@@ -3,6 +3,7 @@ import { MapPin, Clock } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { getTimeOfDayGradient } from '@/lib/timeOfDayColor';
+import { findCategory, categoryLabel } from '@/lib/categories';
 import VoteButton from './VoteButton';
 
 interface EntryCardProps {
@@ -22,15 +23,18 @@ interface EntryCardProps {
   cardSizeClass?: string;
 }
 
-const getCategoryStyle = (category: string | null, color: string | null) => {
-  if (!category) return {};
-  if (color) return { backgroundColor: color, color: '#fff' };
+const getCategoryStyle = (catId: string | null, customColor: string | null) => {
+  const predefined = findCategory(catId ?? '');
+  if (predefined) return { backgroundColor: predefined.color, color: '#fff' };
+  if (customColor) return { backgroundColor: customColor, color: '#fff' };
+  return { backgroundColor: 'hsl(240, 40%, 55%)', color: '#fff' };
+};
 
-  const lower = category.toLowerCase();
-  if (lower.includes('travel')) return { backgroundColor: 'hsl(var(--category-travel))', color: '#fff' };
-  if (lower.includes('food') || lower.includes('eat')) return { backgroundColor: 'hsl(var(--category-food))', color: '#fff' };
-  if (lower.includes('chill') || lower.includes('relax')) return { backgroundColor: 'hsl(var(--category-chill))', color: '#fff' };
-  return { backgroundColor: 'hsl(var(--category-default))', color: '#fff' };
+const getCategoryDisplay = (catId: string | null): string => {
+  const predefined = findCategory(catId ?? '');
+  if (predefined) return `${predefined.emoji} ${predefined.name}`;
+  // For legacy/custom categories, catId is the raw text
+  return catId ?? '';
 };
 
 const EntryCard = ({
@@ -50,7 +54,8 @@ const EntryCard = ({
   cardSizeClass,
 }: EntryCardProps) => {
   const firstImage = option.images?.[0]?.image_url;
-  const categoryStyle = getCategoryStyle(option.category, option.category_color);
+  const categoryStyle = option.category ? getCategoryStyle(option.category, option.category_color) : {};
+  const categoryDisplay = getCategoryDisplay(option.category);
 
   // Dynamic time-of-day gradient for cards without images
   const timeGradient = getTimeOfDayGradient(new Date(startTime), new Date(endTime));
@@ -95,7 +100,7 @@ const EntryCard = ({
               className="inline-block rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
               style={categoryStyle}
             >
-              {option.category}
+              {categoryDisplay}
             </span>
           )}
 

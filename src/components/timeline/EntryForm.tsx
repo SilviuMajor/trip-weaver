@@ -153,7 +153,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip }: EntryFormPro
             </DialogFooter>
           </div>
         ) : (
-          entryId && <OptionForm entryId={entryId} onSaved={handleOptionSaved} />
+          entryId && <OptionForm entryId={entryId} onSaved={handleOptionSaved} customCategories={(trip?.category_presets as any[]) ?? []} />
         )}
       </DialogContent>
     </Dialog>

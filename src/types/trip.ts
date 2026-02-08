@@ -8,6 +8,7 @@ export interface TripUser {
 export interface CategoryPreset {
   name: string;
   color: string;
+  emoji?: string;
 }
 
 export interface Trip {
