@@ -28,6 +28,8 @@ const TripWizard = () => {
   const [name, setName] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [datesUnknown, setDatesUnknown] = useState(false);
+  const [durationDays, setDurationDays] = useState(3);
   const [timezone, setTimezone] = useState('Europe/Amsterdam');
   const [categories, setCategories] = useState<CategoryPreset[]>([]);
   const [members, setMembers] = useState<MemberDraft[]>([]);
@@ -42,8 +44,12 @@ const TripWizard = () => {
   const handleBack = () => setStep(s => Math.max(s - 1, 0));
 
   const handleCreate = async () => {
-    if (!name || !startDate || !endDate) {
-      toast({ title: 'Please fill in name and dates', variant: 'destructive' });
+    if (!name) {
+      toast({ title: 'Please fill in a name', variant: 'destructive' });
+      return;
+    }
+    if (!datesUnknown && (!startDate || !endDate)) {
+      toast({ title: 'Please fill in dates', variant: 'destructive' });
       return;
     }
 
@@ -51,8 +57,9 @@ const TripWizard = () => {
     try {
       const insertData: Record<string, unknown> = {
         name,
-        start_date: startDate,
-        end_date: endDate,
+        start_date: datesUnknown ? null : startDate,
+        end_date: datesUnknown ? null : endDate,
+        duration_days: datesUnknown ? durationDays : null,
         timezone,
         category_presets: categories.length > 0 ? categories : null,
         owner_id: adminUser?.id ?? null,
@@ -108,7 +115,7 @@ const TripWizard = () => {
           onBack={step > 0 ? handleBack : () => navigate('/')}
           onNext={isLastStep ? handleCreate : handleNext}
           nextLabel={isLastStep ? (saving ? 'Creating…' : 'Create Trip') : 'Next'}
-          nextDisabled={saving || (step === 0 && !name) || (step === 1 && (!startDate || !endDate))}
+          nextDisabled={saving || (step === 0 && !name) || (step === 1 && !datesUnknown && (!startDate || !endDate))}
           canSkip={step > 1 && !isLastStep}
           onSkip={handleNext}
         >
@@ -119,6 +126,10 @@ const TripWizard = () => {
               endDate={endDate}
               onStartDateChange={setStartDate}
               onEndDateChange={setEndDate}
+              datesUnknown={datesUnknown}
+              onDatesUnknownChange={setDatesUnknown}
+              durationDays={durationDays}
+              onDurationDaysChange={setDurationDays}
             />
           )}
           {step === 2 && <TimezoneStep value={timezone} onChange={setTimezone} />}

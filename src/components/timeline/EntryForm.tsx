@@ -3,27 +3,38 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import { addDays, format, parseISO } from 'date-fns';
 import OptionForm from './OptionForm';
+import type { Trip } from '@/types/trip';
+
+const REFERENCE_DATE = '2099-01-01';
 
 interface EntryFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tripId: string;
   onCreated: () => void;
+  trip?: Trip | null;
 }
 
-const EntryForm = ({ open, onOpenChange, tripId, onCreated }: EntryFormProps) => {
+const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip }: EntryFormProps) => {
   const [date, setDate] = useState('');
+  const [selectedDay, setSelectedDay] = useState('0');
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('10:00');
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState<'time' | 'option'>('time');
   const [entryId, setEntryId] = useState<string | null>(null);
 
+  const isUndated = !trip?.start_date;
+  const dayCount = trip?.duration_days ?? 3;
+
   const reset = () => {
     setDate('');
+    setSelectedDay('0');
     setStartTime('09:00');
     setEndTime('10:00');
     setStep('time');
@@ -37,15 +48,19 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated }: EntryFormProps) =>
   };
 
   const handleCreateEntry = async () => {
-    if (!date) {
+    const entryDate = isUndated
+      ? format(addDays(parseISO(REFERENCE_DATE), Number(selectedDay)), 'yyyy-MM-dd')
+      : date;
+
+    if (!entryDate) {
       toast({ title: 'Please select a date', variant: 'destructive' });
       return;
     }
 
     setSaving(true);
     try {
-      const startIso = `${date}T${startTime}:00+00:00`;
-      const endIso = `${date}T${endTime}:00+00:00`;
+      const startIso = `${entryDate}T${startTime}:00+00:00`;
+      const endIso = `${entryDate}T${endTime}:00+00:00`;
 
       const { data, error } = await supabase
         .from('entries')
@@ -82,13 +97,33 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated }: EntryFormProps) =>
         {step === 'time' ? (
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="entry-date">Date</Label>
-              <Input
-                id="entry-date"
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-              />
+              {isUndated ? (
+                <>
+                  <Label>Day</Label>
+                  <Select value={selectedDay} onValueChange={setSelectedDay}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover">
+                      {Array.from({ length: dayCount }, (_, i) => (
+                        <SelectItem key={i} value={String(i)}>
+                          Day {i + 1}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              ) : (
+                <>
+                  <Label htmlFor="entry-date">Date</Label>
+                  <Input
+                    id="entry-date"
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                  />
+                </>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">

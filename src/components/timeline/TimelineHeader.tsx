@@ -5,8 +5,10 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { LogOut, Globe, Lock, Unlock, Plus, Route, CloudSun, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { differenceInDays, parseISO } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 import type { Trip } from '@/types/trip';
 import type { useTimezone } from '@/hooks/useTimezone';
 
@@ -25,6 +27,15 @@ const TimelineHeader = ({ trip, tripId, timezone, onToggleTimezone, timezoneLabe
   const navigate = useNavigate();
   const [travelLoading, setTravelLoading] = useState(false);
   const [weatherLoading, setWeatherLoading] = useState(false);
+
+  const isUndated = !trip?.start_date;
+  const daysUntilTrip = trip?.start_date ? differenceInDays(parseISO(trip.start_date), new Date()) : null;
+  const weatherDisabled = isUndated || (daysUntilTrip !== null && daysUntilTrip > 14);
+  const weatherTitle = isUndated
+    ? 'Set dates first to fetch weather'
+    : daysUntilTrip !== null && daysUntilTrip > 14
+      ? 'Weather available within 14 days of trip'
+      : 'Update weather';
 
   const handleLogout = () => {
     logout();
@@ -126,13 +137,13 @@ const TimelineHeader = ({ trip, tripId, timezone, onToggleTimezone, timezoneLabe
                 size="icon"
                 onClick={handleUpdateWeather}
                 className="h-8 w-8"
-                disabled={weatherLoading}
-                title="Update weather"
+                disabled={weatherLoading || weatherDisabled}
+                title={weatherTitle}
               >
                 {weatherLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <CloudSun className="h-4 w-4 text-muted-foreground" />
+                  <CloudSun className={cn('h-4 w-4', weatherDisabled ? 'text-muted-foreground/40' : 'text-muted-foreground')} />
                 )}
               </Button>
             </>
