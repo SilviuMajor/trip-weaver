@@ -1,100 +1,105 @@
 
 
-# Updated Plan: Use Open-Meteo for Weather (No API Key Needed)
+# "I Don't Know When Yet" -- Undated Trip Support
 
-This updates the previously approved plan with one key change: replacing OpenWeatherMap with Open-Meteo for weather data. Everything else from the approved plan remains the same.
+## Overview
 
----
-
-## What changes from the previous plan
-
-**Removed:**
-- No longer need an `OPENWEATHERMAP_API_KEY` secret -- Open-Meteo is 100% free with no authentication required
-- Only one API key is needed now: `GOOGLE_MAPS_API_KEY` for transit directions
-
-**Updated: `fetch-weather` edge function**
-- Instead of calling OpenWeatherMap, it calls the Open-Meteo Forecast API directly:
-  `https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lng}&hourly=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m&start_date={start}&end_date={end}&timezone=auto`
-- No API key header needed -- just a plain GET request
-- Open-Meteo returns WMO weather codes (0-99) which map to conditions like clear, cloudy, rain, snow, thunderstorm
-- Response includes hourly temperature, humidity, wind speed, and weather codes
-- Data is upserted into the same `weather_cache` table as before
+Add the ability to create a trip without specific dates. When the user chooses this, they specify how many days the trip will be. The timeline then shows "Day 1", "Day 2", etc. instead of real calendar dates. Weather is locked until real dates are set and those dates are within 14 days from now.
 
 ---
 
-## Everything else stays the same
+## How it works for users
 
-The full build from the approved plan is unchanged:
+**In the Trip Wizard (Dates step):**
+- A toggle appears: "I don't know when yet"
+- When toggled ON, the date pickers hide and a number input appears: "How many days?"
+- When toggled OFF, the normal start/end date pickers show
 
-1. Request **one** API key (Google Maps only)
-2. Database migration (backfill `trip_users`, `updated_at` trigger)
-3. Admin authentication (`Auth.tsx`, `useAdminAuth.ts`)
-4. Dashboard + Trip Wizard (5-step flow)
-5. Calendar-style timeline (`CalendarDay.tsx`, `TimeSlotGrid.tsx`, `overlapLayout.ts`)
-6. Time-of-day gradients (`sunCalc.ts`, `timeOfDayColor.ts`)
-7. Travel time edge function (`google-directions`)
-8. Weather edge function (`fetch-weather` -- now using Open-Meteo)
-9. Weather badges on cards (`WeatherBadge.tsx`)
-10. Route updates, wiring, and polish
+**On the Timeline:**
+- If the trip has no dates, day headers show "Day 1 -- Monday", "Day 2 -- Tuesday", etc. (no real calendar date)
+- The "Today" scroll button and today highlighting are hidden (no real dates to compare)
+- The weather button in the header is disabled with a tooltip explaining why
+
+**Weather button logic:**
+- Disabled if trip has no real dates (shows "Set dates first")
+- Disabled if trip dates are more than 14 days away (shows "Available within 14 days")
+- Enabled only when trip has real dates and they're within 14 days of today
 
 ---
 
-## Technical details for the Open-Meteo integration
+## Technical details
 
-### Open-Meteo API call (inside the edge function)
+### 1. Database migration
 
-The endpoint is a simple GET request with query parameters:
+Add a `duration_days` column to the `trips` table and make `start_date`/`end_date` nullable:
 
-```text
-GET https://api.open-meteo.com/v1/forecast
-  ?latitude=52.37
-  &longitude=4.90
-  &hourly=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m
-  &start_date=2026-03-15
-  &end_date=2026-03-20
-  &timezone=auto
+```sql
+ALTER TABLE public.trips
+  ALTER COLUMN start_date DROP NOT NULL,
+  ALTER COLUMN end_date DROP NOT NULL,
+  ADD COLUMN duration_days integer;
 ```
 
-No headers or authentication needed.
+When `duration_days` is set and `start_date` is NULL, the trip is in "undated" mode.
 
-### WMO Weather Code mapping
+### 2. Type updates (`src/types/trip.ts`)
 
-Open-Meteo uses WMO standard codes. The edge function will map these to friendly conditions:
+Update the `Trip` interface:
+- `start_date: string | null`
+- `end_date: string | null`
+- `duration_days: number | null`
 
-| Code range | Condition | Icon |
-|-----------|-----------|------|
-| 0 | Clear sky | Sun |
-| 1-3 | Partly cloudy | Partly cloudy |
-| 45, 48 | Fog | Fog |
-| 51-57 | Drizzle | Light rain |
-| 61-67 | Rain | Rain |
-| 71-77 | Snow | Snow |
-| 80-82 | Rain showers | Rain |
-| 85-86 | Snow showers | Snow |
-| 95-99 | Thunderstorm | Thunderstorm |
+### 3. DateStep component changes (`src/components/wizard/DateStep.tsx`)
 
-### Edge function: `fetch-weather`
+- Add a `datesUnknown` boolean prop and `onDatesUnknownChange` callback
+- Add a `durationDays` number prop and `onDurationDaysChange` callback
+- Show a switch/toggle: "I don't know when yet"
+- When toggled ON: hide date inputs, show a number input for days (1-30 range)
+- When toggled OFF: show the normal start/end date pickers
 
-- Accepts POST body: `{ tripId: string, lat: number, lng: number }`
-- Creates a Supabase client with the service role key
-- Gets the trip's date range from the database
-- Calls Open-Meteo forecast API (no key needed)
-- Maps WMO weather codes to human-readable conditions
-- Upserts hourly results into `weather_cache` table
-- Returns the weather data
+### 4. TripWizard changes (`src/pages/TripWizard.tsx`)
 
-### Build sequence (updated)
+- Add state: `datesUnknown` (boolean), `durationDays` (number, default 3)
+- Pass new props to DateStep
+- Update validation: step 1 requires either (startDate AND endDate) OR (datesUnknown AND durationDays > 0)
+- On create: if datesUnknown, send `start_date: null`, `end_date: null`, `duration_days: durationDays`
+- If dates are known, send dates as before with `duration_days: null`
 
-1. Request Google Maps API key (only one secret needed now)
-2. Types update (`trip.ts`)
-3. Utility/lib files (`sunCalc.ts`, `timeOfDayColor.ts`, `overlapLayout.ts`)
-4. Admin auth (`useAdminAuth.ts`, `Auth.tsx`)
-5. Dashboard + Wizard pages and components
-6. Calendar timeline components
-7. Edge functions (`google-directions` + `fetch-weather` using Open-Meteo)
-8. Config and route updates
-9. Wire everything together
-10. Polish and backfill
+### 5. Timeline changes (`src/pages/Timeline.tsx`)
 
-This is still approximately 20+ files. The implementation will be done in one pass, and now only requires one API key from you instead of two.
+- Update `getDays()`: if `trip.start_date` is null, generate synthetic days using `trip.duration_days` (Day 1 through Day N, using a reference date like 2099-01-01 internally so entry timestamps still work)
+- Pass a `dayLabel` or `dayIndex` prop to CalendarDay so it can show "Day 1" instead of a real date
+- Hide "scroll to today" button when trip is undated
+
+### 6. CalendarDay changes (`src/components/timeline/CalendarDay.tsx`)
+
+- Accept an optional `dayLabel` prop (e.g., "Day 1")
+- When `dayLabel` is provided, show it in the header instead of the formatted date
+- Skip `isToday` and `isPast` logic when in undated mode
+
+### 7. TimelineHeader changes (`src/components/timeline/TimelineHeader.tsx`)
+
+- Weather button: check if `trip.start_date` is null -- if so, disable with "Set dates first" title
+- Weather button: check if `trip.start_date` is more than 14 days from today -- if so, disable with "Available within 14 days" title
+- Both conditions use the `disabled` prop on the button
+
+### 8. EntryForm changes (`src/components/timeline/EntryForm.tsx`)
+
+- Accept `trip` prop to know if we're in undated mode
+- When undated: replace the date picker with a dropdown of "Day 1", "Day 2", ... "Day N"
+- Internally map "Day 1" to reference date 2099-01-01, "Day 2" to 2099-01-02, etc.
+- When dated: show normal date picker as today
+
+### Files changed (8 files total)
+
+| File | Change |
+|------|--------|
+| Database migration | Add `duration_days` column, make dates nullable |
+| `src/types/trip.ts` | Update Trip interface |
+| `src/components/wizard/DateStep.tsx` | Add toggle + day count input |
+| `src/pages/TripWizard.tsx` | Handle undated state |
+| `src/pages/Timeline.tsx` | Generate synthetic days, pass labels |
+| `src/components/timeline/CalendarDay.tsx` | Accept/display day labels |
+| `src/components/timeline/TimelineHeader.tsx` | Disable weather conditionally |
+| `src/components/timeline/EntryForm.tsx` | Day dropdown for undated trips |
 
