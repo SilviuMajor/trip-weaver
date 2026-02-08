@@ -1,26 +1,36 @@
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useTimezone } from '@/hooks/useTimezone';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { LogOut, Globe } from 'lucide-react';
+import { LogOut, Globe, Lock, Unlock, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
 import type { Trip } from '@/types/trip';
+import type { useTimezone } from '@/hooks/useTimezone';
 
 interface TimelineHeaderProps {
   trip: Trip | null;
   timezone: ReturnType<typeof useTimezone>['timezone'];
   onToggleTimezone: () => void;
   timezoneLabel: string;
+  onAddEntry?: () => void;
 }
 
-const TimelineHeader = ({ trip, timezone, onToggleTimezone, timezoneLabel }: TimelineHeaderProps) => {
-  const { currentUser, logout } = useCurrentUser();
+const TimelineHeader = ({ trip, timezone, onToggleTimezone, timezoneLabel, onAddEntry }: TimelineHeaderProps) => {
+  const { currentUser, logout, isOrganizer, isEditor } = useCurrentUser();
   const navigate = useNavigate();
 
   const handleLogout = () => {
     logout();
     navigate('/');
+  };
+
+  const handleToggleLock = async () => {
+    if (!trip) return;
+    await supabase
+      .from('trips')
+      .update({ voting_locked: !trip.voting_locked })
+      .eq('id', trip.id);
   };
 
   return (
@@ -37,8 +47,38 @@ const TimelineHeader = ({ trip, timezone, onToggleTimezone, timezoneLabel }: Tim
           )}
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
+          {/* Lock voting toggle (organizer only) */}
+          {isOrganizer && trip && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleToggleLock}
+              className="h-8 w-8"
+              title={trip.voting_locked ? 'Unlock voting' : 'Lock voting'}
+            >
+              {trip.voting_locked ? (
+                <Lock className="h-4 w-4 text-destructive" />
+              ) : (
+                <Unlock className="h-4 w-4 text-muted-foreground" />
+              )}
+            </Button>
+          )}
+
+          {/* Add entry button (organizer/editor) */}
+          {isEditor && onAddEntry && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onAddEntry}
+              className="h-8 w-8"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          )}
+
+          {/* Timezone toggle */}
+          <div className="flex items-center gap-1.5">
             <Globe className="h-3.5 w-3.5 text-muted-foreground" />
             <Label htmlFor="tz-toggle" className="cursor-pointer text-xs text-muted-foreground">
               {timezone === 'UK' ? 'UK' : 'AMS'}
