@@ -1,8 +1,8 @@
 import { motion } from 'framer-motion';
-import { MapPin, Clock, ThumbsUp } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { MapPin, Clock } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import { cn } from '@/lib/utils';
+import VoteButton from './VoteButton';
 
 interface EntryCardProps {
   option: EntryOption;
@@ -13,6 +13,12 @@ interface EntryCardProps {
   optionIndex: number;
   totalOptions: number;
   distanceKm?: number | null;
+  votingLocked: boolean;
+  userId?: string;
+  hasVoted: boolean;
+  onVoteChange: () => void;
+  onClick?: () => void;
+  cardSizeClass?: string;
 }
 
 const getCategoryStyle = (category: string | null, color: string | null) => {
@@ -35,6 +41,12 @@ const EntryCard = ({
   optionIndex,
   totalOptions,
   distanceKm,
+  votingLocked,
+  userId,
+  hasVoted,
+  onVoteChange,
+  onClick,
+  cardSizeClass,
 }: EntryCardProps) => {
   const firstImage = option.images?.[0]?.image_url;
   const categoryStyle = getCategoryStyle(option.category, option.category_color);
@@ -44,9 +56,11 @@ const EntryCard = ({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: optionIndex * 0.05 }}
+      onClick={onClick}
       className={cn(
-        'group relative overflow-hidden rounded-xl border border-border shadow-sm transition-all hover:shadow-md',
-        isPast && 'opacity-50 grayscale-[30%]'
+        'group relative cursor-pointer overflow-hidden rounded-xl border border-border shadow-sm transition-all hover:shadow-md',
+        isPast && 'opacity-50 grayscale-[30%]',
+        cardSizeClass
       )}
     >
       {/* Background image */}
@@ -112,14 +126,15 @@ const EntryCard = ({
             <div />
           )}
 
-          {totalOptions > 1 && option.vote_count !== undefined && (
-            <div className={cn(
-              'flex items-center gap-1 text-xs font-medium',
-              firstImage ? 'text-primary-foreground/80' : 'text-muted-foreground'
-            )}>
-              <ThumbsUp className="h-3 w-3" />
-              <span>{option.vote_count}</span>
-            </div>
+          {userId && totalOptions > 1 && (
+            <VoteButton
+              optionId={option.id}
+              userId={userId}
+              voteCount={option.vote_count ?? 0}
+              hasVoted={hasVoted}
+              locked={votingLocked}
+              onVoteChange={onVoteChange}
+            />
           )}
         </div>
       </div>

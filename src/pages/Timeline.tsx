@@ -1,24 +1,42 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { addDays, parseISO, startOfDay, format } from 'date-fns';
-import { ArrowDown } from 'lucide-react';
+import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
+import { ArrowDown, ZoomIn, ZoomOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useTimezone } from '@/hooks/useTimezone';
+import { useGeolocation } from '@/hooks/useGeolocation';
+import { useTimelineZoom } from '@/hooks/useTimelineZoom';
+import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
 import TimelineDay from '@/components/timeline/TimelineDay';
+import EntryOverlay from '@/components/timeline/EntryOverlay';
+import EntryForm from '@/components/timeline/EntryForm';
 import type { Trip, Entry, EntryOption, EntryWithOptions } from '@/types/trip';
 
 const Timeline = () => {
   const { currentUser } = useCurrentUser();
   const navigate = useNavigate();
   const { timezone, toggle, formatTime, getTimezoneLabel } = useTimezone();
+  const { latitude: userLat, longitude: userLng } = useGeolocation();
 
   const [trip, setTrip] = useState<Trip | null>(null);
   const [entries, setEntries] = useState<EntryWithOptions[]>([]);
+  const [userVotes, setUserVotes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Overlay state
+  const [overlayEntry, setOverlayEntry] = useState<EntryWithOptions | null>(null);
+  const [overlayOption, setOverlayOption] = useState<EntryOption | null>(null);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+
+  // Entry form state
+  const [entryFormOpen, setEntryFormOpen] = useState(false);
+
+  // Zoom
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { zoom, changeZoom, spacingClass, cardSizeClass, zoomLabel } = useTimelineZoom(scrollRef);
 
   // Redirect if no user
   useEffect(() => {
@@ -27,69 +45,85 @@ const Timeline = () => {
     }
   }, [currentUser, navigate]);
 
-  // Fetch trip and entries
-  useEffect(() => {
-    const fetchData = async () => {
-      // Get the first (only) trip
-      const { data: tripData } = await supabase
-        .from('trips')
-        .select('*')
-        .limit(1)
-        .maybeSingle();
+  // Data fetching
+  const fetchData = useCallback(async () => {
+    // Get the first (only) trip
+    const { data: tripData } = await supabase
+      .from('trips')
+      .select('*')
+      .limit(1)
+      .maybeSingle();
 
-      if (!tripData) {
-        setLoading(false);
-        return;
-      }
-
-      setTrip(tripData as Trip);
-
-      // Get all entries with their options
-      const { data: entriesData } = await supabase
-        .from('entries')
-        .select('*')
-        .eq('trip_id', tripData.id)
-        .order('start_time');
-
-      if (!entriesData || entriesData.length === 0) {
-        setEntries([]);
-        setLoading(false);
-        return;
-      }
-
-      const entryIds = entriesData.map(e => e.id);
-
-      // Fetch options for all entries
-      const { data: optionsData } = await supabase
-        .from('entry_options')
-        .select('*')
-        .in('entry_id', entryIds);
-
-      // Fetch vote counts per option
-      const { data: votesData } = await supabase
-        .from('votes')
-        .select('option_id');
-
-      // Count votes per option
-      const voteCounts: Record<string, number> = {};
-      votesData?.forEach(v => {
-        voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1;
-      });
-
-      // Assemble entries with options
-      const entriesWithOptions: EntryWithOptions[] = (entriesData as Entry[]).map(entry => ({
-        ...entry,
-        options: ((optionsData as EntryOption[]) || [])
-          .filter(o => o.entry_id === entry.id)
-          .map(o => ({ ...o, vote_count: voteCounts[o.id] || 0 })),
-      }));
-
-      setEntries(entriesWithOptions);
+    if (!tripData) {
       setLoading(false);
-    };
+      return;
+    }
 
+    setTrip(tripData as Trip);
+
+    // Get all entries
+    const { data: entriesData } = await supabase
+      .from('entries')
+      .select('*')
+      .eq('trip_id', tripData.id)
+      .order('start_time');
+
+    if (!entriesData || entriesData.length === 0) {
+      setEntries([]);
+      setLoading(false);
+      return;
+    }
+
+    const entryIds = entriesData.map(e => e.id);
+
+    // Fetch options, images, and votes in parallel
+    const [optionsRes, imagesRes, votesRes] = await Promise.all([
+      supabase.from('entry_options').select('*').in('entry_id', entryIds),
+      supabase.from('option_images').select('*').order('sort_order'),
+      supabase.from('votes').select('option_id, user_id'),
+    ]);
+
+    const options = (optionsRes.data ?? []) as EntryOption[];
+    const images = imagesRes.data ?? [];
+    const votes = votesRes.data ?? [];
+
+    // Count votes per option
+    const voteCounts: Record<string, number> = {};
+    votes.forEach(v => {
+      voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1;
+    });
+
+    // User's votes
+    if (currentUser) {
+      setUserVotes(
+        votes.filter(v => v.user_id === currentUser.id).map(v => v.option_id)
+      );
+    }
+
+    // Attach images to options
+    const optionsWithImages = options.map(o => ({
+      ...o,
+      vote_count: voteCounts[o.id] || 0,
+      images: images.filter(img => img.option_id === o.id),
+    }));
+
+    // Assemble entries with options
+    const entriesWithOptions: EntryWithOptions[] = (entriesData as Entry[]).map(entry => ({
+      ...entry,
+      options: optionsWithImages.filter(o => o.entry_id === entry.id),
+    }));
+
+    setEntries(entriesWithOptions);
+    setLoading(false);
+  }, [currentUser]);
+
+  // Initial fetch
+  useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
+
+  // Realtime sync
+  useRealtimeSync(fetchData);
 
   // Scroll to today on load
   useEffect(() => {
@@ -133,6 +167,12 @@ const Timeline = () => {
     });
   };
 
+  const handleCardTap = (entry: EntryWithOptions, option: EntryOption) => {
+    setOverlayEntry(entry);
+    setOverlayOption(option);
+    setOverlayOpen(true);
+  };
+
   if (!currentUser) return null;
 
   return (
@@ -142,6 +182,7 @@ const Timeline = () => {
         timezone={timezone}
         onToggleTimezone={toggle}
         timezoneLabel={getTimezoneLabel()}
+        onAddEntry={() => setEntryFormOpen(true)}
       />
 
       {loading ? (
@@ -169,12 +210,44 @@ const Timeline = () => {
                 date={day}
                 entries={getEntriesForDay(day)}
                 formatTime={formatTime}
+                userLat={userLat}
+                userLng={userLng}
+                votingLocked={trip.voting_locked}
+                userId={currentUser?.id}
+                userVotes={userVotes}
+                onVoteChange={fetchData}
+                onCardTap={handleCardTap}
+                spacingClass={spacingClass}
+                cardSizeClass={cardSizeClass}
               />
             ))}
           </main>
 
-          {/* Today quick-jump button */}
-          <div className="fixed bottom-6 right-6 z-40">
+          {/* Bottom controls */}
+          <div className="fixed bottom-6 right-6 z-40 flex flex-col gap-2">
+            {/* Zoom controls */}
+            <div className="flex items-center gap-1 rounded-full bg-card/90 px-2 py-1 shadow-lg backdrop-blur-sm border border-border">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => changeZoom(-1)}
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </Button>
+              <span className="text-[10px] font-medium text-muted-foreground min-w-[36px] text-center">
+                {zoomLabel}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => changeZoom(1)}
+              >
+                <ZoomOut className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+
             <Button
               onClick={scrollToToday}
               size="sm"
@@ -184,6 +257,29 @@ const Timeline = () => {
               Today
             </Button>
           </div>
+
+          {/* Entry overlay */}
+          <EntryOverlay
+            entry={overlayEntry}
+            option={overlayOption}
+            open={overlayOpen}
+            onOpenChange={setOverlayOpen}
+            formatTime={formatTime}
+            userLat={userLat}
+            userLng={userLng}
+            votingLocked={trip.voting_locked}
+            userVotes={userVotes}
+            onVoteChange={fetchData}
+            onImageUploaded={fetchData}
+          />
+
+          {/* Entry form */}
+          <EntryForm
+            open={entryFormOpen}
+            onOpenChange={setEntryFormOpen}
+            tripId={trip.id}
+            onCreated={fetchData}
+          />
         </>
       )}
     </div>

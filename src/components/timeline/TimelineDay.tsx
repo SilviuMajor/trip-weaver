@@ -1,15 +1,38 @@
 import { format, isToday, isPast } from 'date-fns';
-import type { EntryWithOptions } from '@/types/trip';
-import EntryCard from './EntryCard';
+import type { EntryWithOptions, EntryOption } from '@/types/trip';
+import OptionSwiper from './OptionSwiper';
 import { cn } from '@/lib/utils';
+import { haversineKm } from '@/lib/distance';
 
 interface TimelineDayProps {
   date: Date;
   entries: EntryWithOptions[];
   formatTime: (iso: string) => string;
+  userLat: number | null;
+  userLng: number | null;
+  votingLocked: boolean;
+  userId: string | undefined;
+  userVotes: string[];
+  onVoteChange: () => void;
+  onCardTap: (entry: EntryWithOptions, option: EntryOption) => void;
+  spacingClass?: string;
+  cardSizeClass?: string;
 }
 
-const TimelineDay = ({ date, entries, formatTime }: TimelineDayProps) => {
+const TimelineDay = ({
+  date,
+  entries,
+  formatTime,
+  userLat,
+  userLng,
+  votingLocked,
+  userId,
+  userVotes,
+  onVoteChange,
+  onCardTap,
+  spacingClass = 'space-y-3',
+  cardSizeClass,
+}: TimelineDayProps) => {
   const today = isToday(date);
   const dayPast = isPast(date) && !today;
 
@@ -59,30 +82,31 @@ const TimelineDay = ({ date, entries, formatTime }: TimelineDayProps) => {
             No plans yet
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className={spacingClass}>
             {sortedEntries.map((entry) => {
               const entryPast = isPast(new Date(entry.end_time));
-
-              // Sort options by vote count (highest first)
-              const sortedOptions = [...entry.options].sort(
-                (a, b) => (b.vote_count ?? 0) - (a.vote_count ?? 0)
-              );
-
-              // Show only the first option in the timeline (swipe nav comes later)
-              const primaryOption = sortedOptions[0];
-
+              const primaryOption = entry.options[0];
               if (!primaryOption) return null;
 
+              // Calculate distance from user to primary option
+              const distanceKm =
+                userLat != null && userLng != null && primaryOption.latitude != null && primaryOption.longitude != null
+                  ? haversineKm(userLat, userLng, primaryOption.latitude, primaryOption.longitude)
+                  : null;
+
               return (
-                <EntryCard
+                <OptionSwiper
                   key={entry.id}
-                  option={primaryOption}
-                  startTime={entry.start_time}
-                  endTime={entry.end_time}
+                  entry={entry}
                   formatTime={formatTime}
                   isPast={entryPast}
-                  optionIndex={0}
-                  totalOptions={sortedOptions.length}
+                  distanceKm={distanceKm}
+                  votingLocked={votingLocked}
+                  userId={userId}
+                  userVotes={userVotes}
+                  onVoteChange={onVoteChange}
+                  onCardTap={onCardTap}
+                  cardSizeClass={cardSizeClass}
                 />
               );
             })}
