@@ -1,238 +1,189 @@
 
 
-# Major Evolution: Multi-Tenancy, Travel Time, Weather Cards, Calendar Timeline
+# Full Implementation: Multi-Tenancy, Calendar Timeline, Travel, Weather
 
-This plan transforms the app from a single-trip viewer into a full multi-tenant trip platform with admin authentication, a trip creation wizard, Google Maps transit times, weather-aware card backgrounds, and a true calendar-style timeline.
-
----
-
-## Overview of Changes
-
-1. **Admin authentication** (email + password via Supabase Auth)
-2. **Multi-tenancy** (one admin creates many trips, each with its own member list)
-3. **Trip creation wizard** (step-by-step, skippable questions)
-4. **Calendar-style timeline** (full day with time slots, gaps, click-to-create, horizontal scroll for overlaps)
-5. **Travel time between entries** (Google Maps Directions API with a "Generate All" button)
-6. **Weather-aware card backgrounds** (time-of-day gradient + live weather graphics via "Update" button)
+This is a large build covering admin authentication, a trip dashboard, trip creation wizard, calendar-style timeline, time-of-day gradients, travel time via Google Maps, and live weather. Here is the complete breakdown.
 
 ---
 
-## 1. Admin Authentication
+## Step 1: Request API Keys
 
-**What changes:**
-- You (the admin) log in with email + password using Supabase Auth
-- Trip members continue using the name-select approach (no change for them)
-- A new `/auth` page for admin login/signup
-- The landing page (`/`) becomes a trip dashboard showing all your trips
-- Admin session is stored via Supabase Auth; member sessions continue using localStorage
+Before writing any code, two API keys need to be stored as backend secrets:
 
-**New pages/routes:**
-- `/auth` -- Admin login/signup form
-- `/` -- Admin dashboard (list of trips, create new trip button)
-- `/trip/:tripId` -- The trip timeline (accessed by members via a shared link, or by admin from dashboard)
+- **GOOGLE_MAPS_API_KEY** -- for the Directions API (public transit routing between entries)
+- **OPENWEATHERMAP_API_KEY** -- for weather forecasts (free tier works fine)
+
+You will be prompted to enter these when implementation starts.
 
 ---
 
-## 2. Multi-Tenancy Database Changes
+## Step 2: Database Migration
 
-**Current state:** `trip_users` is a global table with no trip association. One trip exists.
+A new migration to backfill existing `trip_users` with `trip_id` and add the `updated_at` trigger for `travel_segments`:
 
-**New schema changes:**
-
-- Add `trip_id` column to `trip_users` (foreign key to `trips`)
-- Add `owner_id` column to `trips` (the Supabase Auth user ID of the admin who created it)
-- Add `timezone` column to `trips` (so each trip can have its own timezone setting)
-- Add `category_presets` column to `trips` (JSONB array of `{name, color}` objects -- the default categories for that trip)
-- Create a `travel_segments` table for storing computed transit times between consecutive entries
-- Create RLS policies scoped to the admin's auth ID for trips, and trip membership for trip_users
-
-**`travel_segments` table:**
-```text
-id            uuid PK
-trip_id       uuid FK -> trips
-from_entry_id uuid FK -> entries
-to_entry_id   uuid FK -> entries
-duration_min  integer
-distance_km   numeric
-mode          text (e.g. "transit", "walking")
-polyline      text (encoded route for optional map display)
-created_at    timestamptz
-```
+- Backfill any existing `trip_users` rows with the first trip's ID
+- Add trigger for `updated_at` on `travel_segments` if needed
 
 ---
 
-## 3. Trip Creation Wizard
+## Step 3: Admin Authentication
 
-A step-by-step flow where each step has a "Skip" button. Steps:
+**New files:**
+- `src/pages/Auth.tsx` -- Login/signup form using Supabase Auth (email + password). Clean design matching the warm travel journal aesthetic. Handles both sign-in and sign-up flows with proper error handling and email redirect configuration.
+- `src/hooks/useAdminAuth.ts` -- Hook wrapping `supabase.auth.onAuthStateChange` and `supabase.auth.getSession`. Returns `{ adminUser, session, loading, signIn, signUp, signOut }`. Sets up the listener before checking session (per best practices). On first admin login, auto-inserts a row into `user_roles` with role `admin`.
 
-1. **Trip name** -- text input with placeholder suggestions
-2. **Date range** -- start and end date pickers
-3. **Location / Timezone** -- select timezone (UK, Amsterdam, or custom)
-4. **Category presets** -- add custom category names + pick colors for each (or use defaults)
-5. **Members** -- add names and assign roles (organizer/editor/viewer). The admin is automatically the organizer.
-
-After completing (or skipping through), the trip is created and the admin lands on its timeline.
+**Modified files:**
+- `src/hooks/useCurrentUser.ts` -- Add awareness of admin auth. If a Supabase Auth session exists, the user is treated as admin (organizer-level permissions). The admin can also "impersonate" trip members by selecting a name.
 
 ---
 
-## 4. Calendar-Style Timeline
+## Step 4: Dashboard + Trip Wizard
 
-**Current:** Cards stacked vertically with spacing classes, no sense of actual time gaps.
+**New files:**
+- `src/pages/Dashboard.tsx` -- Lists all trips owned by the logged-in admin (`trips.owner_id = auth.uid()`). Each trip shows name, date range, member count. "Create Trip" button navigates to the wizard. Clicking a trip navigates to `/trip/:tripId`.
+- `src/pages/TripWizard.tsx` -- 5-step wizard with skip on each step:
+  1. **Name** -- text input, placeholder suggestions
+  2. **Dates** -- start/end date pickers
+  3. **Timezone** -- select (UK / Amsterdam / custom)
+  4. **Categories** -- add name + pick color for each category preset (stored as JSONB on trips)
+  5. **Members** -- add names with role assignment (organizer/editor/viewer). These get inserted into `trip_users` with the new trip's ID.
 
-**New:** A true day-planner layout where:
+Each step is a separate component under `src/components/wizard/`:
+- `WizardStep.tsx` -- reusable step container with skip/next/back buttons and progress dots
+- `NameStep.tsx`, `DateStep.tsx`, `TimezoneStep.tsx`, `CategoryStep.tsx`, `MembersStep.tsx`
 
-- Each day renders a vertical time axis (e.g. 06:00 to 00:00) with hour/half-hour markers
-- Entry cards are **positioned absolutely** based on their start/end time, with height proportional to duration
-- **Empty gaps** between entries are visible and clickable -- tapping an empty slot pre-fills a new entry form with that time
-- **Overlapping entries** (entries whose time ranges overlap) are laid out in columns side by side, scrollable horizontally if they exceed the viewport width
-- The zoom levels still work, controlling how many pixels per hour the timeline uses
-
-**Technical approach:**
-- Calculate pixel position: `top = (minutesSinceDayStart / totalMinutesVisible) * containerHeight`
-- For overlaps: detect which entries share time ranges, assign them to "columns" (like a calendar algorithm), render them side by side within a horizontally scrollable container
-- Click-to-create: register click position on the time axis, convert pixel offset back to a time, open the entry form pre-filled
-
----
-
-## 5. Travel Time (Google Maps Directions API)
-
-**How it works:**
-- An edge function calls the Google Maps Directions API to compute public transit time + distance between consecutive entries
-- The admin taps a **"Generate Travel Times"** button in the header
-- The edge function iterates through all entries for the trip (sorted by start_time), computes transit directions from each entry's location to the next entry's location, and stores results in the `travel_segments` table
-- Between entries on the timeline, a **travel card** appears showing: duration (e.g. "35 min by transit"), distance, and departure guidance (e.g. "Leave by 14:25 to arrive on time")
-- These are **suggestion-style inserts** -- they appear between real entries, styled differently (smaller, muted, with a train/bus icon)
-
-**Requirements:**
-- Google Maps API key (stored as a secret in the backend)
-- Edge function: `google-directions` that accepts from/to coordinates and returns transit time
-- Only entries with lat/lng set are included in the calculation
+On completion, creates the trip in `trips` table with `owner_id = auth.uid()`, then navigates to `/trip/:tripId`.
 
 ---
 
-## 6. Weather-Aware Card Backgrounds
+## Step 5: Update Routing
 
-**Two layers to the card background:**
+**Modified: `src/App.tsx`**
+- `/auth` -- Auth page
+- `/` -- Dashboard (requires admin auth, redirects to `/auth` if not logged in)
+- `/trip/:tripId` -- Timeline for a specific trip (members access via shared link with name-select)
+- `/trip/:tripId/wizard` -- Trip creation wizard (admin only)
 
-**Layer 1 -- Time-of-day gradient:**
-- Calculate sunrise and sunset times for the trip location and date (using a solar position formula -- no API needed, just math based on lat/lng and date)
-- Map the entry's time to a color on this scale:
-  - Pre-dawn: deep indigo/navy
-  - Sunrise: warm orange/pink
-  - Morning: soft golden
-  - Midday: bright sky blue
-  - Afternoon: warm amber
-  - Sunset: deep orange/pink/purple
-  - Night: dark blue/indigo
-- This gradient appears on the right side of the card, fading from the image (or a default texture) on the left
-
-**Layer 2 -- Weather graphics:**
-- A small weather overlay with cute icons (sun, clouds, rain, snow, etc.) and temperature
-- Weather data fetched via an edge function that calls a weather API (OpenWeatherMap free tier)
-- An **"Update Weather"** button in the header fetches current/forecast weather for the trip dates and location, stores results
-- Weather icons are rendered as small SVG graphics on the card
-
-**Requirements:**
-- OpenWeatherMap API key (stored as a secret)
-- Edge function: `fetch-weather` that accepts lat/lng and date range, returns forecast data
-- A `weather_cache` table to store fetched weather data per trip per date
-
-**`weather_cache` table:**
-```text
-id           uuid PK
-trip_id      uuid FK -> trips
-date         date
-hour         integer
-temp_c       numeric
-condition    text (e.g. "clear", "clouds", "rain", "snow")
-icon_code    text
-humidity     integer
-wind_speed   numeric
-created_at   timestamptz
-updated_at   timestamptz
-```
+**Modified: `src/pages/UserSelect.tsx`**
+- Now accepts a `tripId` param and only shows trip_users for that specific trip
+- URL becomes the shareable link: `/trip/:tripId` shows user select if not logged in as a member
 
 ---
 
-## Technical Details
+## Step 6: Calendar-Style Timeline
 
-### New Files
+**New files:**
+- `src/lib/overlapLayout.ts` -- Calendar overlap algorithm. Takes entries sorted by start time, detects overlapping time ranges, assigns each entry to a column index. Returns `{ entryId, column, totalColumns }[]`. Logic: iterate entries, maintain an "active" list (entries whose end time hasn't passed when the current entry starts). Assign to the first available column.
 
-| File | Purpose |
-|------|---------|
-| `src/pages/Auth.tsx` | Admin login/signup page |
-| `src/pages/Dashboard.tsx` | Admin trip list + "Create Trip" button |
-| `src/pages/TripWizard.tsx` | Step-by-step trip creation wizard |
-| `src/components/timeline/CalendarDay.tsx` | New calendar-style day layout with time axis, positioned cards, gap detection |
-| `src/components/timeline/TimeSlotGrid.tsx` | Time axis rendering with hour markers and click-to-create |
-| `src/components/timeline/TravelSegment.tsx` | Travel time card shown between entries |
-| `src/components/timeline/WeatherBadge.tsx` | Small weather overlay for cards |
-| `src/components/wizard/WizardStep.tsx` | Reusable wizard step container with skip/next |
-| `src/components/wizard/NameStep.tsx` | Trip name input step |
-| `src/components/wizard/DateStep.tsx` | Date range step |
-| `src/components/wizard/TimezoneStep.tsx` | Timezone selection step |
-| `src/components/wizard/CategoryStep.tsx` | Category presets step |
-| `src/components/wizard/MembersStep.tsx` | Add members step |
-| `src/hooks/useAdminAuth.ts` | Supabase Auth hook for admin login/session |
-| `src/hooks/useSunTimes.ts` | Solar position calculations for sunrise/sunset |
-| `src/lib/sunCalc.ts` | Pure math functions for solar position (no API needed) |
-| `src/lib/timeOfDayColor.ts` | Maps a time + sun position to an HSL color |
-| `src/lib/overlapLayout.ts` | Calendar overlap algorithm -- assigns entries to columns |
-| `supabase/functions/google-directions/index.ts` | Edge function for Google Maps Directions API |
-| `supabase/functions/fetch-weather/index.ts` | Edge function for OpenWeatherMap API |
+- `src/components/timeline/TimeSlotGrid.tsx` -- Renders the vertical time axis for one day (06:00 to 00:00 by default). Hour markers as horizontal lines with labels. The grid uses a configurable `pixelsPerHour` value (controlled by zoom level). Click handler converts pixel offset to a time and calls `onClickSlot(time)`.
 
-### Files to Modify
+- `src/components/timeline/CalendarDay.tsx` -- Replaces the old stacked layout. Each day has:
+  - A sticky day header (same as before)
+  - A `TimeSlotGrid` as the background
+  - Entry cards positioned absolutely: `top = (minutesSinceDayStart / totalMinutesInDay) * containerHeight`, `height = durationMinutes * pixelsPerMinute`
+  - Overlapping entries placed side by side using `overlapLayout.ts` results
+  - If more than 3 columns of overlaps, wraps in a horizontally scrollable container
+  - Empty gaps are visible and clickable (opens entry form pre-filled with that time)
 
-| File | Changes |
-|------|---------|
-| `src/App.tsx` | Add routes for `/auth`, `/`, `/trip/:tripId`, `/trip/:tripId/wizard` |
-| `src/pages/Timeline.tsx` | Accept `tripId` from URL params; integrate weather data; use new CalendarDay layout; add "Generate Travel" and "Update Weather" buttons |
-| `src/components/timeline/EntryCard.tsx` | Replace static background with time-of-day gradient + weather badge; adjust layout for calendar positioning |
-| `src/components/timeline/TimelineHeader.tsx` | Add "Generate Travel Times" and "Update Weather" buttons; show trip name from trip data |
-| `src/components/timeline/EntryForm.tsx` | Accept pre-filled time from click-to-create |
-| `src/hooks/useCurrentUser.ts` | Add admin auth awareness -- if Supabase Auth session exists, treat as admin |
-| `src/types/trip.ts` | Add `TravelSegment`, `WeatherData` types; update `Trip` type with new fields |
-| `supabase/config.toml` | Add edge function configs for `google-directions` and `fetch-weather` |
+- `src/components/timeline/TravelSegment.tsx` -- A small card rendered between consecutive entries. Shows: transit icon, duration ("35 min"), mode, and departure guidance ("Leave by 14:25"). Styled differently from entry cards (muted, smaller, dashed border).
 
-### Database Migration
+**Modified: `src/pages/Timeline.tsx`**
+- Accept `tripId` from `useParams()` instead of fetching the first trip
+- Replace `TimelineDay` with `CalendarDay`
+- Fetch `travel_segments` for the trip and pass them to `CalendarDay`
+- Fetch `weather_cache` for the trip and pass weather data to entry cards
+- Add "Generate Travel Times" and "Update Weather" buttons to the header
+- Integrate new `pixelsPerHour` from zoom level
 
-One migration covering:
-- Add `trip_id` to `trip_users` with FK to `trips` (nullable initially, then backfill existing data)
-- Add `owner_id` to `trips` (nullable, text -- stores Supabase Auth user ID)
-- Add `timezone`, `category_presets` columns to `trips`
-- Create `travel_segments` table
-- Create `weather_cache` table
-- Enable realtime on `travel_segments` and `weather_cache`
-- RLS policies for all new/modified tables
+**Modified: `src/components/timeline/TimelineDay.tsx`**
+- This file will be largely replaced by `CalendarDay.tsx` but kept for reference
 
-### API Keys Needed
+---
 
-Two API keys will need to be stored as secrets:
-1. **Google Maps API key** -- for the Directions API (transit routing)
-2. **OpenWeatherMap API key** -- for weather forecasts (free tier available)
+## Step 7: Time-of-Day Gradient + Weather Badges
 
-These will be requested before implementation begins.
+**New files:**
+- `src/lib/sunCalc.ts` -- Pure math solar position calculator. Given a date and lat/lng (defaulting to Amsterdam: 52.37, 4.90), calculates sunrise and sunset times using standard astronomical formulas. Returns `{ sunrise: Date, sunset: Date, solarNoon: Date }`.
 
-### Overlap Layout Algorithm
+- `src/lib/timeOfDayColor.ts` -- Maps a time + sunrise/sunset to an HSL color:
+  - Pre-dawn (before sunrise - 1hr): `hsl(230, 40%, 15%)` deep indigo
+  - Sunrise (-1hr to +1hr): `hsl(25, 80%, 55%)` warm orange
+  - Morning (sunrise+1 to noon): `hsl(45, 70%, 65%)` soft golden
+  - Midday (noon +/- 1hr): `hsl(200, 70%, 65%)` bright sky blue
+  - Afternoon (noon+1 to sunset-1): `hsl(35, 75%, 55%)` warm amber
+  - Sunset (-1hr to +1hr): `hsl(15, 75%, 50%)` deep orange-pink
+  - Night (after sunset+1): `hsl(225, 45%, 18%)` dark indigo
+  - Smooth interpolation between these keyframes
 
-The calendar overlap detection works like this:
-1. Sort entries by start time
-2. For each entry, check if it overlaps with any already-placed entry
-3. If it overlaps, assign it to the next available column
-4. Track the maximum number of columns needed
-5. Each entry's width = `100% / maxColumns`, positioned at `column * width`
-6. If total columns exceed ~3, wrap in a horizontally scrollable container
+- `src/components/timeline/WeatherBadge.tsx` -- Small overlay showing weather icon (SVG) + temperature. Icons: sun, partly cloudy, cloudy, rain, thunderstorm, snow, fog. Renders as a small pill in the top-right corner of the entry card.
 
-### Build Order
+**Modified: `src/components/timeline/EntryCard.tsx`**
+- Background changes from static gradient to dynamic time-of-day gradient
+- Right side of card shows the time-appropriate color (fading from image on left)
+- Weather badge appears in top-right corner if weather data is available
+- The gradient uses the entry's start_time and the trip's location for sun position
 
-1. **Database migration** (new columns and tables)
-2. **Admin auth** (`Auth.tsx`, `useAdminAuth.ts`)
-3. **Dashboard + Wizard** (trip listing, step-by-step creation)
-4. **Calendar timeline** (`CalendarDay.tsx`, `TimeSlotGrid.tsx`, `overlapLayout.ts`, click-to-create)
-5. **Time-of-day gradient** (`sunCalc.ts`, `timeOfDayColor.ts`, updated `EntryCard.tsx`)
-6. **API keys** (request Google Maps + OpenWeatherMap keys)
-7. **Travel time** (edge function + `TravelSegment.tsx` + "Generate" button)
-8. **Weather** (edge function + `WeatherBadge.tsx` + `weather_cache` + "Update" button)
-9. **Routing update** (`App.tsx` with new routes, `Timeline.tsx` with tripId param)
-10. **Polish** (backfill existing trip data with new trip_id on trip_users, test flows)
+---
+
+## Step 8: Edge Functions
+
+### `supabase/functions/google-directions/index.ts`
+- Accepts POST body: `{ tripId: string }`
+- Creates a Supabase client with the service role key
+- Fetches all entries for the trip (ordered by start_time) with their options
+- For each consecutive pair of entries with lat/lng, calls Google Maps Directions API with `mode=transit`
+- Deletes existing travel_segments for the trip, then inserts new ones with duration, distance, mode, and polyline
+- Returns summary of computed segments
+- Uses `GOOGLE_MAPS_API_KEY` secret
+
+### `supabase/functions/fetch-weather/index.ts`
+- Accepts POST body: `{ tripId: string, lat: number, lng: number }`
+- Creates a Supabase client with the service role key
+- Gets the trip's date range
+- Calls OpenWeatherMap forecast API (5-day/3-hour or One Call API) for the location
+- Upserts results into `weather_cache` (trip_id, date, hour, temp_c, condition, icon_code, etc.)
+- Returns the weather data
+- Uses `OPENWEATHERMAP_API_KEY` secret
+
+**Modified: `supabase/config.toml`**
+- Add function configs with `verify_jwt = false` (auth handled in code)
+
+---
+
+## Step 9: Wire Header Buttons
+
+**Modified: `src/components/timeline/TimelineHeader.tsx`**
+- Add "Generate Travel Times" button (organizer only) -- calls the `google-directions` edge function
+- Add "Update Weather" button (organizer only) -- calls the `fetch-weather` edge function
+- Both show loading spinners while processing
+- Toast notifications on success/failure
+
+---
+
+## Step 10: Updated Types
+
+**Modified: `src/types/trip.ts`**
+- Add `TravelSegment` type matching the database schema
+- Add `WeatherData` type matching the `weather_cache` schema
+- Update `Trip` type to include `owner_id`, `timezone`, `category_presets`
+- Add `EntryWithOptionsAndWeather` type that includes weather data per entry
+
+---
+
+## Build Sequence
+
+Given the size, implementation will follow this order:
+1. Request API keys (Google Maps + OpenWeatherMap)
+2. Types update (`trip.ts`)
+3. Utility/lib files (`sunCalc.ts`, `timeOfDayColor.ts`, `overlapLayout.ts`)
+4. Admin auth (`useAdminAuth.ts`, `Auth.tsx`)
+5. Dashboard + Wizard pages and components
+6. Calendar timeline components (`TimeSlotGrid.tsx`, `CalendarDay.tsx`, `TravelSegment.tsx`, `WeatherBadge.tsx`)
+7. Edge functions (`google-directions`, `fetch-weather`)
+8. Config updates (`config.toml`)
+9. Route updates (`App.tsx`)
+10. Wire everything in `Timeline.tsx`, `TimelineHeader.tsx`, `EntryCard.tsx`
+11. Update `UserSelect.tsx` for trip-specific member selection
+
+This is approximately 20+ files to create/modify. The implementation will be done in one pass.
 
