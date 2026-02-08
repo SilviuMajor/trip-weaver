@@ -1,143 +1,119 @@
 
 
-# 🗺️ Trip Planner — Collaborative Itinerary App
+# Phases 2, 3 & 4 -- Complete Implementation Plan
 
-## Overview
-A visual, swipeable trip planning app where you build a day-by-day itinerary and share it with friends. Friends can browse, vote on options, and see how far they are from each activity — all from a beautiful, image-rich timeline.
-
----
-
-## 🧑‍💼 User System (Simple, No Passwords)
-
-- **You (Organizer)** create the trip and pre-register friend names in the backend
-- Friends visit the app and select their name from a list to enter — no login/password required
-- You can grant **Editor** permissions to any user (trip-wide), allowing them to add/edit entries
-- Everyone else is **Viewer** — can browse and vote only
+This plan covers all the remaining features: the entry detail overlay, image uploads, swipeable options with voting, live location tracking, pinch-to-zoom, real-time sync, and organizer/editor controls.
 
 ---
 
-## 📅 Timeline View (Core Experience)
+## What gets built
 
-- **Vertical scrolling timeline**, one day flows into the next
-- Trip has a defined **start and end date**
-- **Pinch-to-zoom**: two fingers zoom in (15-minute slots at most zoomed in) or out (full day view at most zoomed out)
-- A **"Today" quick-jump button** to snap back to the current day
-- **Past entries are greyed out** but remain visible in the timeline
-- **Dual timezone toggle** (UK ↔ Amsterdam) — a global switch that converts all displayed times
+### Phase 2 -- Rich Entries
+- **Entry detail overlay**: Tapping a card opens a full-screen sheet with all images (gallery), name, website link, location with a map preview (static image from OpenStreetMap) and Apple/Google Maps navigation links, category, time, and distance.
+- **Image upload**: Organizers and editors can upload photos from their camera roll. Images are stored in the existing `trip-images` storage bucket and linked via the `option_images` table. Drag-to-reorder support so the first image becomes the card background.
+- **Custom categories**: A text input + color picker when creating/editing an option. The category label and color display on the card.
+- **Timezone toggle**: Already built -- just verify it works in the overlay too.
 
----
+### Phase 3 -- Options & Voting
+- **Swipe navigation**: On the timeline, each entry card becomes horizontally swipeable (using `embla-carousel-react`, already installed) to browse competing options.
+- **Voting**: A vote button on each option card. Tapping it inserts/removes a vote in the `votes` table for the current user. Vote count displays on each card. Options auto-reorder by vote count (highest first).
+- **Lock voting**: The organizer gets a toggle in the header to lock/unlock voting trip-wide. When locked, the vote button is hidden for all users.
+- **Real-time votes**: Subscribe to `votes` table changes via Supabase Realtime so vote counts update live across all users.
 
-## 🗂️ Entry Cards
-
-Each entry appears as a **compact card** on the timeline showing:
-- **Background image** (first uploaded image by default)
-- **Name/Place** title
-- **Custom category** label (color-coded, one per entry — e.g. "Travel", "Food", "Chill", or anything custom)
-- **Time range** (start → end)
-- **Distance** from your current location (e.g. "2.3 km away")
-- **Vote count indicator** (if multiple options exist)
-
-### Expanded Overlay View
-Tapping a card opens a **full overlay** with:
-- All uploaded **images** (reorderable, first one = card background)
-- **Name/Place**
-- **Website** link
-- **Location pin** with a small map preview + link to Apple Maps / Google Maps
-- Category & time details
-- Distance from current location
+### Phase 4 -- Location, Zoom & Permissions
+- **Live location**: A `useGeolocation` hook that requests the browser's current position. Distance from each entry's lat/lng is calculated using the Haversine formula and displayed on all cards.
+- **Pinch-to-zoom**: A `useTimelineZoom` hook that listens for touch pinch gestures on the timeline container. Zoom level controls CSS spacing between entries (from 15-min granularity to full-day compressed view).
+- **Past entry greying**: Already partially built -- will ensure entries whose end time has passed get the greyed-out treatment consistently.
+- **"Today" button**: Already built.
+- **Entry creation/editing (organizers + editors)**: A floating "+" button to add new entries. A form dialog to set time range, then add options with name, website, location, category, and images.
+- **Real-time sync**: Subscribe to `entries`, `entry_options`, and `option_images` table changes so all users see new/updated entries live.
 
 ---
 
-## 🔀 Multiple Options per Time Slot
+## Technical details
 
-- Any time slot can have **multiple competing options** (e.g. "Restaurant A" vs "Restaurant B")
-- **Swipe left/right** on a card to browse the different options
-- Each option has its **own images, name, location, website**, etc.
-- Options are **ordered by vote count** (highest first)
-- Non-winning options stay visible but appear after the top-voted one
+### New files to create
 
----
+| File | Purpose |
+|------|---------|
+| `src/components/timeline/EntryOverlay.tsx` | Full-screen sheet showing entry detail: image gallery, name, website, map, category, time, distance, vote button |
+| `src/components/timeline/OptionSwiper.tsx` | Horizontal swipeable carousel wrapping multiple `EntryCard` components per entry using `embla-carousel-react` |
+| `src/components/timeline/ImageGallery.tsx` | Scrollable image gallery inside the overlay with reorder capability |
+| `src/components/timeline/ImageUploader.tsx` | Camera roll upload component that stores images in `trip-images` bucket |
+| `src/components/timeline/MapPreview.tsx` | Static map tile preview + Apple/Google Maps links |
+| `src/components/timeline/VoteButton.tsx` | Vote/unvote button with animated state |
+| `src/components/timeline/EntryForm.tsx` | Dialog form for creating/editing entries and their options |
+| `src/components/timeline/OptionForm.tsx` | Sub-form for adding/editing a single option (name, website, location, category, images) |
+| `src/hooks/useGeolocation.ts` | Browser geolocation hook returning `{ latitude, longitude, error }` |
+| `src/hooks/useTimelineZoom.ts` | Pinch-to-zoom gesture handler returning a zoom level that controls timeline spacing |
+| `src/hooks/useRealtimeSync.ts` | Supabase Realtime subscription hook for votes, entries, and options |
+| `src/lib/distance.ts` | Haversine formula utility for calculating km distance between two lat/lng points |
 
-## 🗳️ Voting System
+### Files to modify
 
-- All viewers and editors can **vote on options** within a time slot
-- Votes are **anonymous** — no one sees who voted for what, just tallies
-- **Lock Voting toggle** (organizer/admin only) — hides the vote button for all users when activated
-- Real-time vote tallies visible to everyone
+| File | Changes |
+|------|---------|
+| `src/components/timeline/TimelineDay.tsx` | Replace single `EntryCard` render with `OptionSwiper`; pass zoom level for spacing; pass geolocation for distance; pass `onCardTap` to open overlay |
+| `src/components/timeline/EntryCard.tsx` | Add `onClick` handler to open overlay; accept and display distance from geolocation; add vote button |
+| `src/components/timeline/TimelineHeader.tsx` | Add "Lock Voting" toggle for organizer; add "+" button for organizer/editor |
+| `src/pages/Timeline.tsx` | Integrate `useGeolocation`, `useTimelineZoom`, `useRealtimeSync`; manage overlay open/close state; manage entry form state; pass zoom level to day components |
+| `src/types/trip.ts` | No changes needed -- types already cover everything |
 
----
+### Database changes
+- **Enable Realtime on `option_images`**: `ALTER PUBLICATION supabase_realtime ADD TABLE public.option_images;` -- needed so image changes sync live.
+- No new tables needed; the existing schema covers all features.
 
-## 📍 Live Location & Distance
+### Key implementation details
 
-- App requests your **current location** on load
-- Every entry card shows **distance from you** to that activity's location
-- Shown on **all entries** (past and future)
-- Graceful fallback if location permission is denied (distance simply not shown)
+**Swipe navigation (OptionSwiper)**
+- Uses `embla-carousel-react` (already installed) to create a horizontal carousel
+- Each slide is an `EntryCard` for one option
+- Dot indicators show which option is active and how many exist
+- Options sorted by vote count descending
 
----
+**Voting flow**
+1. User taps vote button on an option card
+2. Check if user already voted for this option -- if yes, delete the vote; if no, insert a new vote
+3. Realtime subscription picks up the change and updates vote counts for all connected users
+4. The `voting_locked` flag on the trip hides the vote UI when true
 
-## 🏷️ Custom Categories
+**Image upload flow**
+1. User taps "Add image" in the entry form or overlay
+2. File picker opens (accepts `image/*`)
+3. File is uploaded to `trip-images` bucket with path `{option_id}/{timestamp}_{filename}`
+4. A row is inserted into `option_images` with the public URL and next sort order
+5. Drag handles allow reordering; reorder saves updated `sort_order` values
 
-- Categories are **custom text** you type in (not a fixed list)
-- Each category gets a **color** (auto-assigned or chosen)
-- Displayed as a **label/tag on the card**
-- One category per entry
+**Pinch-to-zoom**
+- Touch event listeners (`touchstart`, `touchmove`, `touchend`) track two-finger distance
+- Zoom level maps to a CSS variable controlling entry card height and time slot spacing
+- 5 zoom levels: 15min, 30min, 1hr, 2hr, full-day
+- Zoom level persists in component state (resets on page reload)
 
----
+**Live location**
+- `navigator.geolocation.watchPosition()` for continuous tracking
+- Haversine formula calculates distance to each option's lat/lng
+- If permission denied, distance simply doesn't show (graceful fallback)
+- Distance updates as user moves
 
-## 🖼️ Images
+**Map preview**
+- Uses OpenStreetMap static tile image (no API key required): `https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lng}&zoom=15&size=600x200&markers={lat},{lng}`
+- Links to `https://maps.apple.com/?ll={lat},{lng}` and `https://www.google.com/maps?q={lat},{lng}`
 
-- Upload from **camera roll**
-- Multiple images per entry/option
-- **Reorderable** — drag to change order, first image becomes the card background
-- Each option within a time slot has its **own set of images**
+**Real-time sync**
+- Single Supabase channel subscribing to `postgres_changes` on `votes`, `entries`, `entry_options`, and `option_images`
+- On any change, re-fetch the affected data and update state
+- Ensures all connected users see live updates
 
----
+**Entry creation form**
+- A floating action button ("+" icon) visible only to organizers and editors
+- Opens a dialog with: date picker, start/end time pickers
+- After creating the entry shell, a sub-form lets you add options (name, website, category + color, location name + lat/lng, images)
+- Location can be entered as a place name with lat/lng fields (manual input for now)
 
-## 🔧 Backend (Lovable Cloud + Supabase)
-
-The app needs a backend to support:
-- **Database**: Trips, entries, options, votes, users, categories, permissions
-- **Image storage**: Uploaded photos stored in Supabase Storage
-- **Real-time updates**: Friends see vote changes and new entries live
-- **Location data**: Stored per entry for distance calculations
-
----
-
-## 📱 Pages & Navigation
-
-1. **User Select Screen** — Pick your name from the list to enter
-2. **Trip Timeline** — The main scrollable, zoomable itinerary view
-3. **Entry Overlay** — Expanded detail view of any entry (slides up over timeline)
-4. **Admin Controls** (organizer only) — Manage users, permissions, lock voting
-
----
-
-## 🚀 Build Phases
-
-### Phase 1 — Foundation
-- User selection screen (name-based entry)
-- Trip timeline with vertical scroll and day sections
-- Basic entry cards with name, time, category
-- Start/end date for the trip
-
-### Phase 2 — Rich Entries
-- Entry overlay with full details (images, website, location, map preview)
-- Image upload from camera roll with reordering
-- Custom color-coded categories
-- Timezone toggle (UK ↔ Amsterdam)
-
-### Phase 3 — Options & Voting
-- Multiple options per time slot with swipe navigation
-- Anonymous voting system
-- Auto-reorder by vote count
-- Lock voting toggle for admin
-
-### Phase 4 — Location & Polish
-- Live location tracking with distance display on all cards
-- Pinch-to-zoom on timeline
-- Past entry greying
-- "Today" quick-jump button
-- Editor permissions management
-- Real-time sync across users
+### Build order
+1. Utility files first: `distance.ts`, `useGeolocation.ts`, `useTimelineZoom.ts`, `useRealtimeSync.ts`
+2. UI components: `MapPreview`, `VoteButton`, `ImageGallery`, `ImageUploader`
+3. Composite components: `EntryOverlay`, `OptionSwiper`, `EntryForm`, `OptionForm`
+4. Wire everything together in `TimelineDay`, `EntryCard`, `TimelineHeader`, and `Timeline`
 
