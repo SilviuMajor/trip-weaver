@@ -47,7 +47,13 @@ export function useAdminAuth() {
   };
 
   const signUp = async (email: string, password: string) => {
-    return supabase.auth.signUp({ email, password });
+    return supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/`,
+      },
+    });
   };
 
   const signOut = async () => {
