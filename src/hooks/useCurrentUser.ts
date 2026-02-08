@@ -24,8 +24,14 @@ export function useCurrentUser() {
     }
   }, [currentUser]);
 
-  const login = (user: TripUser) => setCurrentUser(user);
-  const logout = () => setCurrentUser(null);
+  const login = (user: TripUser) => {
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+    setCurrentUser(user);
+  };
+  const logout = () => {
+    localStorage.removeItem(USER_STORAGE_KEY);
+    setCurrentUser(null);
+  };
 
   const isOrganizer = currentUser?.role === 'organizer';
   const isEditor = currentUser?.role === 'editor' || isOrganizer;
