@@ -131,54 +131,150 @@ export type Database = {
           },
         ]
       }
+      travel_segments: {
+        Row: {
+          created_at: string
+          distance_km: number | null
+          duration_min: number | null
+          from_entry_id: string
+          id: string
+          mode: string | null
+          polyline: string | null
+          to_entry_id: string
+          trip_id: string
+        }
+        Insert: {
+          created_at?: string
+          distance_km?: number | null
+          duration_min?: number | null
+          from_entry_id: string
+          id?: string
+          mode?: string | null
+          polyline?: string | null
+          to_entry_id: string
+          trip_id: string
+        }
+        Update: {
+          created_at?: string
+          distance_km?: number | null
+          duration_min?: number | null
+          from_entry_id?: string
+          id?: string
+          mode?: string | null
+          polyline?: string | null
+          to_entry_id?: string
+          trip_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "travel_segments_from_entry_id_fkey"
+            columns: ["from_entry_id"]
+            isOneToOne: false
+            referencedRelation: "entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "travel_segments_to_entry_id_fkey"
+            columns: ["to_entry_id"]
+            isOneToOne: false
+            referencedRelation: "entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "travel_segments_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trip_users: {
         Row: {
           created_at: string
           id: string
           name: string
           role: string
+          trip_id: string | null
         }
         Insert: {
           created_at?: string
           id?: string
           name: string
           role?: string
+          trip_id?: string | null
         }
         Update: {
           created_at?: string
           id?: string
           name?: string
           role?: string
+          trip_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "trip_users_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       trips: {
         Row: {
+          category_presets: Json | null
           created_at: string
           end_date: string
           id: string
           name: string
+          owner_id: string | null
           start_date: string
+          timezone: string
           updated_at: string
           voting_locked: boolean
         }
         Insert: {
+          category_presets?: Json | null
           created_at?: string
           end_date: string
           id?: string
           name: string
+          owner_id?: string | null
           start_date: string
+          timezone?: string
           updated_at?: string
           voting_locked?: boolean
         }
         Update: {
+          category_presets?: Json | null
           created_at?: string
           end_date?: string
           id?: string
           name?: string
+          owner_id?: string | null
           start_date?: string
+          timezone?: string
           updated_at?: string
           voting_locked?: boolean
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
         }
         Relationships: []
       }
@@ -218,15 +314,71 @@ export type Database = {
           },
         ]
       }
+      weather_cache: {
+        Row: {
+          condition: string | null
+          created_at: string
+          date: string
+          hour: number
+          humidity: number | null
+          icon_code: string | null
+          id: string
+          temp_c: number | null
+          trip_id: string
+          updated_at: string
+          wind_speed: number | null
+        }
+        Insert: {
+          condition?: string | null
+          created_at?: string
+          date: string
+          hour: number
+          humidity?: number | null
+          icon_code?: string | null
+          id?: string
+          temp_c?: number | null
+          trip_id: string
+          updated_at?: string
+          wind_speed?: number | null
+        }
+        Update: {
+          condition?: string | null
+          created_at?: string
+          date?: string
+          hour?: number
+          humidity?: number | null
+          icon_code?: string | null
+          id?: string
+          temp_c?: number | null
+          trip_id?: string
+          updated_at?: string
+          wind_speed?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "weather_cache_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -353,6 +505,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin"],
+    },
   },
 } as const
