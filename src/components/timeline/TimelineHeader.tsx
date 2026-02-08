@@ -1,28 +1,34 @@
+import { useState } from 'react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { LogOut, Globe, Lock, Unlock, Plus } from 'lucide-react';
+import { LogOut, Globe, Lock, Unlock, Plus, Route, CloudSun, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/hooks/use-toast';
 import type { Trip } from '@/types/trip';
 import type { useTimezone } from '@/hooks/useTimezone';
 
 interface TimelineHeaderProps {
   trip: Trip | null;
+  tripId: string;
   timezone: ReturnType<typeof useTimezone>['timezone'];
   onToggleTimezone: () => void;
   timezoneLabel: string;
   onAddEntry?: () => void;
+  onDataRefresh?: () => void;
 }
 
-const TimelineHeader = ({ trip, timezone, onToggleTimezone, timezoneLabel, onAddEntry }: TimelineHeaderProps) => {
+const TimelineHeader = ({ trip, tripId, timezone, onToggleTimezone, timezoneLabel, onAddEntry, onDataRefresh }: TimelineHeaderProps) => {
   const { currentUser, logout, isOrganizer, isEditor } = useCurrentUser();
   const navigate = useNavigate();
+  const [travelLoading, setTravelLoading] = useState(false);
+  const [weatherLoading, setWeatherLoading] = useState(false);
 
   const handleLogout = () => {
     logout();
-    navigate('/');
+    navigate(`/trip/${tripId}`);
   };
 
   const handleToggleLock = async () => {
@@ -31,6 +37,41 @@ const TimelineHeader = ({ trip, timezone, onToggleTimezone, timezoneLabel, onAdd
       .from('trips')
       .update({ voting_locked: !trip.voting_locked })
       .eq('id', trip.id);
+  };
+
+  const handleGenerateTravel = async () => {
+    if (!tripId) return;
+    setTravelLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('google-directions', {
+        body: { tripId },
+      });
+      if (error) throw error;
+      toast({ title: `Generated ${data?.segments?.length ?? 0} travel segments` });
+      onDataRefresh?.();
+    } catch (err: any) {
+      toast({ title: 'Failed to generate travel times', description: err.message, variant: 'destructive' });
+    } finally {
+      setTravelLoading(false);
+    }
+  };
+
+  const handleUpdateWeather = async () => {
+    if (!tripId) return;
+    setWeatherLoading(true);
+    try {
+      // Default to Amsterdam coordinates; could be enhanced to use trip location
+      const { data, error } = await supabase.functions.invoke('fetch-weather', {
+        body: { tripId, lat: 52.37, lng: 4.90 },
+      });
+      if (error) throw error;
+      toast({ title: data?.message ?? 'Weather updated' });
+      onDataRefresh?.();
+    } catch (err: any) {
+      toast({ title: 'Failed to update weather', description: err.message, variant: 'destructive' });
+    } finally {
+      setWeatherLoading(false);
+    }
   };
 
   return (
@@ -47,22 +88,54 @@ const TimelineHeader = ({ trip, timezone, onToggleTimezone, timezoneLabel, onAdd
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Lock voting toggle (organizer only) */}
+        <div className="flex items-center gap-1">
+          {/* Organizer-only buttons */}
           {isOrganizer && trip && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleToggleLock}
-              className="h-8 w-8"
-              title={trip.voting_locked ? 'Unlock voting' : 'Lock voting'}
-            >
-              {trip.voting_locked ? (
-                <Lock className="h-4 w-4 text-destructive" />
-              ) : (
-                <Unlock className="h-4 w-4 text-muted-foreground" />
-              )}
-            </Button>
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleToggleLock}
+                className="h-8 w-8"
+                title={trip.voting_locked ? 'Unlock voting' : 'Lock voting'}
+              >
+                {trip.voting_locked ? (
+                  <Lock className="h-4 w-4 text-destructive" />
+                ) : (
+                  <Unlock className="h-4 w-4 text-muted-foreground" />
+                )}
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleGenerateTravel}
+                className="h-8 w-8"
+                disabled={travelLoading}
+                title="Generate travel times"
+              >
+                {travelLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Route className="h-4 w-4 text-muted-foreground" />
+                )}
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleUpdateWeather}
+                className="h-8 w-8"
+                disabled={weatherLoading}
+                title="Update weather"
+              >
+                {weatherLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CloudSun className="h-4 w-4 text-muted-foreground" />
+                )}
+              </Button>
+            </>
           )}
 
           {/* Add entry button (organizer/editor) */}
