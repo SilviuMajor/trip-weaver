@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import type { TripUser } from '@/types/trip';
 
 const USER_STORAGE_KEY = 'trip-planner-current-user';
@@ -16,6 +17,8 @@ export function useCurrentUser() {
     return null;
   });
 
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(currentUser));
@@ -23,6 +26,19 @@ export function useCurrentUser() {
       localStorage.removeItem(USER_STORAGE_KEY);
     }
   }, [currentUser]);
+
+  // Check for admin auth session
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsAdminLoggedIn(!!session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setIsAdminLoggedIn(!!session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const login = (user: TripUser) => {
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
@@ -33,8 +49,9 @@ export function useCurrentUser() {
     setCurrentUser(null);
   };
 
-  const isOrganizer = currentUser?.role === 'organizer';
+  // Admin gets organizer permissions regardless of selected trip member
+  const isOrganizer = currentUser?.role === 'organizer' || isAdminLoggedIn;
   const isEditor = currentUser?.role === 'editor' || isOrganizer;
 
-  return { currentUser, login, logout, isOrganizer, isEditor };
+  return { currentUser, login, logout, isOrganizer, isEditor, isAdminLoggedIn };
 }

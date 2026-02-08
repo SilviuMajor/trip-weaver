@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { MapPin, Users } from 'lucide-react';
@@ -7,36 +7,39 @@ import type { TripUser } from '@/types/trip';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 const UserSelect = () => {
+  const { tripId } = useParams<{ tripId: string }>();
   const [users, setUsers] = useState<TripUser[]>([]);
+  const [tripName, setTripName] = useState('');
   const [loading, setLoading] = useState(true);
   const { currentUser, login } = useCurrentUser();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (currentUser) {
-      navigate('/trip');
+      navigate(`/trip/${tripId}/timeline`);
     }
-  }, [currentUser, navigate]);
+  }, [currentUser, navigate, tripId]);
 
   useEffect(() => {
-    const fetchUsers = async () => {
-      const { data, error } = await supabase
-        .from('trip_users')
-        .select('*')
-        .order('name');
+    if (!tripId) return;
 
-      if (!error && data) {
-        setUsers(data as TripUser[]);
-      }
+    const fetchData = async () => {
+      const [usersRes, tripRes] = await Promise.all([
+        supabase.from('trip_users').select('*').eq('trip_id', tripId).order('name'),
+        supabase.from('trips').select('name').eq('id', tripId).single(),
+      ]);
+
+      if (usersRes.data) setUsers(usersRes.data as TripUser[]);
+      if (tripRes.data) setTripName(tripRes.data.name);
       setLoading(false);
     };
 
-    fetchUsers();
-  }, []);
+    fetchData();
+  }, [tripId]);
 
   const handleSelectUser = (user: TripUser) => {
     login(user);
-    navigate('/trip');
+    navigate(`/trip/${tripId}/timeline`);
   };
 
   return (
@@ -51,7 +54,9 @@ const UserSelect = () => {
           <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
             <MapPin className="h-8 w-8 text-primary" />
           </div>
-          <h1 className="mb-2 text-3xl font-bold tracking-tight">Trip Planner</h1>
+          <h1 className="mb-2 text-3xl font-bold tracking-tight">
+            {tripName || 'Trip Planner'}
+          </h1>
           <p className="text-muted-foreground">Select your name to get started</p>
         </div>
 
@@ -65,7 +70,7 @@ const UserSelect = () => {
           <div className="rounded-lg border border-dashed border-border p-8 text-center">
             <Users className="mx-auto mb-3 h-10 w-10 text-muted-foreground/50" />
             <p className="text-sm text-muted-foreground">
-              No users yet. Add some users in the backend to get started.
+              No members yet. The trip organizer needs to add members.
             </p>
           </div>
         ) : (

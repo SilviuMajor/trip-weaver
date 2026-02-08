@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
 import { ArrowDown, ZoomIn, ZoomOut } from 'lucide-react';
@@ -10,12 +10,13 @@ import { useGeolocation } from '@/hooks/useGeolocation';
 import { useTimelineZoom } from '@/hooks/useTimelineZoom';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
-import TimelineDay from '@/components/timeline/TimelineDay';
+import CalendarDay from '@/components/timeline/CalendarDay';
 import EntryOverlay from '@/components/timeline/EntryOverlay';
 import EntryForm from '@/components/timeline/EntryForm';
-import type { Trip, Entry, EntryOption, EntryWithOptions } from '@/types/trip';
+import type { Trip, Entry, EntryOption, EntryWithOptions, TravelSegment, WeatherData } from '@/types/trip';
 
 const Timeline = () => {
+  const { tripId } = useParams<{ tripId: string }>();
   const { currentUser } = useCurrentUser();
   const navigate = useNavigate();
   const { timezone, toggle, formatTime, getTimezoneLabel } = useTimezone();
@@ -24,6 +25,8 @@ const Timeline = () => {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [entries, setEntries] = useState<EntryWithOptions[]>([]);
   const [userVotes, setUserVotes] = useState<string[]>([]);
+  const [travelSegments, setTravelSegments] = useState<TravelSegment[]>([]);
+  const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Overlay state
@@ -41,33 +44,38 @@ const Timeline = () => {
   // Redirect if no user
   useEffect(() => {
     if (!currentUser) {
-      navigate('/');
+      navigate(tripId ? `/trip/${tripId}` : '/');
     }
-  }, [currentUser, navigate]);
+  }, [currentUser, navigate, tripId]);
 
   // Data fetching
   const fetchData = useCallback(async () => {
-    // Get the first (only) trip
+    if (!tripId) return;
+
     const { data: tripData } = await supabase
       .from('trips')
       .select('*')
-      .limit(1)
-      .maybeSingle();
+      .eq('id', tripId)
+      .single();
 
     if (!tripData) {
       setLoading(false);
       return;
     }
 
-    setTrip(tripData as Trip);
+    setTrip(tripData as unknown as Trip);
 
-    // Get all entries
-    const { data: entriesData } = await supabase
-      .from('entries')
-      .select('*')
-      .eq('trip_id', tripData.id)
-      .order('start_time');
+    // Get entries, travel segments, and weather in parallel
+    const [entriesRes, segmentsRes, weatherRes] = await Promise.all([
+      supabase.from('entries').select('*').eq('trip_id', tripId).order('start_time'),
+      supabase.from('travel_segments').select('*').eq('trip_id', tripId),
+      supabase.from('weather_cache').select('*').eq('trip_id', tripId),
+    ]);
 
+    setTravelSegments((segmentsRes.data ?? []) as TravelSegment[]);
+    setWeatherData((weatherRes.data ?? []) as WeatherData[]);
+
+    const entriesData = entriesRes.data;
     if (!entriesData || entriesData.length === 0) {
       setEntries([]);
       setLoading(false);
@@ -115,7 +123,7 @@ const Timeline = () => {
 
     setEntries(entriesWithOptions);
     setLoading(false);
-  }, [currentUser]);
+  }, [currentUser, tripId]);
 
   // Initial fetch
   useEffect(() => {
@@ -167,6 +175,11 @@ const Timeline = () => {
     });
   };
 
+  const getWeatherForDay = (day: Date): WeatherData[] => {
+    const dayStr = format(day, 'yyyy-MM-dd');
+    return weatherData.filter(w => w.date === dayStr);
+  };
+
   const handleCardTap = (entry: EntryWithOptions, option: EntryOption) => {
     setOverlayEntry(entry);
     setOverlayOption(option);
@@ -179,10 +192,12 @@ const Timeline = () => {
     <div className="flex min-h-screen flex-col bg-background" ref={scrollRef}>
       <TimelineHeader
         trip={trip}
+        tripId={tripId ?? ''}
         timezone={timezone}
         onToggleTimezone={toggle}
         timezoneLabel={getTimezoneLabel()}
         onAddEntry={() => setEntryFormOpen(true)}
+        onDataRefresh={fetchData}
       />
 
       {loading ? (
@@ -197,7 +212,7 @@ const Timeline = () => {
           <div className="text-center">
             <h2 className="mb-2 text-xl font-bold">No trip found</h2>
             <p className="text-sm text-muted-foreground">
-              Create a trip in the backend to get started.
+              This trip doesn't exist or was deleted.
             </p>
           </div>
         </div>
@@ -205,11 +220,12 @@ const Timeline = () => {
         <>
           <main className="flex-1 pb-20">
             {getDays().map(day => (
-              <TimelineDay
+              <CalendarDay
                 key={day.toISOString()}
                 date={day}
                 entries={getEntriesForDay(day)}
                 formatTime={formatTime}
+                timezone={timezone}
                 userLat={userLat}
                 userLng={userLng}
                 votingLocked={trip.voting_locked}
@@ -217,15 +233,14 @@ const Timeline = () => {
                 userVotes={userVotes}
                 onVoteChange={fetchData}
                 onCardTap={handleCardTap}
-                spacingClass={spacingClass}
-                cardSizeClass={cardSizeClass}
+                travelSegments={travelSegments}
+                weatherData={getWeatherForDay(day)}
               />
             ))}
           </main>
 
           {/* Bottom controls */}
           <div className="fixed bottom-6 right-6 z-40 flex flex-col gap-2">
-            {/* Zoom controls */}
             <div className="flex items-center gap-1 rounded-full bg-card/90 px-2 py-1 shadow-lg backdrop-blur-sm border border-border">
               <Button
                 variant="ghost"

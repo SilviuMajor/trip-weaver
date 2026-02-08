@@ -5,12 +5,20 @@ export interface TripUser {
   created_at: string;
 }
 
+export interface CategoryPreset {
+  name: string;
+  color: string;
+}
+
 export interface Trip {
   id: string;
   name: string;
   start_date: string;
   end_date: string;
+  timezone: string;
   voting_locked: boolean;
+  owner_id: string | null;
+  category_presets: CategoryPreset[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -53,6 +61,33 @@ export interface Vote {
   option_id: string;
   user_id: string;
   created_at: string;
+}
+
+export interface TravelSegment {
+  id: string;
+  trip_id: string;
+  from_entry_id: string;
+  to_entry_id: string;
+  duration_min: number | null;
+  distance_km: number | null;
+  mode: string | null;
+  polyline: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WeatherData {
+  id: string;
+  trip_id: string;
+  date: string;
+  hour: number;
+  temp_c: number | null;
+  condition: string | null;
+  icon_code: string | null;
+  humidity: number | null;
+  wind_speed: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export type Timezone = 'UK' | 'Amsterdam';
