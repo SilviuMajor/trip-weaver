@@ -13,8 +13,9 @@ export interface CategoryPreset {
 export interface Trip {
   id: string;
   name: string;
-  start_date: string;
-  end_date: string;
+  start_date: string | null;
+  end_date: string | null;
+  duration_days: number | null;
   timezone: string;
   voting_locked: boolean;
   owner_id: string | null;

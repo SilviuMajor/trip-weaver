@@ -228,11 +228,12 @@ export type Database = {
         Row: {
           category_presets: Json | null
           created_at: string
-          end_date: string
+          duration_days: number | null
+          end_date: string | null
           id: string
           name: string
           owner_id: string | null
-          start_date: string
+          start_date: string | null
           timezone: string
           updated_at: string
           voting_locked: boolean
@@ -240,11 +241,12 @@ export type Database = {
         Insert: {
           category_presets?: Json | null
           created_at?: string
-          end_date: string
+          duration_days?: number | null
+          end_date?: string | null
           id?: string
           name: string
           owner_id?: string | null
-          start_date: string
+          start_date?: string | null
           timezone?: string
           updated_at?: string
           voting_locked?: boolean
@@ -252,11 +254,12 @@ export type Database = {
         Update: {
           category_presets?: Json | null
           created_at?: string
-          end_date?: string
+          duration_days?: number | null
+          end_date?: string | null
           id?: string
           name?: string
           owner_id?: string | null
-          start_date?: string
+          start_date?: string | null
           timezone?: string
           updated_at?: string
           voting_locked?: boolean

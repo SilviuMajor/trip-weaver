@@ -26,6 +26,7 @@ interface CalendarDayProps {
   travelSegments?: TravelSegment[];
   weatherData?: WeatherData[];
   onClickSlot?: (time: Date) => void;
+  dayLabel?: string;
 }
 
 function getHourInTimezone(isoString: string, tz: Timezone): number {
@@ -57,9 +58,11 @@ const CalendarDay = ({
   travelSegments = [],
   weatherData = [],
   onClickSlot,
+  dayLabel,
 }: CalendarDayProps) => {
-  const today = isToday(date);
-  const dayPast = isPast(date) && !today;
+  const isUndated = !!dayLabel;
+  const today = !isUndated && isToday(date);
+  const dayPast = !isUndated && isPast(date) && !today;
 
   const sortedEntries = [...entries].sort(
     (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
@@ -116,14 +119,21 @@ const CalendarDay = ({
             'font-display text-sm font-bold',
             today ? 'text-primary' : dayPast ? 'text-muted-foreground' : 'text-foreground'
           )}>
-            {format(date, 'EEEE')}
+            {isUndated ? dayLabel : format(date, 'EEEE')}
           </span>
-          <span className={cn(
-            'text-xs',
-            today ? 'text-primary/70' : 'text-muted-foreground'
-          )}>
-            {format(date, 'd MMM')}
-          </span>
+          {!isUndated && (
+            <span className={cn(
+              'text-xs',
+              today ? 'text-primary/70' : 'text-muted-foreground'
+            )}>
+              {format(date, 'd MMM')}
+            </span>
+          )}
+          {isUndated && (
+            <span className="text-xs text-muted-foreground">
+              {format(date, 'EEEE')}
+            </span>
+          )}
           {today && (
             <span className="ml-1 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">
               TODAY

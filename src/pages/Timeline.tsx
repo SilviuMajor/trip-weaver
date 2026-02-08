@@ -152,11 +152,20 @@ const Timeline = () => {
     }
   };
 
-  // Generate days between trip start and end
+  const isUndated = !trip?.start_date;
+
+  // Reference date used for synthetic "Day 1" entries when no real dates
+  const REFERENCE_DATE = '2099-01-01';
+
+  // Generate days between trip start and end (or synthetic days)
   const getDays = (): Date[] => {
     if (!trip) return [];
-    const start = parseISO(trip.start_date);
-    const end = parseISO(trip.end_date);
+    if (isUndated) {
+      const count = trip.duration_days ?? 3;
+      return Array.from({ length: count }, (_, i) => addDays(parseISO(REFERENCE_DATE), i));
+    }
+    const start = parseISO(trip.start_date!);
+    const end = parseISO(trip.end_date!);
     const days: Date[] = [];
     let current = startOfDay(start);
     while (current <= end) {
@@ -219,7 +228,7 @@ const Timeline = () => {
       ) : (
         <>
           <main className="flex-1 pb-20">
-            {getDays().map(day => (
+            {getDays().map((day, index) => (
               <CalendarDay
                 key={day.toISOString()}
                 date={day}
@@ -235,6 +244,7 @@ const Timeline = () => {
                 onCardTap={handleCardTap}
                 travelSegments={travelSegments}
                 weatherData={getWeatherForDay(day)}
+                dayLabel={isUndated ? `Day ${index + 1}` : undefined}
               />
             ))}
           </main>
@@ -263,14 +273,16 @@ const Timeline = () => {
               </Button>
             </div>
 
-            <Button
-              onClick={scrollToToday}
-              size="sm"
-              className="rounded-full shadow-lg"
-            >
-              <ArrowDown className="mr-1 h-3.5 w-3.5" />
-              Today
-            </Button>
+            {!isUndated && (
+              <Button
+                onClick={scrollToToday}
+                size="sm"
+                className="rounded-full shadow-lg"
+              >
+                <ArrowDown className="mr-1 h-3.5 w-3.5" />
+                Today
+              </Button>
+            )}
           </div>
 
           {/* Entry overlay */}
@@ -294,6 +306,7 @@ const Timeline = () => {
             onOpenChange={setEntryFormOpen}
             tripId={trip.id}
             onCreated={fetchData}
+            trip={trip}
           />
         </>
       )}
