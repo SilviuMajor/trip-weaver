@@ -200,6 +200,18 @@ const Timeline = () => {
     setEntryFormOpen(true);
   };
 
+  const handleEntryTimeChange = async (entryId: string, newStartIso: string, newEndIso: string) => {
+    const { error } = await supabase
+      .from('entries')
+      .update({ start_time: newStartIso, end_time: newEndIso })
+      .eq('id', entryId);
+    if (error) {
+      console.error('Failed to update entry time:', error);
+      return;
+    }
+    await fetchData();
+  };
+
   const days = getDays();
 
   if (!currentUser) return null;
@@ -255,6 +267,7 @@ const Timeline = () => {
                 isFirstDay={index === 0}
                 isLastDay={index === days.length - 1}
                 onAddBetween={handleAddBetween}
+                onEntryTimeChange={handleEntryTimeChange}
               />
             ))}
           </main>

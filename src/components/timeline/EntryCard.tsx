@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { MapPin, Clock, Plane } from 'lucide-react';
+import { MapPin, Clock, Plane, ArrowRight } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { getTimeOfDayGradient } from '@/lib/timeOfDayColor';
@@ -21,6 +21,11 @@ interface EntryCardProps {
   onVoteChange: () => void;
   onClick?: () => void;
   cardSizeClass?: string;
+  isDragging?: boolean;
+  onDragStart?: (e: React.MouseEvent) => void;
+  onTouchDragStart?: (e: React.TouchEvent) => void;
+  onTouchDragMove?: (e: React.TouchEvent) => void;
+  onTouchDragEnd?: () => void;
 }
 
 const getCategoryColor = (catId: string | null, customColor: string | null): string => {
@@ -71,15 +76,20 @@ const EntryCard = ({
   onVoteChange,
   onClick,
   cardSizeClass,
+  isDragging,
+  onDragStart,
+  onTouchDragStart,
+  onTouchDragMove,
+  onTouchDragEnd,
 }: EntryCardProps) => {
   const firstImage = option.images?.[0]?.image_url;
   const catColor = getCategoryColor(option.category, option.category_color);
   const catEmoji = getCategoryEmoji(option.category);
   const catName = getCategoryName(option.category);
   const timeGradient = getTimeOfDayGradient(new Date(startTime), new Date(endTime));
+  const isTransfer = option.category === 'transfer';
 
-  // For cards without images, use a light tinted bg
-  const tintBg = `${catColor}18`; // ~10% opacity hex suffix
+  const tintBg = `${catColor}18`;
 
   return (
     <motion.div
@@ -87,9 +97,14 @@ const EntryCard = ({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: optionIndex * 0.05 }}
       onClick={onClick}
+      onMouseDown={onDragStart}
+      onTouchStart={onTouchDragStart}
+      onTouchMove={onTouchDragMove}
+      onTouchEnd={onTouchDragEnd}
       className={cn(
-        'group relative cursor-pointer overflow-hidden rounded-2xl border shadow-md transition-all hover:shadow-lg',
+        'group relative overflow-hidden rounded-2xl border shadow-md transition-all hover:shadow-lg',
         isEntryPast && 'opacity-50 grayscale-[30%]',
+        isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
         cardSizeClass
       )}
       style={!firstImage ? { borderColor: catColor, borderLeftWidth: 4 } : undefined}
@@ -138,6 +153,18 @@ const EntryCard = ({
           {option.name}
         </h3>
 
+        {/* Transfer FROM → TO display */}
+        {isTransfer && (option.departure_location || option.arrival_location) && (
+          <div className={cn(
+            'mb-2 flex items-center gap-1.5 text-xs',
+            firstImage ? 'text-white/80' : 'text-muted-foreground'
+          )}>
+            <span>{option.departure_location}</span>
+            <ArrowRight className="h-3 w-3" />
+            <span>{option.arrival_location}</span>
+          </div>
+        )}
+
         {/* Time / Flight info */}
         {option.category === 'flight' && option.departure_location ? (
           <div className={cn(
@@ -149,7 +176,7 @@ const EntryCard = ({
               {option.departure_location} {formatTimeInTz(startTime, option.departure_tz)} → {option.arrival_location} {formatTimeInTz(endTime, option.arrival_tz)}
             </span>
           </div>
-        ) : (
+        ) : !isTransfer && (
           <div className={cn(
             'mb-2 flex items-center gap-1.5 text-xs',
             firstImage ? 'text-white/80' : 'text-muted-foreground'
