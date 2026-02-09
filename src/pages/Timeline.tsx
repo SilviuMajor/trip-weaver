@@ -252,6 +252,7 @@ const Timeline = () => {
             destinationTz: opt.arrival_tz!,
             flightStartHour: getHour(f.start_time, opt.departure_tz!),
             flightEndHour: getHour(f.end_time, opt.arrival_tz!),
+            flightEndUtc: f.end_time,
           };
         });
         map.set(dayStr, { activeTz: currentTz, flights });
