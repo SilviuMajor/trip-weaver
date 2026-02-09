@@ -1,84 +1,110 @@
 
 
-# Trip Image/Emoji, Weather Between Hours, and Timezone Centering
+# Fix Flight Card Alignment and Add Full Flight Details to Overlay
 
-## 1. Trip Image or Custom Emoji
+## Problem Summary
 
-Add an `emoji` (text, nullable) and `image_url` (text, nullable) column to the `trips` table. The image overrides the emoji, and the emoji overrides the default plane icon.
+1. **Flight card position doesn't match gutter times**: BA432 departs LHR at 05:45 GMT, arrives AMS at 08:15 CET. The card is positioned using `tripTimezone` (CET) for both start and end, so it sits at 06:45-08:15 CET on the grid. But the card label says "05:45 GMT" -- this doesn't line up with the gutter which shows CET before the flight.
 
-### Database
-- Add migration: `ALTER TABLE trips ADD COLUMN emoji text DEFAULT NULL; ALTER TABLE trips ADD COLUMN image_url text DEFAULT NULL;`
+2. **Overlay shows no flight details**: When tapping a flight card, the overlay only shows generic time/distance/website. No airports, terminals, timezones, or flight duration.
 
-### Upload Flow
-- In **TripSettings.tsx**, add an "Icon" section where the user can:
-  - Pick an emoji from a small curated set (or type one)
-  - Upload an image (stored in the existing `trip-images` bucket under `trips/{tripId}/icon.ext`)
-  - Preview the current icon
-- Save `emoji` and/or `image_url` to the trips row
-
-### Display
-- **Dashboard.tsx** (line 156-158): Replace the hardcoded `✈️` with: if `trip.image_url` exists, render a rounded `<img>`. Else if `trip.emoji` exists, render it. Else fall back to `✈️`.
-- **TimelineHeader.tsx** (line 87-95): Replace the Home button area or add a trip icon next to the title. If `trip.image_url` exists, show a small circular image. Else show `trip.emoji ?? '✈️'`.
-
-### Type Update
-- The `Trip` type in `types/trip.ts` will auto-update from the database schema after migration.
-
-## 2. Weather Badges at Half-Hour Marks
-
-Currently weather badges are positioned at the top of each hour (`top = (hour - startHour) * PIXELS_PER_HOUR + 2`). Move them to the half-hour position to sit between hour lines.
-
-### Changes
-- **CalendarDay.tsx** (line 542): Change `top` calculation from `(hour - startHour) * PIXELS_PER_HOUR + 2` to `(hour - startHour) * PIXELS_PER_HOUR + (PIXELS_PER_HOUR / 2) - 6`. This positions each weather badge at the :30 mark of each hour, vertically centered.
-
-## 3. Timezone Label Centering and Transition
-
-### Single Timezone: Centered
-Currently single-TZ labels sit at `left: -36`. Instead, center them within the gutter space (between weather column and gradient line).
-
-- The gutter space runs from roughly `left: -36` (after weather) to `left: -6` (gradient line), so ~30px wide.
-- Center the label in that space: `left: -36` with `width: 30px` and `text-align: center`.
-
-### Dual Timezone Transition: Side-by-Side with Divider
-Currently the two timezones are shown inline with a `│` divider but the positioning and opacity logic makes them hard to read.
-
-Refactor the dual-TZ display so:
-- Before the flight: Single origin timezone, centered (same as single-TZ layout)
-- During transition (overlap zone): Two columns side-by-side. The origin time on the left, destination time on the right, with a thin vertical divider (the centerline) between them. Both equally visible.
-- After the flight: Single destination timezone, centered
-
-### Changes
-- **TimeSlotGrid.tsx** lines 80-115: Simplify `getColumnsAtHour` to return three states:
-  - `'single-origin'` -- before flight overlap zone
-  - `'dual'` -- during the overlap zone (flight time +/- 1.5h buffer)
-  - `'single-dest'` -- after flight overlap zone
-- **TimeSlotGrid.tsx** lines 262-294: Render differently based on state:
-  - `single-origin` / `single-dest`: One centered label in the gutter space
-  - `dual`: Two labels, each taking half the gutter width, with a thin center divider line
-
-### Layout Math (single-TZ, 56px margin)
-```text
-Weather: left -56, width ~20px
-Gutter:  left -36, width 30px  (time labels centered here)
-Gradient: left -6, width 5px
-```
-
-### Layout Math (dual-TZ, 80px margin)
-```text
-Weather: left -80, width ~20px
-Gutter:  left -58, width 52px  (split into two 25px halves with 2px divider)
-Gradient: left -6, width 5px
-```
+3. **Edit works but details aren't visible**: The Edit button does open the form with flight data pre-filled, but the overlay itself doesn't display flight-specific information.
 
 ---
 
-## Technical Summary
+## Fix 1: Flight Card Position and Gutter Alignment
+
+The core issue is that the gutter timezone before a flight should be the **departure timezone** (not the trip timezone), and after landing it should be the **arrival timezone**. The 3-hour crossover should center on the flight midpoint.
+
+### Changes in `Timeline.tsx` (dayTimezoneMap computation, ~lines 211-258)
+
+Currently `currentTz` starts as `tripTimezone` and only changes after a flight day. The flight's `flightStartHour` uses `departure_tz` but `flightEndHour` uses `currentTz` (which may not match departure_tz).
+
+**Fix**: Before the first flight on any day, set `currentTz` to the flight's departure timezone (the user is physically in the departure city). Then:
+- `flightStartHour` = hour of departure in `departure_tz` (already correct)
+- `flightEndHour` = hour of arrival in `arrival_tz` (change from `currentTz` to `arrival_tz`)
+
+After the flight, `currentTz` switches to `arrival_tz` (already done).
+
+This means if trip starts with a LHR departure, the gutter before the flight shows GMT (matching the "05:45 GMT" on the card). During the 3h crossover centered on the flight midpoint, both GMT and CET are shown. After landing, only CET is shown.
+
+### Changes in `CalendarDay.tsx` (card positioning, ~lines 362-370)
+
+Currently all entries use `getHourInTimezone(entry.start_time, tripTimezone)`. For flights:
+- Position `startHour` using the departure timezone (so 05:45 GMT = position 5.75)
+- Position `endHour` using the arrival timezone (so 08:15 CET = position 8.25)
+
+For non-flight entries, use `activeTz` (the timezone active at that point in the day) instead of `tripTimezone`. This ensures all cards align with whatever the gutter is showing.
+
+The `activeTz` for entries before a flight = departure_tz. For entries after a flight = arrival_tz.
+
+### Changes in `TimeSlotGrid.tsx`
+
+Update the overlap calculation: currently `overlapStart = flightStartHour - 1.5` and `overlapEnd = flightEndHour + 1.5`. Change to center on the flight midpoint:
+- `flightMidpoint = (flightStartHour + flightEndHour) / 2`
+- `overlapStart = flightMidpoint - 1.5`
+- `overlapEnd = flightMidpoint + 1.5`
+
+This ensures the dual-TZ zone is centered on the middle of the flight.
+
+---
+
+## Fix 2: Full Flight Details in Overlay
+
+### Changes in `EntryOverlay.tsx`
+
+Add a flight-specific section that shows:
+- Departure airport + terminal + local time (in departure TZ)
+- Arrow separator
+- Arrival airport + terminal + local time (in arrival TZ)
+- Flight duration (computed from UTC times)
+- Timezone abbreviations (e.g., "GMT", "CET")
+
+This section replaces the generic time display when the entry is a flight.
+
+### Layout
+
+```text
++------------------------------------------+
+| [FLIGHT badge]                           |
+| BA432                                    |
+|                                          |
+| LHR Terminal 5          AMS Schiphol     |
+| 05:45 GMT       ->      08:15 CET       |
+| Duration: 1h 30m                         |
+|                                          |
+| [Vote] [Images] [Map]                    |
+| [Edit] [Lock] [Delete]                   |
++------------------------------------------+
+```
+
+### Technical Details
+
+- Import `Plane` icon from lucide-react (already available in EntryCard)
+- Detect flight by checking `option.category === 'flight'`
+- Format times using `toLocaleTimeString` with the respective timezone
+- Get TZ abbreviation using `Intl.DateTimeFormat` with `timeZoneName: 'short'`
+- Compute duration: `(endUTC - startUTC) / 60000` minutes
+
+---
+
+## Fix 3: Accurate `activeTz` for Non-Flight Entries
+
+Currently all non-flight entries are positioned using `tripTimezone`. After fix 1, the gutter may show a different timezone (e.g., GMT before a LHR departure). Non-flight entries on the same day need to use the correct timezone for positioning.
+
+### Changes in `CalendarDay.tsx`
+
+- Accept `activeTz` (already passed as a prop) and use it instead of `tripTimezone` for positioning non-flight entries
+- For flight entries specifically, use departure_tz for start and arrival_tz for end
+
+---
+
+## Files to Change
 
 | File | Changes |
 |------|---------|
-| **Migration** | Add `emoji text` and `image_url text` columns to `trips` table |
-| `TripSettings.tsx` | Add icon/emoji picker section with image upload |
-| `Dashboard.tsx` | Show trip image/emoji instead of hardcoded plane icon |
-| `TimelineHeader.tsx` | Show trip image/emoji next to trip name |
-| `CalendarDay.tsx` | Move weather badge `top` to half-hour position |
-| `TimeSlotGrid.tsx` | Refactor TZ labels: center single-TZ, side-by-side dual-TZ with centered divider |
+| `Timeline.tsx` | Update `dayTimezoneMap` to set `currentTz` to departure_tz before flights. Compute `flightEndHour` using `arrival_tz`. |
+| `CalendarDay.tsx` | Use `activeTz` for non-flight entry positioning. Use departure_tz/arrival_tz for flight entries. |
+| `TimeSlotGrid.tsx` | Center the 3h overlap on flight midpoint instead of flight edges. |
+| `EntryOverlay.tsx` | Add flight-specific detail section showing airports, terminals, times in respective TZs, and duration. |
 
