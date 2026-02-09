@@ -1,19 +1,45 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, Calendar, MapPin, LogOut, Settings } from 'lucide-react';
+import { Plus, LogOut, Settings, MoreVertical, Link2, Trash2, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { useProfile } from '@/hooks/useProfile';
 import { format, parseISO } from 'date-fns';
+import { toast } from '@/hooks/use-toast';
 import type { Trip } from '@/types/trip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+
+const CARD_COLORS = [
+  'hsl(24, 90%, 52%)',
+  'hsl(340, 75%, 55%)',
+  'hsl(262, 70%, 55%)',
+  'hsl(173, 70%, 40%)',
+  'hsl(45, 90%, 50%)',
+];
 
 const Dashboard = () => {
   const { adminUser, isAdmin, loading: authLoading, signOut } = useAdminAuth();
   const { displayName } = useProfile(adminUser?.id);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteTrip, setDeleteTrip] = useState<Trip | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -22,26 +48,41 @@ const Dashboard = () => {
     }
   }, [authLoading, isAdmin, navigate]);
 
+  const fetchTrips = async () => {
+    if (!adminUser) return;
+    const { data } = await supabase
+      .from('trips')
+      .select('*')
+      .eq('owner_id', adminUser.id)
+      .order('start_date', { ascending: false });
+
+    setTrips((data ?? []) as unknown as Trip[]);
+    setLoading(false);
+  };
+
   useEffect(() => {
     if (!adminUser) return;
-
-    const fetchTrips = async () => {
-      const { data } = await supabase
-        .from('trips')
-        .select('*')
-        .eq('owner_id', adminUser.id)
-        .order('start_date', { ascending: false });
-
-      setTrips((data ?? []) as unknown as Trip[]);
-      setLoading(false);
-    };
-
     fetchTrips();
   }, [adminUser]);
 
   const handleSignOut = async () => {
     await signOut();
     navigate('/auth');
+  };
+
+  const handleCopyLink = (tripId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const url = `${window.location.origin}/trip/${tripId}`;
+    navigator.clipboard.writeText(url);
+    toast({ title: 'Link copied!', description: 'Share this link with your trip members.' });
+  };
+
+  const handleDeleteTrip = async () => {
+    if (!deleteTrip) return;
+    await supabase.from('trips').delete().eq('id', deleteTrip.id);
+    setDeleteTrip(null);
+    fetchTrips();
+    toast({ title: 'Trip deleted' });
   };
 
   if (authLoading) {
@@ -103,13 +144,14 @@ const Dashboard = () => {
         ) : (
           <div className="space-y-3">
             {trips.map((trip, i) => (
-              <motion.button
+              <motion.div
                 key={trip.id}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
                 onClick={() => navigate(`/trip/${trip.id}`)}
-                className="flex w-full items-start gap-4 rounded-2xl border-2 border-border bg-card p-4 text-left transition-all hover:border-primary/40 hover:shadow-lg"
+                className="flex w-full cursor-pointer items-start gap-4 rounded-2xl border-2 border-border bg-card p-4 text-left transition-all hover:border-primary/40 hover:shadow-lg"
+                style={{ borderLeftColor: CARD_COLORS[i % CARD_COLORS.length], borderLeftWidth: 4 }}
               >
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/15 text-2xl">
                   ✈️
@@ -127,11 +169,52 @@ const Dashboard = () => {
                         : 'Dates TBD'}
                   </p>
                 </div>
-              </motion.button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                    <Button variant="ghost" size="icon" className="shrink-0">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); navigate(`/trip/${trip.id}/settings`); }}>
+                      <Settings className="mr-2 h-4 w-4" />
+                      Trip Settings
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={(e) => handleCopyLink(trip.id, e)}>
+                      <Copy className="mr-2 h-4 w-4" />
+                      Copy Share Link
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={(e) => { e.stopPropagation(); setDeleteTrip(trip); }}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete Trip
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </motion.div>
             ))}
           </div>
         )}
       </main>
+
+      <AlertDialog open={!!deleteTrip} onOpenChange={(open) => !open && setDeleteTrip(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{deleteTrip?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this trip and all its entries. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteTrip} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
