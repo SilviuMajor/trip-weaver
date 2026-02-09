@@ -1,138 +1,139 @@
 
 
-# Flight Handling, Smart Entry Creation, Delete Trip, and Navigation
+# Multiple Improvements: Flights, Overlay, Markers, Add-Between, and Date Conversion
 
-## 1. Delete Trip Button in Trip Settings
+## Overview
 
-Add a danger zone at the bottom of `TripSettings.tsx` with a red "Delete Trip" button that opens an AlertDialog confirmation. On confirm, delete the trip and navigate back to `/dashboard`.
-
-**File:** `src/pages/TripSettings.tsx`
+This plan addresses 7 distinct issues/features across the entry form, timeline display, and overlay.
 
 ---
 
-## 2. Back to My Trips (Timeline Header)
+## 1. Flight Duration Auto-Calculated (Remove Manual Duration Field)
 
-Replace the timezone toggle in `TimelineHeader.tsx` with a Home/back icon button that navigates to `/dashboard`. Remove the timezone toggle entirely (it's being replaced by the flight timezone approach).
+**Problem:** The "When" step shows a manual "Duration (minutes)" input for flights, but flight duration should be computed from depart/arrive times and their timezones.
 
-**File:** `src/components/timeline/TimelineHeader.tsx`
-- Remove the `Globe`, `Switch`, timezone toggle UI, and the `onToggleTimezone`/`timezoneLabel` props
-- Add a `Home` icon button that navigates to `/dashboard`
-
-**File:** `src/pages/Timeline.tsx`
-- Remove the `useTimezone` hook usage and stop passing timezone props to TimelineHeader
+**Changes to `src/components/timeline/EntryForm.tsx`:**
+- Remove the "Duration (minutes)" input entirely for flights (hide it when `isFlight` is true)
+- When the user changes depart time or arrive time for a flight, auto-calculate the duration and update `durationMin` state (for non-flights, keep the existing behavior)
+- For non-flight entries, keep the duration field as-is (it helps recalculate end time)
 
 ---
 
-## 3. Flight Category with Dual Timezones
+## 2. Return Flight Prompt
 
-When the user picks "Flight" as a category, the entry form collects extra flight-specific fields:
+**Problem:** No way to easily add a return flight after creating the outbound.
 
-- Departure city/airport (e.g. "LHR" or "London Heathrow")
-- Arrival city/airport (e.g. "AMS" or "Amsterdam Schiphol")
-- Departure timezone (from a list like the wizard uses)
-- Arrival timezone
-- Departure time and arrival time (each shown in their respective timezone)
+**Changes to `src/components/timeline/EntryForm.tsx`:**
+- After successfully saving a flight entry, show a confirmation dialog: "Add return flight?"
+- If "Yes", re-open the form pre-filled with:
+  - Category: flight (already set)
+  - Departure location = previous arrival location
+  - Arrival location = previous departure location
+  - Departure TZ = previous arrival TZ
+  - Arrival TZ = previous departure TZ
+  - Name cleared (user fills in return flight number)
+  - Day/date cleared for user to pick the return day
+- If "No", close as normal
 
-The entry's `start_time` and `end_time` are stored in UTC as usual, but calculated from the local times + their timezones. On the timeline, the EntryCard displays both times in their local zones (e.g. "Depart 08:00 GMT -- Arrive 10:30 CET").
-
-### Database changes
-
-Add columns to `entry_options` to store flight-specific data:
-```sql
-ALTER TABLE entry_options ADD COLUMN departure_location text;
-ALTER TABLE entry_options ADD COLUMN arrival_location text;
-ALTER TABLE entry_options ADD COLUMN departure_tz text;
-ALTER TABLE entry_options ADD COLUMN arrival_tz text;
-```
-
-The trip's timezone field becomes the "destination timezone" used for all non-flight entries on the timeline.
-
-### UI changes
-
-**`src/components/timeline/OptionForm.tsx`:**
-- When category is "flight", show departure/arrival city inputs and timezone selectors
-- Show departure time and arrival time inputs (these feed back to the parent EntryForm to set start/end times, converted to UTC using the selected timezones)
-
-**`src/components/timeline/EntryCard.tsx`:**
-- When category is "flight", display departure and arrival info with their local times (e.g. "LHR 08:00 GMT -> AMS 10:30 CET")
-
-**`src/components/timeline/EntryForm.tsx`:**
-- When category is "flight", the time inputs are handled by OptionForm instead of the top-level time step (since they need timezone context)
-
-**`src/types/trip.ts`:**
-- Add the new optional fields to `EntryOption`
+**Implementation:** Add a `pendingReturnFlight` state that stores the reversed flight details. After the main save completes, if `isFlight && !isEditing`, set this state and show a dialog. On confirm, reset the form with the reversed values and re-open at the "details" step.
 
 ---
 
-## 4. Redesigned Entry Creation Flow (Category-First with Smart Defaults)
+## 3. Dynamic Flight Location Labels
 
-Completely rework the `EntryForm` step order:
+**Problem:** The message "Depart in London (GMT/BST) -- Arrive in Amsterdam (CET/CEST)" on line 463 is hardcoded from the timezone list labels, but it doesn't reflect the user's entered departure/arrival locations.
 
-### New flow:
-1. **Step 1 -- Category**: Pick what you're doing (Breakfast, Lunch, Activity, Flight, etc.)
-2. **Step 2 -- Details**: Name, website, location (the current OptionForm fields). For flights, also departure/arrival info.
-3. **Step 3 -- When**: Which day? Optional time override. Pre-filled with smart defaults based on category.
+**Changes to `src/components/timeline/EntryForm.tsx`:**
+- Update the flight timezone hint (line 463) to use the actual departure/arrival location names entered by the user
+- Format: "Depart from {departureLocation || timezone label} -- Arrive at {arrivalLocation || timezone label}"
+- Fall back to the timezone label only if no location is entered yet
 
-### Smart default durations per category:
-| Category | Default Duration | Default Time Slot |
-|----------|-----------------|-------------------|
-| Breakfast | 1h | 08:00-09:00 |
-| Lunch | 1.5h | 12:30-14:00 |
-| Dinner | 2h | 19:00-21:00 |
-| Drinks | 2h | 21:00-23:00 |
-| Activity | 2h | 10:00-12:00 |
-| Sightseeing | 2h | 14:00-16:00 |
-| Shopping | 1.5h | 15:00-16:30 |
-| Hotel | 10h | 22:00-08:00 |
-| Flight | 3h | 10:00-13:00 |
-| Travel | 1h | 09:00-10:00 |
-| Home | 1h | 09:00-10:00 |
-
-When the user picks a day but doesn't override the time, the system uses **smart placement**:
-- Breakfast goes to morning (08:00)
-- Lunch to midday (12:30)
-- Dinner to evening (19:00)
-- Activities/sightseeing fill the first available gap in the day
-- The user can always override both start and end time
-
-The time fields are pre-filled with the defaults but shown as editable, with a note like "Suggested: 12:30 - 14:00" so the user knows they can change it.
-
-### File changes:
-
-**`src/components/timeline/EntryForm.tsx`:** Major rewrite
-- New step flow: `category` -> `details` -> `when`
-- Step 1 shows the category grid (moved from OptionForm)
-- Step 2 shows name/website/location fields (and flight fields if applicable)
-- Step 3 shows day picker + pre-filled time inputs with smart defaults
-- On save: creates the entry with the times, then creates the option with the details, all in one go
-
-**`src/components/timeline/OptionForm.tsx`:**
-- Extract category picker to be reusable, or inline it in EntryForm
-- OptionForm becomes focused on just the detail fields (name, website, location, flight data)
+**Changes to `src/components/timeline/EntryCard.tsx`:**
+- The card already uses `option.departure_location` and `option.arrival_location` dynamically (line 149), so this should already work. The issue may be that existing entries were saved without these fields populated. Verify and ensure the card renders correctly with the stored data.
 
 ---
 
-## 5. Remove Old Timezone Toggle Hook
+## 4. Flight Card Size Glitch
 
-Since we're removing the UK/Amsterdam toggle in favor of per-flight timezone display and using the trip's timezone for everything else:
+**Problem:** Flight cards appear half-size on the calendar. This is likely because `getHourInTimezone` calculates a very small time span when the arrival is in a different timezone than `tripTimezone`.
 
-**`src/hooks/useTimezone.ts`:** Can be removed or simplified
-**`src/pages/Timeline.tsx`:** Stop importing/using `useTimezone`, use `trip.timezone` directly for formatting non-flight times
+**Root cause in `src/components/timeline/CalendarDay.tsx`:** The card positioning uses `getHourInTimezone(entry.start_time, tripTimezone)` and `getHourInTimezone(entry.end_time, tripTimezone)` (lines 168-169). For flights, start_time is stored as UTC converted from the departure timezone, and end_time from the arrival timezone. When displayed using tripTimezone, the visual span should be correct. However, if the entry's arrival time crosses midnight or the timezone offset makes the span appear very small, the `Math.max(40, ...)` minimum height kicks in but may still look wrong.
+
+**Fix in `src/components/timeline/CalendarDay.tsx`:**
+- Ensure the minimum height for entry cards is reasonable (increase from 40px to at least 60px)
+- For flights specifically, ensure we calculate the visual span correctly: both times are in UTC, so converting both to `tripTimezone` should give the correct visual duration. If end < start in tripTimezone (cross-midnight), handle that case.
+
+---
+
+## 5. Entry Overlay: Move Images to Bottom, Hide Empty State
+
+**Changes to `src/components/timeline/EntryOverlay.tsx`:**
+- Remove the image gallery section from the top of the overlay (lines 66-74)
+- Remove the "No photos yet" placeholder entirely
+- Move the `ImageGallery` component to after the map/vote section, just before the edit/delete buttons
+- Only render it if `images.length > 0`
+
+---
+
+## 6. Visual "Trip Begins" / "Trip Ends" Markers
+
+**Not stored in the database.** Rendered automatically on the timeline.
+
+**Changes to `src/components/timeline/CalendarDay.tsx`:**
+- Accept new props: `isFirstDay: boolean` and `isLastDay: boolean`
+- When `isFirstDay`, render a visual "Trip Begins" marker at the top of the day (before entries), styled as a decorative banner with a flag emoji
+- When `isLastDay`, render a "Trip Ends" marker at the bottom of the day (after entries)
+- Styled with a warm amber background, rounded pill, centred text
+
+**Changes to `src/pages/Timeline.tsx`:**
+- Pass `isFirstDay={index === 0}` and `isLastDay={index === days.length - 1}` to each `CalendarDay`
+
+---
+
+## 7. "+" Add Button Between Entries
+
+**Changes to `src/components/timeline/CalendarDay.tsx`:**
+- Between each pair of entries (and after the last entry), render a small "+" button
+- The button is positioned between entry cards in the timeline flow
+- Clicking it calls a new callback `onAddBetween(afterEntryEndTime, beforeEntryStartTime)` that opens the entry form with pre-filled time context
+
+**Changes to `src/pages/Timeline.tsx`:**
+- Add handler for `onAddBetween` that opens `EntryForm` with a pre-filled start time (= the end time of the previous entry)
+- Pass a new prop `prefillStartTime` to `EntryForm`
+
+**Changes to `src/components/timeline/EntryForm.tsx`:**
+- Accept optional `prefillStartTime?: string` prop
+- When provided, use it to set the initial start time (overriding category defaults for time, but still using category default duration)
+
+---
+
+## 8. Convert Undated Trip to Real Dates (Including Auto-Detection from Flights)
+
+**Changes to `src/pages/TripSettings.tsx`:**
+- Add a "Trip Dates" section that shows current dates or "Undated (Day 1, Day 2...)"
+- Add a "Set Dates" form with start date picker
+- On save: update `trips.start_date` and `trips.end_date` (calculated from start + duration_days), then shift ALL existing entries by replacing the 2099-01-01 reference date with the real start date
+
+**Changes to `src/components/timeline/EntryForm.tsx`:**
+- After saving a flight entry on an undated trip, detect that the flight has a real date and auto-trigger the date conversion:
+  - Calculate the trip start date by working backwards from the flight's date and which "Day" it was placed on
+  - Update the trip's `start_date` and `end_date`
+  - Shift all existing entries from 2099-01-xx to real dates
+  - Show a toast: "Trip dates set based on your flight!"
+
+**Shift logic:** For each entry, replace the date portion: if entry is on `2099-01-01` (Day 1), move to `start_date`; `2099-01-02` (Day 2) moves to `start_date + 1 day`, etc. Keep the time portion unchanged.
 
 ---
 
 ## Files Summary
 
-| File | Action | What Changes |
-|------|--------|-------------|
-| Database migration | Create | Add flight columns to `entry_options` |
-| `src/pages/TripSettings.tsx` | Edit | Add delete trip danger zone with AlertDialog |
-| `src/components/timeline/TimelineHeader.tsx` | Edit | Remove tz toggle, add Home button |
-| `src/pages/Timeline.tsx` | Edit | Remove useTimezone, clean up props |
-| `src/components/timeline/EntryForm.tsx` | Edit | Category-first flow with smart defaults |
-| `src/components/timeline/OptionForm.tsx` | Edit | Add flight fields, restructure for new flow |
-| `src/components/timeline/EntryCard.tsx` | Edit | Flight dual-timezone display |
-| `src/types/trip.ts` | Edit | Add flight fields to EntryOption |
-| `src/lib/categories.ts` | Edit | Add default durations and time slots per category |
-| `src/hooks/useTimezone.ts` | Delete or simplify | No longer needed for toggle |
+| File | Changes |
+|------|---------|
+| `src/components/timeline/EntryForm.tsx` | Remove duration for flights, auto-calc, return flight prompt, dynamic labels, prefill support, auto-date-detection |
+| `src/components/timeline/EntryOverlay.tsx` | Move images to bottom, hide empty state |
+| `src/components/timeline/CalendarDay.tsx` | Trip begin/end markers, "+" add buttons between entries, fix flight card min height |
+| `src/pages/Timeline.tsx` | Pass isFirstDay/isLastDay, handle addBetween callback |
+| `src/pages/TripSettings.tsx` | Add date conversion section for undated trips |
+
+No database schema changes needed -- all changes are UI/logic only.
 
