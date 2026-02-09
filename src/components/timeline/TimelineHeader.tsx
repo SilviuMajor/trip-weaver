@@ -127,8 +127,9 @@ const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas
             </Button>
           )}
 
+          {/* Ideas toggle - desktop only */}
           {onToggleIdeas && (
-            <Button variant="ghost" size="icon" onClick={onToggleIdeas} className="h-8 w-8 relative" title="Ideas panel">
+            <Button variant="ghost" size="icon" onClick={onToggleIdeas} className="h-8 w-8 relative hidden md:flex" title="Ideas panel">
               <Lightbulb className="h-4 w-4 text-muted-foreground" />
               {ideasCount > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">

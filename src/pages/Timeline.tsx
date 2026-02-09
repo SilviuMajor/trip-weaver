@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
 import { getDateInTimezone } from '@/lib/timezoneUtils';
 import { ArrowDown, ZoomIn, ZoomOut } from 'lucide-react';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGeolocation } from '@/hooks/useGeolocation';
@@ -184,6 +185,8 @@ const Timeline = () => {
     entries.filter(e => e.is_scheduled === false), [entries]
   );
 
+  const isMobile = useIsMobile();
+
   const isUndated = !trip?.start_date;
   const REFERENCE_DATE = '2099-01-01';
 
@@ -203,6 +206,56 @@ const Timeline = () => {
     }
     return days;
   };
+
+  // Compute timezone map per day based on flights
+  const dayTimezoneMap = useMemo(() => {
+    const map = new Map<string, { activeTz: string; flights: Array<{ originTz: string; destinationTz: string; flightStartHour: number; flightEndHour: number }> }>();
+    if (!trip) return map;
+
+    const days = getDays();
+    let currentTz = tripTimezone;
+
+    for (const day of days) {
+      const dayStr = format(day, 'yyyy-MM-dd');
+      const dayEntries = scheduledEntries
+        .filter(entry => {
+          const entryDay = getDateInTimezone(entry.start_time, tripTimezone);
+          return entryDay === dayStr;
+        })
+        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+
+      const flightEntries = dayEntries.filter(e => {
+        const opt = e.options[0];
+        return opt?.category === 'flight' && opt.departure_tz && opt.arrival_tz;
+      });
+
+      if (flightEntries.length === 0) {
+        map.set(dayStr, { activeTz: currentTz, flights: [] });
+      } else {
+        const flights = flightEntries.map(f => {
+          const opt = f.options[0];
+          const getHour = (iso: string, tz: string) => {
+            const d = new Date(iso);
+            const parts = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: 'numeric', minute: 'numeric', hour12: false }).formatToParts(d);
+            const h = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0');
+            const m = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0');
+            return h + m / 60;
+          };
+          return {
+            originTz: opt.departure_tz!,
+            destinationTz: opt.arrival_tz!,
+            flightStartHour: getHour(f.start_time, opt.departure_tz!),
+            flightEndHour: getHour(f.end_time, opt.arrival_tz!),
+          };
+        });
+        map.set(dayStr, { activeTz: currentTz, flights });
+        // After this day, the current TZ switches to the last flight's arrival
+        currentTz = flightEntries[flightEntries.length - 1].options[0].arrival_tz!;
+      }
+    }
+
+    return map;
+  }, [trip, scheduledEntries, tripTimezone]);
 
   const getEntriesForDay = (day: Date): EntryWithOptions[] => {
     const dayStr = format(day, 'yyyy-MM-dd');
@@ -398,34 +451,57 @@ const Timeline = () => {
         </div>
       ) : (
         <>
-          <main className="flex-1 pb-20">
-            {days.map((day, index) => (
-              <CalendarDay
-                key={day.toISOString()}
-                date={day}
-                entries={getEntriesForDay(day)}
-                allEntries={scheduledEntries}
-                formatTime={formatTime}
-                tripTimezone={tripTimezone}
-                userLat={userLat}
-                userLng={userLng}
-                votingLocked={trip.voting_locked}
-                userId={currentUser?.id}
-                userVotes={userVotes}
-                onVoteChange={fetchData}
-                onCardTap={handleCardTap}
-                travelSegments={travelSegments}
-                weatherData={getWeatherForDay(day)}
-                dayLabel={isUndated ? `Day ${index + 1}` : undefined}
-                isFirstDay={index === 0}
-                isLastDay={index === days.length - 1}
-                onAddBetween={handleAddBetween}
-                onDragSlot={handleDragSlot}
-                onEntryTimeChange={handleEntryTimeChange}
-                onDropFromPanel={(entryId, hourOffset) => handleDropOnTimeline(entryId, day, hourOffset)}
+          <div className="flex flex-1 overflow-hidden">
+            <main className="flex-1 overflow-y-auto pb-20">
+              {days.map((day, index) => {
+                const dayStr = format(day, 'yyyy-MM-dd');
+                const tzInfo = dayTimezoneMap.get(dayStr);
+                return (
+                  <CalendarDay
+                    key={day.toISOString()}
+                    date={day}
+                    entries={getEntriesForDay(day)}
+                    allEntries={scheduledEntries}
+                    formatTime={formatTime}
+                    tripTimezone={tripTimezone}
+                    userLat={userLat}
+                    userLng={userLng}
+                    votingLocked={trip.voting_locked}
+                    userId={currentUser?.id}
+                    userVotes={userVotes}
+                    onVoteChange={fetchData}
+                    onCardTap={handleCardTap}
+                    travelSegments={travelSegments}
+                    weatherData={getWeatherForDay(day)}
+                    dayLabel={isUndated ? `Day ${index + 1}` : undefined}
+                    isFirstDay={index === 0}
+                    isLastDay={index === days.length - 1}
+                    onAddBetween={handleAddBetween}
+                    onDragSlot={handleDragSlot}
+                    onEntryTimeChange={handleEntryTimeChange}
+                    onDropFromPanel={(entryId, hourOffset) => handleDropOnTimeline(entryId, day, hourOffset)}
+                    activeTz={tzInfo?.activeTz}
+                    dayFlights={tzInfo?.flights}
+                  />
+                );
+              })}
+            </main>
+
+            {/* Desktop sidebar */}
+            {!isMobile && (
+              <IdeasPanel
+                open={ideasPanelOpen}
+                onOpenChange={setIdeasPanelOpen}
+                entries={unscheduledEntries}
+                scheduledEntries={scheduledEntries}
+                onDragStart={handleIdeaDragStart}
+                onCardTap={(entry) => {
+                  const opt = entry.options[0];
+                  if (opt) handleCardTap(entry, opt);
+                }}
               />
-            ))}
-          </main>
+            )}
+          </div>
 
           {/* Bottom controls */}
           <div className="fixed bottom-6 right-6 z-40 flex flex-col gap-2">
@@ -448,6 +524,35 @@ const Timeline = () => {
               </Button>
             )}
           </div>
+
+          {/* Mobile FAB for Ideas */}
+          {isMobile && (
+            <>
+              <button
+                onClick={() => setIdeasPanelOpen(prev => !prev)}
+                className="fixed bottom-20 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-primary shadow-lg transition-transform hover:scale-105 active:scale-95"
+              >
+                <span className="text-xl">💡</span>
+                {unscheduledEntries.length > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
+                    {unscheduledEntries.length}
+                  </span>
+                )}
+              </button>
+
+              <IdeasPanel
+                open={ideasPanelOpen}
+                onOpenChange={setIdeasPanelOpen}
+                entries={unscheduledEntries}
+                scheduledEntries={scheduledEntries}
+                onDragStart={handleIdeaDragStart}
+                onCardTap={(entry) => {
+                  const opt = entry.options[0];
+                  if (opt) handleCardTap(entry, opt);
+                }}
+              />
+            </>
+          )}
 
           <EntryOverlay
             entry={overlayEntry}
@@ -488,18 +593,6 @@ const Timeline = () => {
             editOption={editOption}
             prefillStartTime={prefillStartTime}
             prefillEndTime={prefillEndTime}
-          />
-
-          <IdeasPanel
-            open={ideasPanelOpen}
-            onOpenChange={setIdeasPanelOpen}
-            entries={unscheduledEntries}
-            scheduledEntries={scheduledEntries}
-            onDragStart={handleIdeaDragStart}
-            onCardTap={(entry) => {
-              const opt = entry.options[0];
-              if (opt) handleCardTap(entry, opt);
-            }}
           />
 
           <ConflictResolver

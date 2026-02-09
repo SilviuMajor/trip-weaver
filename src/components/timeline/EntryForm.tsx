@@ -78,6 +78,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   // Return flight prompt
   const [returnFlightData, setReturnFlightData] = useState<ReturnFlightData | null>(null);
   const [showReturnPrompt, setShowReturnPrompt] = useState(false);
+  const [isReturnFlight, setIsReturnFlight] = useState(false);
 
   const isUndated = !trip?.start_date;
   const dayCount = trip?.duration_days ?? 3;
@@ -208,6 +209,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setEndTime('10:00');
     setDurationMin(60);
     setSaving(false);
+    setIsReturnFlight(false);
   };
 
   const handleClose = (open: boolean) => {
@@ -533,7 +535,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
       toast({ title: isEditing ? 'Entry updated!' : 'Entry created!' });
 
       // Prompt return flight for new flights
-      if (isFlight && !isEditing) {
+      if (isFlight && !isEditing && !isReturnFlight) {
         setReturnFlightData({
           departureLocation: arrivalLocation,
           arrivalLocation: departureLocation,
@@ -554,6 +556,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   const handleReturnFlightConfirm = () => {
     if (!returnFlightData) return;
     setShowReturnPrompt(false);
+    setIsReturnFlight(true);
     setCategoryId('flight');
     setName('');
     setDepartureLocation(returnFlightData.departureLocation);
