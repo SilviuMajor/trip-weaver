@@ -19,6 +19,9 @@ export type Database = {
           created_at: string
           end_time: string
           id: string
+          is_locked: boolean
+          linked_flight_id: string | null
+          linked_type: string | null
           start_time: string
           trip_id: string
           updated_at: string
@@ -27,6 +30,9 @@ export type Database = {
           created_at?: string
           end_time: string
           id?: string
+          is_locked?: boolean
+          linked_flight_id?: string | null
+          linked_type?: string | null
           start_time: string
           trip_id: string
           updated_at?: string
@@ -35,11 +41,21 @@ export type Database = {
           created_at?: string
           end_time?: string
           id?: string
+          is_locked?: boolean
+          linked_flight_id?: string | null
+          linked_type?: string | null
           start_time?: string
           trip_id?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "entries_linked_flight_id_fkey"
+            columns: ["linked_flight_id"]
+            isOneToOne: false
+            referencedRelation: "entries"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "entries_trip_id_fkey"
             columns: ["trip_id"]
@@ -51,6 +67,8 @@ export type Database = {
       }
       entry_options: {
         Row: {
+          airport_checkin_hours: number | null
+          airport_checkout_min: number | null
           arrival_location: string | null
           arrival_terminal: string | null
           arrival_tz: string | null
@@ -70,6 +88,8 @@ export type Database = {
           website: string | null
         }
         Insert: {
+          airport_checkin_hours?: number | null
+          airport_checkout_min?: number | null
           arrival_location?: string | null
           arrival_terminal?: string | null
           arrival_tz?: string | null
@@ -89,6 +109,8 @@ export type Database = {
           website?: string | null
         }
         Update: {
+          airport_checkin_hours?: number | null
+          airport_checkout_min?: number | null
           arrival_location?: string | null
           arrival_terminal?: string | null
           arrival_tz?: string | null
@@ -267,6 +289,8 @@ export type Database = {
         Row: {
           category_presets: Json | null
           created_at: string
+          default_checkin_hours: number
+          default_checkout_min: number
           destination: string | null
           duration_days: number | null
           end_date: string | null
@@ -281,6 +305,8 @@ export type Database = {
         Insert: {
           category_presets?: Json | null
           created_at?: string
+          default_checkin_hours?: number
+          default_checkout_min?: number
           destination?: string | null
           duration_days?: number | null
           end_date?: string | null
@@ -295,6 +321,8 @@ export type Database = {
         Update: {
           category_presets?: Json | null
           created_at?: string
+          default_checkin_hours?: number
+          default_checkout_min?: number
           destination?: string | null
           duration_days?: number | null
           end_date?: string | null

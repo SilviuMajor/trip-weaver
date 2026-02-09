@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { MapPin, Clock, Plane, ArrowRight } from 'lucide-react';
+import { MapPin, Clock, Plane, ArrowRight, Lock } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { getTimeOfDayGradient } from '@/lib/timeOfDayColor';
@@ -22,6 +22,9 @@ interface EntryCardProps {
   onClick?: () => void;
   cardSizeClass?: string;
   isDragging?: boolean;
+  isLocked?: boolean;
+  isProcessing?: boolean;
+  linkedType?: string | null;
   onDragStart?: (e: React.MouseEvent) => void;
   onTouchDragStart?: (e: React.TouchEvent) => void;
   onTouchDragMove?: (e: React.TouchEvent) => void;
@@ -77,6 +80,9 @@ const EntryCard = ({
   onClick,
   cardSizeClass,
   isDragging,
+  isLocked,
+  isProcessing,
+  linkedType,
   onDragStart,
   onTouchDragStart,
   onTouchDragMove,
@@ -89,7 +95,7 @@ const EntryCard = ({
   const timeGradient = getTimeOfDayGradient(new Date(startTime), new Date(endTime));
   const isTransfer = option.category === 'transfer';
 
-  const tintBg = `${catColor}18`;
+  const tintBg = isProcessing ? `${catColor}10` : `${catColor}18`;
 
   return (
     <motion.div
@@ -105,9 +111,14 @@ const EntryCard = ({
         'group relative overflow-hidden rounded-2xl border shadow-md transition-all hover:shadow-lg',
         isEntryPast && 'opacity-50 grayscale-[30%]',
         isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+        isLocked && 'border-dashed border-2 border-muted-foreground/40',
+        isProcessing && 'opacity-80',
         cardSizeClass
       )}
-      style={!firstImage ? { borderColor: catColor, borderLeftWidth: 4 } : undefined}
+      style={!firstImage ? {
+        borderColor: isLocked ? undefined : catColor,
+        borderLeftWidth: isLocked ? undefined : 4,
+      } : undefined}
     >
       {/* Background */}
       {firstImage ? (
@@ -117,24 +128,38 @@ const EntryCard = ({
         </div>
       ) : (
         <div className="absolute inset-0" style={{ background: tintBg }}>
-          <div className="absolute inset-0" style={{ background: timeGradient, opacity: 0.15 }} />
+          <div className="absolute inset-0" style={{ background: timeGradient, opacity: isProcessing ? 0.05 : 0.15 }} />
+        </div>
+      )}
+
+      {/* Lock icon */}
+      {isLocked && (
+        <div className="absolute right-2 top-2 z-20">
+          <Lock className="h-3.5 w-3.5 text-muted-foreground/60" />
         </div>
       )}
 
       {/* Content */}
       <div className={cn(
         'relative z-10 p-4',
-        firstImage ? 'text-white' : 'text-foreground'
+        firstImage ? 'text-white' : 'text-foreground',
+        isProcessing && 'p-3'
       )}>
         {/* Top row: Category + Options indicator */}
         <div className="mb-3 flex items-start justify-between">
           {option.category && (
             <span
-              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold"
+              className={cn(
+                'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold',
+                isProcessing && 'text-[10px] px-2 py-0.5'
+              )}
               style={{ backgroundColor: catColor, color: '#fff' }}
             >
-              <span className="text-sm">{catEmoji}</span>
-              {catName}
+              <span className={isProcessing ? 'text-xs' : 'text-sm'}>{catEmoji}</span>
+              {isProcessing
+                ? (linkedType === 'checkin' ? 'Check-in' : 'Checkout')
+                : catName
+              }
             </span>
           )}
           {totalOptions > 1 && (
@@ -148,7 +173,10 @@ const EntryCard = ({
         </div>
 
         {/* Title with emoji */}
-        <h3 className="mb-2 flex items-center gap-2 font-display text-lg font-bold leading-tight">
+        <h3 className={cn(
+          'mb-2 flex items-center gap-2 font-display font-bold leading-tight',
+          isProcessing ? 'text-sm' : 'text-lg'
+        )}>
           {!option.category && <span className="text-xl">{catEmoji}</span>}
           {option.name}
         </h3>
@@ -176,7 +204,7 @@ const EntryCard = ({
               {option.departure_location?.split(' - ')[0]}{option.departure_terminal ? ` T${option.departure_terminal}` : ''} {formatTimeInTz(startTime, option.departure_tz)} → {option.arrival_location?.split(' - ')[0]}{option.arrival_terminal ? ` T${option.arrival_terminal}` : ''} {formatTimeInTz(endTime, option.arrival_tz)}
             </span>
           </div>
-        ) : !isTransfer && (
+        ) : !isTransfer && !isProcessing && (
           <div className={cn(
             'mb-2 flex items-center gap-1.5 text-xs',
             firstImage ? 'text-white/80' : 'text-muted-foreground'
@@ -186,31 +214,41 @@ const EntryCard = ({
           </div>
         )}
 
-        {/* Bottom row: Distance + Votes */}
-        <div className="flex items-center justify-between">
-          {distanceKm !== null && distanceKm !== undefined ? (
-            <div className={cn(
-              'flex items-center gap-1 text-xs',
-              firstImage ? 'text-white/70' : 'text-muted-foreground'
-            )}>
-              <MapPin className="h-3 w-3" />
-              <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
-            </div>
-          ) : (
-            <div />
-          )}
+        {/* Processing: show time compactly */}
+        {isProcessing && (
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Clock className="h-3 w-3" />
+            <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
+          </div>
+        )}
 
-          {userId && totalOptions > 1 && (
-            <VoteButton
-              optionId={option.id}
-              userId={userId}
-              voteCount={option.vote_count ?? 0}
-              hasVoted={hasVoted}
-              locked={votingLocked}
-              onVoteChange={onVoteChange}
-            />
-          )}
-        </div>
+        {/* Bottom row: Distance + Votes */}
+        {!isProcessing && (
+          <div className="flex items-center justify-between">
+            {distanceKm !== null && distanceKm !== undefined ? (
+              <div className={cn(
+                'flex items-center gap-1 text-xs',
+                firstImage ? 'text-white/70' : 'text-muted-foreground'
+              )}>
+                <MapPin className="h-3 w-3" />
+                <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
+              </div>
+            ) : (
+              <div />
+            )}
+
+            {userId && totalOptions > 1 && (
+              <VoteButton
+                optionId={option.id}
+                userId={userId}
+                voteCount={option.vote_count ?? 0}
+                hasVoted={hasVoted}
+                locked={votingLocked}
+                onVoteChange={onVoteChange}
+              />
+            )}
+          </div>
+        )}
       </div>
     </motion.div>
   );

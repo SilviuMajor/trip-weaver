@@ -1,33 +1,126 @@
+import { useState, useRef, useCallback } from 'react';
+
 interface TimeSlotGridProps {
   startHour: number;
   endHour: number;
   pixelsPerHour: number;
   date: Date;
   onClickSlot?: (time: Date) => void;
+  onDragSlot?: (startTime: Date, endTime: Date) => void;
 }
 
-const TimeSlotGrid = ({ startHour, endHour, pixelsPerHour, date, onClickSlot }: TimeSlotGridProps) => {
+const SNAP_MINUTES = 15;
+
+function snapMinutes(totalMinutes: number): number {
+  return Math.round(totalMinutes / SNAP_MINUTES) * SNAP_MINUTES;
+}
+
+const TimeSlotGrid = ({ startHour, endHour, pixelsPerHour, date, onClickSlot, onDragSlot }: TimeSlotGridProps) => {
   const hours: number[] = [];
   for (let h = startHour; h < endHour; h++) {
     hours.push(h);
   }
 
-  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!onClickSlot) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const y = e.clientY - rect.top;
-    const minutesFromStart = (y / pixelsPerHour) * 60;
-    const totalMinutes = startHour * 60 + minutesFromStart;
-    const h = Math.floor(totalMinutes / 60);
-    const m = Math.round((totalMinutes % 60) / 15) * 15;
+  const [dragStart, setDragStart] = useState<number | null>(null);
+  const [dragEnd, setDragEnd] = useState<number | null>(null);
+  const isDraggingRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
+  const yToMinutes = useCallback((y: number): number => {
+    const minutesFromStart = (y / pixelsPerHour) * 60;
+    return startHour * 60 + minutesFromStart;
+  }, [pixelsPerHour, startHour]);
+
+  const minutesToTime = useCallback((totalMinutes: number): Date => {
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
     const time = new Date(date);
     time.setHours(h, m, 0, 0);
-    onClickSlot(time);
+    return time;
+  }, [date]);
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onClickSlot && !onDragSlot) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const minutes = snapMinutes(yToMinutes(y));
+    setDragStart(minutes);
+    setDragEnd(minutes);
+    isDraggingRef.current = false;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (dragStart === null) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const minutes = snapMinutes(yToMinutes(y));
+    if (Math.abs(minutes - dragStart) > 5) {
+      isDraggingRef.current = true;
+    }
+    setDragEnd(minutes);
+  };
+
+  const handleMouseUp = () => {
+    if (dragStart === null) return;
+
+    if (isDraggingRef.current && onDragSlot && dragEnd !== null) {
+      const s = Math.min(dragStart, dragEnd);
+      const e = Math.max(dragStart, dragEnd);
+      if (e - s >= SNAP_MINUTES) {
+        onDragSlot(minutesToTime(s), minutesToTime(e));
+      }
+    } else if (onClickSlot) {
+      onClickSlot(minutesToTime(dragStart));
+    }
+
+    setDragStart(null);
+    setDragEnd(null);
+    isDraggingRef.current = false;
+  };
+
+  // Preview block during drag
+  const renderPreview = () => {
+    if (dragStart === null || dragEnd === null || !isDraggingRef.current) return null;
+    const s = Math.min(dragStart, dragEnd);
+    const e = Math.max(dragStart, dragEnd);
+    if (e - s < SNAP_MINUTES) return null;
+
+    const top = ((s - startHour * 60) / 60) * pixelsPerHour;
+    const height = ((e - s) / 60) * pixelsPerHour;
+
+    const sH = Math.floor(s / 60);
+    const sM = s % 60;
+    const eH = Math.floor(e / 60);
+    const eM = e % 60;
+    const label = `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')} – ${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`;
+
+    return (
+      <div
+        className="pointer-events-none absolute left-0 right-0 z-[12] rounded-lg border-2 border-dashed border-primary/50 bg-primary/10"
+        style={{ top, height }}
+      >
+        <span className="absolute left-2 top-1 select-none text-xs font-medium text-primary">
+          {label}
+        </span>
+      </div>
+    );
   };
 
   return (
-    <div className="absolute inset-0" onClick={handleClick}>
+    <div
+      ref={containerRef}
+      className="absolute inset-0"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={() => {
+        if (dragStart !== null) {
+          setDragStart(null);
+          setDragEnd(null);
+          isDraggingRef.current = false;
+        }
+      }}
+    >
       {hours.map(hour => (
         <div
           key={hour}
@@ -39,6 +132,7 @@ const TimeSlotGrid = ({ startHour, endHour, pixelsPerHour, date, onClickSlot }: 
           </span>
         </div>
       ))}
+      {renderPreview()}
     </div>
   );
 };

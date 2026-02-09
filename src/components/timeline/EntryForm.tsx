@@ -35,11 +35,12 @@ interface EntryFormProps {
   editEntry?: EntryWithOptions | null;
   editOption?: EntryOption | null;
   prefillStartTime?: string;
+  prefillEndTime?: string;
 }
 
 type Step = 'category' | 'details' | 'when';
 
-const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, editOption, prefillStartTime }: EntryFormProps) => {
+const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, editOption, prefillStartTime, prefillEndTime }: EntryFormProps) => {
   const [step, setStep] = useState<Step>('category');
   const [saving, setSaving] = useState(false);
 
@@ -58,6 +59,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   const [arrivalTz, setArrivalTz] = useState('Europe/Amsterdam');
   const [departureTerminal, setDepartureTerminal] = useState('');
   const [arrivalTerminal, setArrivalTerminal] = useState('');
+  const [checkinHours, setCheckinHours] = useState(2);
+  const [checkoutMin, setCheckoutMin] = useState(30);
 
   // Transfer-specific
   const [transferFrom, setTransferFrom] = useState('');
@@ -82,12 +85,13 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   const isFlight = categoryId === 'flight';
   const isTransfer = categoryId === 'transfer';
   const tripTimezone = trip?.timezone ?? 'Europe/Amsterdam';
-
+  const defaultCheckinHours = trip?.default_checkin_hours ?? 2;
+  const defaultCheckoutMin = trip?.default_checkout_min ?? 30;
   const selectedCategory = PREDEFINED_CATEGORIES.find(c => c.id === categoryId);
 
   const customCategories = (trip?.category_presets as CategoryPreset[] | null) ?? [];
   const allCategories: CategoryDef[] = [
-    ...PREDEFINED_CATEGORIES,
+    ...PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing'),
     ...customCategories.map((c, i) => ({
       id: `custom_${i}`,
       name: c.name,
@@ -143,6 +147,20 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     }
   }, [prefillStartTime, open, editEntry]);
 
+  // Pre-fill end time from prop (drag-to-create)
+  useEffect(() => {
+    if (prefillEndTime && open && !editEntry) {
+      const dt = new Date(prefillEndTime);
+      setEndTime(format(dt, 'HH:mm'));
+      // Calculate duration from prefilled times
+      if (prefillStartTime) {
+        const startDt = new Date(prefillStartTime);
+        const diffMin = Math.round((dt.getTime() - startDt.getTime()) / 60000);
+        if (diffMin > 0) setDurationMin(diffMin);
+      }
+    }
+  }, [prefillEndTime, prefillStartTime, open, editEntry]);
+
   const applySmartDefaults = useCallback((cat: CategoryDef) => {
     const h = cat.defaultStartHour;
     const m = cat.defaultStartMin;
@@ -178,6 +196,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setArrivalTz('Europe/Amsterdam');
     setDepartureTerminal('');
     setArrivalTerminal('');
+    setCheckinHours(defaultCheckinHours);
+    setCheckoutMin(defaultCheckoutMin);
     setTransferFrom('');
     setTransferTo('');
     setTransferMode('transit');
@@ -378,6 +398,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         arrival_tz: isFlight ? arrivalTz : null,
         departure_terminal: isFlight ? (departureTerminal.trim() || null) : null,
         arrival_terminal: isFlight ? (arrivalTerminal.trim() || null) : null,
+        airport_checkin_hours: isFlight ? checkinHours : null,
+        airport_checkout_min: isFlight ? checkoutMin : null,
       };
 
       if (isEditing && editOption) {
@@ -391,6 +413,61 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
           .from('entry_options')
           .insert(optionPayload);
         if (error) throw error;
+      }
+
+      // Auto-create airport processing entries for new flights
+      if (isFlight && !isEditing && checkinHours > 0) {
+        // Check-in entry: ends at flight departure, starts X hours before
+        const checkinEnd = new Date(startIso);
+        const checkinStart = new Date(checkinEnd.getTime() - checkinHours * 60 * 60 * 1000);
+        const { data: checkinEntry } = await supabase
+          .from('entries')
+          .insert({
+            trip_id: tripId,
+            start_time: checkinStart.toISOString(),
+            end_time: checkinEnd.toISOString(),
+            is_locked: true,
+            linked_flight_id: entryId,
+            linked_type: 'checkin',
+          } as any)
+          .select('id')
+          .single();
+        if (checkinEntry) {
+          await supabase.from('entry_options').insert({
+            entry_id: checkinEntry.id,
+            name: 'Airport Check-in',
+            category: 'airport_processing',
+            category_color: 'hsl(210, 50%, 60%)',
+            location_name: departureLocation.split(' - ')[0] || null,
+          } as any);
+        }
+      }
+
+      if (isFlight && !isEditing && checkoutMin > 0) {
+        // Checkout entry: starts at flight arrival, ends Y minutes after
+        const checkoutStart = new Date(endIso);
+        const checkoutEnd = new Date(checkoutStart.getTime() + checkoutMin * 60 * 1000);
+        const { data: checkoutEntry } = await supabase
+          .from('entries')
+          .insert({
+            trip_id: tripId,
+            start_time: checkoutStart.toISOString(),
+            end_time: checkoutEnd.toISOString(),
+            is_locked: true,
+            linked_flight_id: entryId,
+            linked_type: 'checkout',
+          } as any)
+          .select('id')
+          .single();
+        if (checkoutEntry) {
+          await supabase.from('entry_options').insert({
+            entry_id: checkoutEntry.id,
+            name: 'Airport Checkout',
+            category: 'airport_processing',
+            category_color: 'hsl(210, 50%, 60%)',
+            location_name: arrivalLocation.split(' - ')[0] || null,
+          } as any);
+        }
       }
 
       // Auto-detect dates from flight on undated trip
@@ -584,6 +661,38 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                         onChange={(e) => setArrivalTerminal(e.target.value)}
                       />
                     </div>
+                  </div>
+
+                  {/* Airport processing times */}
+                  <div className="space-y-3 rounded-lg border border-border/50 bg-muted/30 p-3">
+                    <p className="text-xs font-medium text-muted-foreground">Airport Processing</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Arrive early (hours)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={6}
+                          step={0.5}
+                          value={checkinHours}
+                          onChange={(e) => setCheckinHours(Math.max(0, Number(e.target.value) || 0))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Checkout (minutes)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={120}
+                          step={15}
+                          value={checkoutMin}
+                          onChange={(e) => setCheckoutMin(Math.max(0, Number(e.target.value) || 0))}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Auto-creates check-in &amp; checkout blocks on the timeline
+                    </p>
                   </div>
                 </>
               )}

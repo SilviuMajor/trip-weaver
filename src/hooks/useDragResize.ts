@@ -33,6 +33,7 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const isDraggingRef = useRef(false);
+  const wasDraggedRef = useRef(false);
   const dragStateRef = useRef<DragState | null>(null);
 
   // Keep ref in sync
@@ -59,6 +60,7 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
     setDragState(state);
     dragStateRef.current = state;
     isDraggingRef.current = true;
+    wasDraggedRef.current = true;
   }, []);
 
   const handlePointerMove = useCallback((clientY: number) => {
@@ -78,14 +80,13 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
     } else if (state.type === 'resize-top') {
       newStart = snapToGrid(state.originalStartHour + deltaHours);
       newEnd = state.originalEndHour;
-      if (newStart >= newEnd - 0.25) newStart = newEnd - 0.25; // min 15min
+      if (newStart >= newEnd - 0.25) newStart = newEnd - 0.25;
     } else if (state.type === 'resize-bottom') {
       newStart = state.originalStartHour;
       newEnd = snapToGrid(state.originalEndHour + deltaHours);
       if (newEnd <= newStart + 0.25) newEnd = newStart + 0.25;
     }
 
-    // Clamp to valid range
     if (newStart < 0) { newEnd -= newStart; newStart = 0; }
     if (newEnd > 24) { newStart -= (newEnd - 24); newEnd = 24; }
 
@@ -101,8 +102,9 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
     }
     setDragState(null);
     dragStateRef.current = null;
-    // Delay resetting so click handlers can check
-    setTimeout(() => { isDraggingRef.current = false; }, 50);
+    isDraggingRef.current = false;
+    // Keep wasDragged true for 150ms so click handlers can check
+    setTimeout(() => { wasDraggedRef.current = false; }, 150);
   }, [onCommit]);
 
   // Mouse handlers
@@ -138,7 +140,6 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
     const touch = e.touches[0];
     const startPos = touchStartPosRef.current;
     
-    // Cancel hold if moved too much before activation
     if (!isDraggingRef.current && startPos && touchTimerRef.current) {
       const dx = touch.clientX - startPos.x;
       const dy = touch.clientY - startPos.y;
@@ -188,6 +189,7 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
   return {
     dragState,
     isDragging: isDraggingRef.current,
+    wasDraggedRef,
     onMouseDown,
     onTouchStart,
     onTouchMove,
