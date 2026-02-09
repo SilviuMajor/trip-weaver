@@ -1,139 +1,147 @@
 
 
-# Multiple Improvements: Flights, Overlay, Markers, Add-Between, and Date Conversion
+# Transfers, Drag-to-Resize, Lat/Lng Removal, and "+" Button Improvements
 
 ## Overview
 
-This plan addresses 7 distinct issues/features across the entry form, timeline display, and overlay.
+Five changes: remove lat/lng fields from entry creation, rename Travel to Transfer with FROM/TO fields, implement Google Calendar-style drag-to-resize/move on the timeline, add "+" buttons before entries, and handle Transfer override of auto-calculated travel segments.
 
 ---
 
-## 1. Flight Duration Auto-Calculated (Remove Manual Duration Field)
+## 1. Remove Latitude/Longitude from Entry Creation
 
-**Problem:** The "When" step shows a manual "Duration (minutes)" input for flights, but flight duration should be computed from depart/arrive times and their timezones.
+Remove the manual latitude and longitude input fields from both `EntryForm.tsx` and `OptionForm.tsx`. The lat/lng columns remain in the database for future use (e.g. Google Places autocomplete), but users won't manually type coordinates.
 
-**Changes to `src/components/timeline/EntryForm.tsx`:**
-- Remove the "Duration (minutes)" input entirely for flights (hide it when `isFlight` is true)
-- When the user changes depart time or arrive time for a flight, auto-calculate the duration and update `durationMin` state (for non-flights, keep the existing behavior)
-- For non-flight entries, keep the duration field as-is (it helps recalculate end time)
-
----
-
-## 2. Return Flight Prompt
-
-**Problem:** No way to easily add a return flight after creating the outbound.
-
-**Changes to `src/components/timeline/EntryForm.tsx`:**
-- After successfully saving a flight entry, show a confirmation dialog: "Add return flight?"
-- If "Yes", re-open the form pre-filled with:
-  - Category: flight (already set)
-  - Departure location = previous arrival location
-  - Arrival location = previous departure location
-  - Departure TZ = previous arrival TZ
-  - Arrival TZ = previous departure TZ
-  - Name cleared (user fills in return flight number)
-  - Day/date cleared for user to pick the return day
-- If "No", close as normal
-
-**Implementation:** Add a `pendingReturnFlight` state that stores the reversed flight details. After the main save completes, if `isFlight && !isEditing`, set this state and show a dialog. On confirm, reset the form with the reversed values and re-open at the "details" step.
+### Files changed:
+- **`src/components/timeline/EntryForm.tsx`**: Remove the `latitude`/`longitude` state variables and their `<Input>` fields (lines 65-66, 558-567). Set `latitude: null` and `longitude: null` in the save payload.
+- **`src/components/timeline/OptionForm.tsx`**: Remove the latitude/longitude inputs (lines 175-198) and their state variables.
 
 ---
 
-## 3. Dynamic Flight Location Labels
+## 2. Rename "Travel" to "Transfer" with FROM/TO Fields
 
-**Problem:** The message "Depart in London (GMT/BST) -- Arrive in Amsterdam (CET/CEST)" on line 463 is hardcoded from the timezone list labels, but it doesn't reflect the user's entered departure/arrival locations.
+### Category rename:
+- **`src/lib/categories.ts`**: Change `id: 'travel'` to `id: 'transfer'`, name to "Transfer", emoji to "🚐"
 
-**Changes to `src/components/timeline/EntryForm.tsx`:**
-- Update the flight timezone hint (line 463) to use the actual departure/arrival location names entered by the user
-- Format: "Depart from {departureLocation || timezone label} -- Arrive at {arrivalLocation || timezone label}"
-- Fall back to the timezone label only if no location is entered yet
+### Transfer-specific form fields:
+- **`src/components/timeline/EntryForm.tsx`**: When category is `transfer`:
+  - Show "From" and "To" text inputs (like flight departure/arrival)
+  - Show travel mode selector (Walk, Transit, Cycle, Drive)
+  - Auto-calculate duration via the `google-directions` edge function using FROM/TO text (or use manual override)
+  - Add a "Calculate" button next to duration that triggers the API call
+  - Allow manual duration override (input field, pre-filled from API or default)
+  - Store FROM in `departure_location` and TO in `arrival_location` columns (reusing existing flight columns)
+
+### Transfer overrides auto-segments:
+- **`src/components/timeline/CalendarDay.tsx`**: When rendering travel segments between entries, skip rendering `TravelSegmentCard` if there's already a Transfer entry between those two entries (check by matching time ranges or by checking if a transfer entry exists with start_time >= entry A end_time and end_time <= entry B start_time)
+
+### Files changed:
+- `src/lib/categories.ts` -- rename travel to transfer
+- `src/components/timeline/EntryForm.tsx` -- add FROM/TO fields and auto-calc for transfer category
+- `src/components/timeline/OptionForm.tsx` -- update `isTravel` check to `isTransfer`
+- `src/components/timeline/CalendarDay.tsx` -- skip auto travel segments when manual Transfer exists
+- `src/components/timeline/EntryCard.tsx` -- display FROM/TO on Transfer cards (similar to flight display)
+
+---
+
+## 3. Drag-to-Resize and Drag-to-Move on Timeline (Google Calendar Style)
+
+This is the largest change. Entry cards on the `CalendarDay` grid become draggable and resizable.
+
+### Interaction model:
+- **Drag top edge**: Resize start time (move top of card up/down)
+- **Drag bottom edge**: Resize end time (move bottom of card up/down)
+- **Drag middle of card**: Move entire card (maintains duration, shifts start/end times)
+- Snaps to 15-minute increments
+- On release, updates the entry's `start_time` and `end_time` in the database
+- Works on both mouse and touch (touch requires a short hold ~200ms before drag activates, to distinguish from scroll)
+
+### Implementation approach:
+
+**New hook: `src/hooks/useDragResize.ts`**
+- Manages drag state: `isDragging`, `dragType` (move | resize-top | resize-bottom), `dragEntryId`
+- Tracks pointer position and calculates new time values based on pixel offset and `PIXELS_PER_HOUR`
+- Handles mousedown/touchstart on drag handles and card body
+- On release: calls Supabase to update `start_time`/`end_time`, then triggers `onDataRefresh`
+- Snaps to nearest 15-minute interval
+
+**Changes to `src/components/timeline/CalendarDay.tsx`:**
+- Import and use the drag hook
+- Add resize handles: thin transparent divs at the top and bottom edges of each entry card (6px tall, `cursor-ns-resize`)
+- During drag, render a "ghost" preview showing the new position/size with reduced opacity
+- Pass `onEntryTimeChange` callback prop for persisting changes
+- Add touch event handling with hold-to-drag delay
 
 **Changes to `src/components/timeline/EntryCard.tsx`:**
-- The card already uses `option.departure_location` and `option.arrival_location` dynamically (line 149), so this should already work. The issue may be that existing entries were saved without these fields populated. Verify and ensure the card renders correctly with the stored data.
-
----
-
-## 4. Flight Card Size Glitch
-
-**Problem:** Flight cards appear half-size on the calendar. This is likely because `getHourInTimezone` calculates a very small time span when the arrival is in a different timezone than `tripTimezone`.
-
-**Root cause in `src/components/timeline/CalendarDay.tsx`:** The card positioning uses `getHourInTimezone(entry.start_time, tripTimezone)` and `getHourInTimezone(entry.end_time, tripTimezone)` (lines 168-169). For flights, start_time is stored as UTC converted from the departure timezone, and end_time from the arrival timezone. When displayed using tripTimezone, the visual span should be correct. However, if the entry's arrival time crosses midnight or the timezone offset makes the span appear very small, the `Math.max(40, ...)` minimum height kicks in but may still look wrong.
-
-**Fix in `src/components/timeline/CalendarDay.tsx`:**
-- Ensure the minimum height for entry cards is reasonable (increase from 40px to at least 60px)
-- For flights specifically, ensure we calculate the visual span correctly: both times are in UTC, so converting both to `tripTimezone` should give the correct visual duration. If end < start in tripTimezone (cross-midnight), handle that case.
-
----
-
-## 5. Entry Overlay: Move Images to Bottom, Hide Empty State
-
-**Changes to `src/components/timeline/EntryOverlay.tsx`:**
-- Remove the image gallery section from the top of the overlay (lines 66-74)
-- Remove the "No photos yet" placeholder entirely
-- Move the `ImageGallery` component to after the map/vote section, just before the edit/delete buttons
-- Only render it if `images.length > 0`
-
----
-
-## 6. Visual "Trip Begins" / "Trip Ends" Markers
-
-**Not stored in the database.** Rendered automatically on the timeline.
-
-**Changes to `src/components/timeline/CalendarDay.tsx`:**
-- Accept new props: `isFirstDay: boolean` and `isLastDay: boolean`
-- When `isFirstDay`, render a visual "Trip Begins" marker at the top of the day (before entries), styled as a decorative banner with a flag emoji
-- When `isLastDay`, render a "Trip Ends" marker at the bottom of the day (after entries)
-- Styled with a warm amber background, rounded pill, centred text
+- Accept optional `onDragStart` prop for the card body (middle drag)
+- Add `cursor-grab` / `cursor-grabbing` styles when hovering/dragging
+- Prevent click handler from firing when a drag just completed
 
 **Changes to `src/pages/Timeline.tsx`:**
-- Pass `isFirstDay={index === 0}` and `isLastDay={index === days.length - 1}` to each `CalendarDay`
+- Add `handleEntryTimeChange(entryId, newStart, newEnd)` that updates the database and calls `fetchData()`
+- Pass it to `CalendarDay`
+
+### New prop on CalendarDay:
+```typescript
+onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
+```
 
 ---
 
-## 7. "+" Add Button Between Entries
+## 4. "+" Button Before First Entry
 
-**Changes to `src/components/timeline/CalendarDay.tsx`:**
-- Between each pair of entries (and after the last entry), render a small "+" button
-- The button is positioned between entry cards in the timeline flow
-- Clicking it calls a new callback `onAddBetween(afterEntryEndTime, beforeEntryStartTime)` that opens the entry form with pre-filled time context
+Currently the "+" button only appears AFTER each entry. We need one BEFORE the first entry too.
 
-**Changes to `src/pages/Timeline.tsx`:**
-- Add handler for `onAddBetween` that opens `EntryForm` with a pre-filled start time (= the end time of the previous entry)
-- Pass a new prop `prefillStartTime` to `EntryForm`
-
-**Changes to `src/components/timeline/EntryForm.tsx`:**
-- Accept optional `prefillStartTime?: string` prop
-- When provided, use it to set the initial start time (overriding category defaults for time, but still using category default duration)
+### Changes to `src/components/timeline/CalendarDay.tsx`:**
+- Before the first entry in the positioned entries loop, render an additional "+" button
+- Position it at the first entry's top minus a small offset (in the time label gutter area, left side)
+- Pre-fill time: first entry start time minus 1 hour
+- Use the same `onAddBetween` callback with the calculated pre-fill time
 
 ---
 
-## 8. Convert Undated Trip to Real Dates (Including Auto-Detection from Flights)
+## 5. Google Directions Edge Function Update
 
-**Changes to `src/pages/TripSettings.tsx`:**
-- Add a "Trip Dates" section that shows current dates or "Undated (Day 1, Day 2...)"
-- Add a "Set Dates" form with start date picker
-- On save: update `trips.start_date` and `trips.end_date` (calculated from start + duration_days), then shift ALL existing entries by replacing the 2099-01-01 reference date with the real start date
+The existing `google-directions` edge function works with lat/lng coordinates. For Transfer entries with text-based FROM/TO, we need to support address-based lookups.
 
-**Changes to `src/components/timeline/EntryForm.tsx`:**
-- After saving a flight entry on an undated trip, detect that the flight has a real date and auto-trigger the date conversion:
-  - Calculate the trip start date by working backwards from the flight's date and which "Day" it was placed on
-  - Update the trip's `start_date` and `end_date`
-  - Shift all existing entries from 2099-01-xx to real dates
-  - Show a toast: "Trip dates set based on your flight!"
+### Changes to `supabase/functions/google-directions/index.ts`:
+- Accept an optional `fromAddress`/`toAddress` parameter (in addition to existing lat/lng flow)
+- When addresses are provided, use them directly in the Google Directions API (it supports text addresses as origin/destination)
+- Return duration, distance, and mode
 
-**Shift logic:** For each entry, replace the date portion: if entry is on `2099-01-01` (Day 1), move to `start_date`; `2099-01-02` (Day 2) moves to `start_date + 1 day`, etc. Keep the time portion unchanged.
+---
+
+## Technical Details
+
+### Drag-to-resize pixel-to-time conversion:
+```
+deltaMinutes = (deltaPixels / PIXELS_PER_HOUR) * 60
+snappedMinutes = Math.round(deltaMinutes / 15) * 15
+newTime = originalTime + snappedMinutes
+```
+
+### Touch handling for drag:
+- `onTouchStart`: Start a 200ms timer
+- If finger moves > 10px before timer fires: cancel (it's a scroll)
+- If timer fires: activate drag mode, prevent scrolling via `e.preventDefault()`
+- `onTouchMove`: Update drag position
+- `onTouchEnd`: Commit changes
+
+### Transfer override logic:
+When rendering `CalendarDay`, for each pair of consecutive entries, check if any entry between them has `category === 'transfer'`. If so, skip the auto `TravelSegmentCard`.
 
 ---
 
 ## Files Summary
 
-| File | Changes |
-|------|---------|
-| `src/components/timeline/EntryForm.tsx` | Remove duration for flights, auto-calc, return flight prompt, dynamic labels, prefill support, auto-date-detection |
-| `src/components/timeline/EntryOverlay.tsx` | Move images to bottom, hide empty state |
-| `src/components/timeline/CalendarDay.tsx` | Trip begin/end markers, "+" add buttons between entries, fix flight card min height |
-| `src/pages/Timeline.tsx` | Pass isFirstDay/isLastDay, handle addBetween callback |
-| `src/pages/TripSettings.tsx` | Add date conversion section for undated trips |
-
-No database schema changes needed -- all changes are UI/logic only.
+| File | Action | What Changes |
+|------|--------|-------------|
+| `src/lib/categories.ts` | Edit | Rename travel -> transfer |
+| `src/components/timeline/EntryForm.tsx` | Edit | Remove lat/lng, add Transfer FROM/TO + auto-calc, pre-fill before logic |
+| `src/components/timeline/OptionForm.tsx` | Edit | Remove lat/lng fields, update isTravel -> isTransfer |
+| `src/components/timeline/CalendarDay.tsx` | Edit | Drag handles, resize/move logic, "+" before first entry, Transfer override of travel segments |
+| `src/components/timeline/EntryCard.tsx` | Edit | Drag cursor styles, Transfer display, prevent click during drag |
+| `src/pages/Timeline.tsx` | Edit | Add handleEntryTimeChange, pass to CalendarDay |
+| `src/hooks/useDragResize.ts` | Create | Drag-to-resize/move hook with mouse + touch support |
+| `supabase/functions/google-directions/index.ts` | Edit | Support text addresses for Transfer entries |
 
