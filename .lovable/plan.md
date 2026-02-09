@@ -1,56 +1,70 @@
 
 
-# Fix: Gap, Gutter Z-Index, Click Issues, Category Badges, and Sunrise/Sunset Line
+# Fix: Locks, Full Day, Layout Order, and Flight Alignment
 
-## 1. Gap Above Date Header
+## 1. Lock Symbols -- Top Right, Consistent Size
 
-The day header has `py-3` (12px top+bottom padding) and the content below also has `py-3`. Combined with the "Trip Begins" banner on the first day, this creates noticeable whitespace.
+Currently locks are positioned `absolute bottom-1.5 right-1.5` with `h-3.5 w-3.5`. In compact mode they use `h-2.5 w-2.5`.
 
-**Fix**: Reduce header padding from `py-3` to `py-1.5` and content padding from `py-3` to `py-2`. This tightens the layout without removing structure.
+**Fix**: Move all lock buttons to `top-1.5 right-1.5` and standardize icon size to `h-3.5 w-3.5` for both compact and regular cards.
 
-**File**: `CalendarDay.tsx` line 226 (`py-2` to `py-1.5`) and line 288 (`py-3` to `py-2`).
+### Changes
+- **`EntryCard.tsx`** line 305: Change `bottom-1.5` to `top-1.5`
+- **`EntryCard.tsx`** lines 148-150 (compact mode): Change `h-2.5 w-2.5` to `h-3.5 w-3.5`
 
-## 2. Timezone Gutter Behind Cards
+## 2. Show Full Day (All 24 Hours)
 
-The time labels (05:00, 06:00, etc.) are positioned at `left: 0` inside `TimeSlotGrid`, which sits inside a container with `ml-14` / `ml-20`. This means the labels start at the left edge of the card area -- they are not to the left of cards, they overlap them.
+Currently the visible hour range is computed from entries with a 1-hour buffer (lines 104-116 of `CalendarDay.tsx`). This means if you only have entries from 8-10, you only see 7-11.
 
-The labels need to be positioned with a negative `left` value so they appear in the margin space, outside the card container.
+**Fix**: Always show 00:00 through 23:00 (full day). Set `startHour = 0` and `endHour = 24` regardless of entries.
 
-**Fix**: In `TimeSlotGrid.tsx`, change the time label positioning from `left-0` to a negative left value (e.g., `left: -56px` for single-TZ, `left: -80px` for dual-TZ) so labels sit in the `ml-14`/`ml-20` margin space. Pass a prop for the margin width so labels know where to go.
+### Changes
+- **`CalendarDay.tsx`** lines 104-116: Replace the dynamic calculation with fixed `startHour = 0; endHour = 24;`
 
-Alternatively, simpler approach: Move the time labels out of `TimeSlotGrid` and into `CalendarDay` positioned absolutely with negative left, ensuring they are outside the card container entirely.
+## 3. Correct Layout Order: Weather, Times, Gradient Line
 
-**File**: `TimeSlotGrid.tsx` lines 269-294 -- change `left-0` positioning to negative left values.
-**File**: `CalendarDay.tsx` -- pass `gutterWidth` prop to `TimeSlotGrid`.
+Current positions (from left, using negative offsets from the card container):
+- Gradient line: `left: -52` (5px wide)
+- Weather column: `left: -48` (44px wide)
+- Time labels: `left: -56` (single-TZ) / `left: -80` (dual-TZ)
 
-## 3. Card Click Requires Multiple Clicks
+These overlap and are in the wrong order. The correct order from far-left should be:
 
-The drag system in `useDragResize.ts` sets `wasDraggedRef.current = true` in `startDrag()` (line 63), which is called on every mousedown for draggable cards. The click handler on the card checks `if (!wasDraggedRef.current)` before opening the overlay (CalendarDay line 452). Since `wasDragged` is true immediately on mousedown, the first click after any interaction is blocked. It only resets after a 150ms timeout.
+```text
+[WEATHER] [TIMES] [GRADIENT LINE] | [CARDS]
+```
 
-**Fix**: Don't set `wasDraggedRef.current = true` immediately in `startDrag`. Instead, only set it to true once actual movement occurs (i.e., in `handlePointerMove` when delta exceeds a small threshold like 5px). This way, a simple click (mousedown + mouseup without movement) will not flag as "dragged" and the overlay will open immediately.
+With `ml-20` (80px) for dual-TZ and `ml-14` (56px) for single-TZ, we need to lay these out within that margin space.
 
-**File**: `useDragResize.ts` -- remove `wasDraggedRef.current = true` from `startDrag` (line 63). Add it to `handlePointerMove` when actual movement is detected.
+### Single-TZ layout (56px margin):
+- Weather: `left: -56` (leftmost, ~20px wide for emoji+temp)
+- Times: `left: -36` (time label "08:00" ~30px)
+- Gradient: `left: -6` (5px wide, right next to cards)
 
-## 4. Category Indicators: Uniform Size
+### Dual-TZ layout (80px margin):
+- Weather: `left: -80`
+- Times: `left: -58` (dual times need ~52px)
+- Gradient: `left: -6`
 
-Currently, regular categories use `px-2.5 py-1 text-xs` while processing entries (Check-in/Checkout) use `text-[10px] px-2 py-0.5`. The user prefers the Check-in size for all.
+### Changes
+- **`CalendarDay.tsx`** lines 548-560: Move weather column to `left: -80` (dual) or `left: -56` (single). Pass `dayFlights.length > 0` to determine offset.
+- **`CalendarDay.tsx`** lines 540-544: Move gradient line to `left: -6` (just left of cards).
+- **`TimeSlotGrid.tsx`** line 269: Change dual-TZ label position from `left: -80` to `left: -58`.
+- **`TimeSlotGrid.tsx`** line 291: Change single-TZ label position from `left: -56` to `left: -36`.
 
-**Fix**: Make all category badges use the smaller Check-in styling: `text-[10px] px-2 py-0.5` with slightly smaller emoji.
+## 4. Flight Card Time Accuracy
 
-**File**: `EntryCard.tsx` lines 201-213 -- remove the conditional sizing and apply the compact style universally.
+The flight card displays times using `formatTimeInTz()` which correctly shows departure in departure_tz and arrival in arrival_tz (e.g., "LHR 08:15 GMT -> AMS 10:46 CET"). This is accurate.
 
-## 5. Sunrise/Sunset Gradient Line
+The card's physical position on the timeline uses `getHourInTimezone(entry.start_time, tripTimezone)` and `getHourInTimezone(entry.end_time, tripTimezone)`. Since `tripTimezone` is the base timezone (e.g., GMT), the card spans from 08:15 to 09:46 on the GMT timeline -- this reflects the actual elapsed duration correctly.
 
-Replace the orange background effect with a 5px-wide vertical gradient line that runs alongside the time gutter. The gradient should transition through:
-- Dark blue (night) at the top/bottom
-- Warm sunrise colors (orange/amber) around sunrise hour
-- Light blue (day) through midday
-- Warm sunset colors around sunset hour
-- Back to dark blue (night)
+The `flightEndHour` in `Timeline.tsx` line 248 already uses `currentTz` (which matches `tripTimezone` for the departure day), so the dual-TZ gutter transition should align with the card.
 
-This uses the existing `sunCalc.ts` to determine sunrise/sunset hours for the day, then renders a thin absolute-positioned div with a CSS gradient.
+**Remaining issue**: If the gutter shows "10:00" in the destination column at the 10:00 GMT position, but the flight card ends at 09:46 GMT, the "10:46 CET" arrival label on the card doesn't visually align with any gutter mark. This is inherent to the dual-TZ display -- the destination time column shows what time it is in the destination at each physical position, so 09:46 GMT = 10:46 CET, and the gutter should show "10:46" at that position.
 
-**File**: `CalendarDay.tsx` -- add a new 5px-wide `div` positioned at the left edge of the time gutter (next to or just inside the weather column). The gradient stops are computed from `calculateSunTimes()` mapped to the day's hour range.
+Let me verify: at position 09:46 GMT (physical position), the destination column should display "10:46" (CET = GMT+1). The current `destHour = hour + tzOffset` logic in `TimeSlotGrid.tsx` (line 258) does this correctly for whole hours. The flight card bottom edge at 09:46 should fall between the 09:00 and 10:00 gutter lines, and both gutter columns should show the correct times at those marks.
+
+No additional code changes needed for flight accuracy -- the current implementation is correct. The visual "mismatch" is simply that the card ends between two hourly marks.
 
 ---
 
@@ -58,37 +72,7 @@ This uses the existing `sunCalc.ts` to determine sunrise/sunset hours for the da
 
 | File | Changes |
 |------|---------|
-| `CalendarDay.tsx` | Reduce header/content padding. Add 5px sunrise/sunset gradient line. |
-| `TimeSlotGrid.tsx` | Move time labels to negative left positioning so they sit in the margin, not overlapping cards. |
-| `useDragResize.ts` | Only set `wasDraggedRef` to true on actual pointer movement, not on mousedown. Fixes single-click overlay opening. |
-| `EntryCard.tsx` | Normalize all category badges to the compact Check-in size (`text-[10px] px-2 py-0.5`). |
+| `EntryCard.tsx` | Move lock from `bottom-1.5` to `top-1.5`. Standardize compact lock icons to `h-3.5 w-3.5`. |
+| `CalendarDay.tsx` | Set `startHour=0, endHour=24`. Reposition weather to far left, gradient line next to cards. |
+| `TimeSlotGrid.tsx` | Adjust time label left offsets to sit between weather and gradient. |
 
-### Sunrise/Sunset Gradient Implementation
-
-```text
-Gradient line (5px wide, full height of day):
-  - Position: absolute, left of time labels
-  - Colors computed from sunCalc:
-    top (early hours) -> hsl(220, 50%, 20%) dark blue
-    sunrise hour     -> hsl(30, 80%, 55%) warm orange  
-    mid-morning      -> hsl(200, 60%, 70%) light blue
-    midday           -> hsl(200, 70%, 75%) bright sky
-    afternoon        -> hsl(200, 60%, 70%) light blue
-    sunset hour      -> hsl(25, 80%, 50%) deep orange
-    evening          -> hsl(220, 50%, 20%) dark blue
-```
-
-### Click Fix Logic
-
-```text
-Current flow:
-  mousedown -> startDrag() -> wasDragged = true
-  mouseup   -> commitDrag() -> setTimeout(150ms, wasDragged = false)
-  click     -> if (!wasDragged) openOverlay  // BLOCKED because wasDragged is true
-
-Fixed flow:
-  mousedown -> startDrag() -> wasDragged = false (unchanged)
-  mousemove -> if delta > 5px: wasDragged = true
-  mouseup   -> commitDrag()
-  click     -> if (!wasDragged) openOverlay  // WORKS for simple clicks
-```
