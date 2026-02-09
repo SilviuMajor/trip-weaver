@@ -2,7 +2,7 @@ import { motion } from 'framer-motion';
 import { MapPin, Clock, Plane, ArrowRight, Lock, LockOpen } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import { cn } from '@/lib/utils';
-import { getTimeOfDayGradient } from '@/lib/timeOfDayColor';
+
 import { findCategory } from '@/lib/categories';
 import VoteButton from './VoteButton';
 
@@ -98,7 +98,6 @@ const EntryCard = ({
   const catColor = getCategoryColor(option.category, option.category_color);
   const catEmoji = getCategoryEmoji(option.category);
   const catName = getCategoryName(option.category);
-  const timeGradient = getTimeOfDayGradient(new Date(startTime), new Date(endTime));
   const isTransfer = option.category === 'transfer';
 
   const tintBg = isProcessing ? `${catColor}10` : `${catColor}18`;
@@ -187,9 +186,7 @@ const EntryCard = ({
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
         </div>
       ) : (
-        <div className="absolute inset-0" style={{ background: tintBg }}>
-          <div className="absolute inset-0" style={{ background: timeGradient, opacity: isProcessing ? 0.05 : 0.15 }} />
-        </div>
+        <div className="absolute inset-0" style={{ background: tintBg }} />
       )}
 
       {/* Content */}
@@ -275,7 +272,7 @@ const EntryCard = ({
           </div>
         )}
 
-        {/* Bottom row: Distance + Votes + Lock */}
+        {/* Bottom row: Distance + Votes */}
         {!isProcessing && (
           <div className="flex items-center justify-between">
             {distanceKm !== null && distanceKm !== undefined ? (
@@ -290,35 +287,34 @@ const EntryCard = ({
               <div />
             )}
 
-            <div className="flex items-center gap-1.5">
-              {userId && totalOptions > 1 && (
-                <VoteButton
-                  optionId={option.id}
-                  userId={userId}
-                  voteCount={option.vote_count ?? 0}
-                  hasVoted={hasVoted}
-                  locked={votingLocked}
-                  onVoteChange={onVoteChange}
-                />
-              )}
-
-              {canEdit && onToggleLock && (
-                <button
-                  onClick={handleLockClick}
-                  className={cn(
-                    'rounded-md p-1 transition-colors',
-                    firstImage ? 'hover:bg-white/20' : 'hover:bg-muted/50'
-                  )}
-                >
-                  {isLocked ? (
-                    <Lock className={cn('h-3.5 w-3.5', firstImage ? 'text-white/70' : 'text-muted-foreground/80')} />
-                  ) : (
-                    <LockOpen className={cn('h-3.5 w-3.5', firstImage ? 'text-white/30' : 'text-muted-foreground/30')} />
-                  )}
-                </button>
-              )}
-            </div>
+            {userId && totalOptions > 1 && (
+              <VoteButton
+                optionId={option.id}
+                userId={userId}
+                voteCount={option.vote_count ?? 0}
+                hasVoted={hasVoted}
+                locked={votingLocked}
+                onVoteChange={onVoteChange}
+              />
+            )}
           </div>
+        )}
+
+        {/* Lock button - always visible on all card types */}
+        {canEdit && onToggleLock && (
+          <button
+            onClick={handleLockClick}
+            className={cn(
+              'absolute bottom-1.5 right-1.5 rounded-md p-1 transition-colors z-20',
+              firstImage ? 'hover:bg-white/20' : 'hover:bg-muted/50'
+            )}
+          >
+            {isLocked ? (
+              <Lock className={cn('h-3.5 w-3.5', firstImage ? 'text-white/70' : 'text-muted-foreground/80')} />
+            ) : (
+              <LockOpen className={cn('h-3.5 w-3.5', firstImage ? 'text-white/30' : 'text-muted-foreground/30')} />
+            )}
+          </button>
         )}
       </div>
     </motion.div>
