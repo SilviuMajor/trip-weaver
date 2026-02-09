@@ -1,110 +1,71 @@
 
 
-# Fix Flight Card Alignment and Add Full Flight Details to Overlay
+# Fix Entry Timezone Alignment and Merge Flight + Airport Cards
 
-## Problem Summary
+## Issue 1: Entries Before/After Flight Using Wrong Timezone
 
-1. **Flight card position doesn't match gutter times**: BA432 departs LHR at 05:45 GMT, arrives AMS at 08:15 CET. The card is positioned using `tripTimezone` (CET) for both start and end, so it sits at 06:45-08:15 CET on the grid. But the card label says "05:45 GMT" -- this doesn't line up with the gutter which shows CET before the flight.
+**Root cause**: `Timeline.tsx` passes a single `activeTz` per day. On a flight day, it's set to `departure_tz` (line 238). But entries AFTER the flight should use `arrival_tz`. Currently, all non-flight entries on the day use the same `activeTz`, so post-flight entries are positioned in the wrong timezone.
 
-2. **Overlay shows no flight details**: When tapping a flight card, the overlay only shows generic time/distance/website. No airports, terminals, timezones, or flight duration.
+**Fix**: Instead of one `activeTz` per day, determine the correct timezone per-entry based on whether it starts before or after the flight.
 
-3. **Edit works but details aren't visible**: The Edit button does open the form with flight data pre-filled, but the overlay itself doesn't display flight-specific information.
+### Changes in `CalendarDay.tsx` (lines 367-378)
 
----
+For non-flight entries, instead of blindly using `activeTz`, check if the entry's UTC start time is after the flight's UTC end time. If so, use `arrival_tz`; otherwise use `departure_tz` (or `activeTz` if no flight).
 
-## Fix 1: Flight Card Position and Gutter Alignment
+Pass the flight info (already available as `flights` prop data from `TimeSlotGrid`) into the positioning logic. Specifically:
+- Accept the raw flight entries (or their UTC times + timezones) so we can compare each entry's UTC time against the flight's UTC end time.
+- Before flight end (UTC): use departure_tz (origin)
+- After flight end (UTC): use arrival_tz (destination)
+- No flight on this day: use activeTz as-is
 
-The core issue is that the gutter timezone before a flight should be the **departure timezone** (not the trip timezone), and after landing it should be the **arrival timezone**. The 3-hour crossover should center on the flight midpoint.
+### Changes in `Timeline.tsx` (lines 211-264)
 
-### Changes in `Timeline.tsx` (dayTimezoneMap computation, ~lines 211-258)
+Pass the flight entries' data (UTC start/end + departure_tz/arrival_tz) to `CalendarDay` so it can determine per-entry timezone. Add a new prop like `dayFlightInfo` containing the raw flight UTC times and timezones.
 
-Currently `currentTz` starts as `tripTimezone` and only changes after a flight day. The flight's `flightStartHour` uses `departure_tz` but `flightEndHour` uses `currentTz` (which may not match departure_tz).
+## Issue 2: Merge Check-in + Flight + Checkout into One Card
 
-**Fix**: Before the first flight on any day, set `currentTz` to the flight's departure timezone (the user is physically in the departure city). Then:
-- `flightStartHour` = hour of departure in `departure_tz` (already correct)
-- `flightEndHour` = hour of arrival in `arrival_tz` (change from `currentTz` to `arrival_tz`)
+**Current state**: Check-in, flight, and checkout are three separate `EntryCard` components positioned independently. They have their own lock icons and drag handles.
 
-After the flight, `currentTz` switches to `arrival_tz` (already done).
+**Goal**: Render them as a single merged block -- check-in section on top, flight in the middle, checkout at the bottom. Moving the flight moves all three. No separate lock icons on airport cards.
 
-This means if trip starts with a LHR departure, the gutter before the flight shows GMT (matching the "05:45 GMT" on the card). During the 3h crossover centered on the flight midpoint, both GMT and CET are shown. After landing, only CET is shown.
+### Changes in `CalendarDay.tsx` (entry rendering, lines 354-470)
 
-### Changes in `CalendarDay.tsx` (card positioning, ~lines 362-370)
+1. **Group linked entries**: Before rendering, group entries so that a flight and its linked check-in/checkout are treated as one "flight group". Filter out entries with `linked_flight_id` from the main render loop.
 
-Currently all entries use `getHourInTimezone(entry.start_time, tripTimezone)`. For flights:
-- Position `startHour` using the departure timezone (so 05:45 GMT = position 5.75)
-- Position `endHour` using the arrival timezone (so 08:15 CET = position 8.25)
+2. **Render flight groups as merged blocks**: For each flight entry, find its linked check-in (ends at flight start) and checkout (starts at flight end). Compute the merged block's `top` from the check-in start and `height` from check-in start to checkout end.
 
-For non-flight entries, use `activeTz` (the timezone active at that point in the day) instead of `tripTimezone`. This ensures all cards align with whatever the gutter is showing.
+3. **Single merged card component**: Inside the merged block div, render three sections vertically:
+   - Check-in section (compact, shows "Check-in" label + time)
+   - Flight section (main card, full detail)
+   - Checkout section (compact, shows "Checkout" label + time)
 
-The `activeTz` for entries before a flight = departure_tz. For entries after a flight = arrival_tz.
+4. **Drag behavior**: The drag handle applies to the entire merged block. When dragged, all three entries move together (the existing `handleDragCommit` already moves linked entries when a flight moves -- we just need to use the flight entry's ID for dragging).
 
-### Changes in `TimeSlotGrid.tsx`
+5. **No lock icons on airport cards**: The merged block has one lock icon on the flight section only. Airport processing sections never show lock controls.
 
-Update the overlap calculation: currently `overlapStart = flightStartHour - 1.5` and `overlapEnd = flightEndHour + 1.5`. Change to center on the flight midpoint:
-- `flightMidpoint = (flightStartHour + flightEndHour) / 2`
-- `overlapStart = flightMidpoint - 1.5`
-- `overlapEnd = flightMidpoint + 1.5`
+### Changes in `EntryCard.tsx`
 
-This ensures the dual-TZ zone is centered on the middle of the flight.
+Add a new rendering mode or a wrapper component (`FlightGroupCard`) that accepts the flight option + check-in entry + checkout entry and renders them as a single unified card with three sections:
 
----
-
-## Fix 2: Full Flight Details in Overlay
-
-### Changes in `EntryOverlay.tsx`
-
-Add a flight-specific section that shows:
-- Departure airport + terminal + local time (in departure TZ)
-- Arrow separator
-- Arrival airport + terminal + local time (in arrival TZ)
-- Flight duration (computed from UTC times)
-- Timezone abbreviations (e.g., "GMT", "CET")
-
-This section replaces the generic time display when the entry is a flight.
-
-### Layout
-
-```text
-+------------------------------------------+
-| [FLIGHT badge]                           |
-| BA432                                    |
-|                                          |
-| LHR Terminal 5          AMS Schiphol     |
-| 05:45 GMT       ->      08:15 CET       |
-| Duration: 1h 30m                         |
-|                                          |
-| [Vote] [Images] [Map]                    |
-| [Edit] [Lock] [Delete]                   |
-+------------------------------------------+
+```
++----------------------------------+
+| Check-in | LHR T5 | 03:45-05:45 |
+|----------------------------------|
+| BA432    LHR -> AMS              |
+| 05:45 GMT  ->  08:15 CET        |
+|         [lock icon]              |
+|----------------------------------|
+| Checkout | AMS | 08:15-08:45     |
++----------------------------------+
 ```
 
-### Technical Details
+The sections share the flight's category color. The check-in and checkout sections are visually lighter/subdued compared to the main flight section.
 
-- Import `Plane` icon from lucide-react (already available in EntryCard)
-- Detect flight by checking `option.category === 'flight'`
-- Format times using `toLocaleTimeString` with the respective timezone
-- Get TZ abbreviation using `Intl.DateTimeFormat` with `timeZoneName: 'short'`
-- Compute duration: `(endUTC - startUTC) / 60000` minutes
-
----
-
-## Fix 3: Accurate `activeTz` for Non-Flight Entries
-
-Currently all non-flight entries are positioned using `tripTimezone`. After fix 1, the gutter may show a different timezone (e.g., GMT before a LHR departure). Non-flight entries on the same day need to use the correct timezone for positioning.
-
-### Changes in `CalendarDay.tsx`
-
-- Accept `activeTz` (already passed as a prop) and use it instead of `tripTimezone` for positioning non-flight entries
-- For flight entries specifically, use departure_tz for start and arrival_tz for end
-
----
-
-## Files to Change
+## Technical Summary
 
 | File | Changes |
 |------|---------|
-| `Timeline.tsx` | Update `dayTimezoneMap` to set `currentTz` to departure_tz before flights. Compute `flightEndHour` using `arrival_tz`. |
-| `CalendarDay.tsx` | Use `activeTz` for non-flight entry positioning. Use departure_tz/arrival_tz for flight entries. |
-| `TimeSlotGrid.tsx` | Center the 3h overlap on flight midpoint instead of flight edges. |
-| `EntryOverlay.tsx` | Add flight-specific detail section showing airports, terminals, times in respective TZs, and duration. |
+| `Timeline.tsx` | Pass flight UTC times + timezones to CalendarDay for per-entry TZ resolution |
+| `CalendarDay.tsx` | Per-entry timezone selection (before/after flight). Group flight + linked entries into merged blocks. Single drag handle for the group. |
+| `EntryCard.tsx` | Add `FlightGroupCard` rendering mode that shows check-in, flight, and checkout as one merged card with three sections |
 
