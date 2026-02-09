@@ -1,133 +1,99 @@
 
 
-# Dual Timezone Display, Short Entry Fix, Return Flight Bug, and Ideas Sidebar
+# Lock Toggle on Cards, Weather Column, and Timezone Gutter Improvements
 
-## 1. Dual Timezone Gutter in TimeSlotGrid
+## 1. Lock/Unlock Button on Entry Cards
 
-### How it works
-The time gutter (left side of the timeline) currently shows one column of hour labels. We will expand it to support two timezone columns that change based on flights on that day.
+### Behavior
+- A small lock icon button appears in the **bottom-right corner** of every entry card.
+- When the entry is locked: shows a filled/closed lock icon.
+- When unlocked: shows an open lock icon (subtle/dimmed).
+- Clicking the button toggles `is_locked` on the entry via a database update.
+- **Only users with editor or organizer role** can toggle. For viewers, the button is **not rendered at all** (silent -- no tooltip or error).
+- Uses the existing `isEditor` flag from `useCurrentUser`.
 
-### Logic
-- **Default (no flight on this day):** Show only the "current" timezone -- this is the trip's destination timezone, OR after a flight lands, the arrival timezone becomes the new "current" one.
-- **Flight day:** Show two timezone columns with a 3-hour overlap period centered around the flight time. Before the flight, show origin timezone. During the overlap (1.5h before to 1.5h after the flight), show both side by side. After the overlap, show only the destination timezone.
-- **Multiple flights same day:** Show a third timezone column during the second flight's overlap.
-
-### Determining which timezone applies
-- Walk through all entries across all days chronologically. Track "current timezone" starting from the trip's timezone.
-- When a flight is encountered, the current timezone switches to the flight's `arrival_tz` after that day.
-- For each day, pass `originTz` and `destinationTz` (if a flight exists) plus the flight's start/end times to `TimeSlotGrid` and `CalendarDay`.
+### Compact entries
+- On compact (single-line) entries, the time label moves to the **left side** (after the emoji), and the lock icon sits alone on the **far right edge**.
 
 ### Changes
-- **`TimeSlotGrid.tsx`**: Add props for `originTz`, `destinationTz`, `flightStartHour`, `flightEndHour`. Render two columns of hour labels. The origin column fades out after the overlap period; the destination column fades in.
-- **`CalendarDay.tsx`**: Compute which flight(s) exist on this day, extract their timezones, and pass them to `TimeSlotGrid`. Widen the left margin from `ml-10` to `ml-16` or `ml-20` when dual timezones are shown.
-- **`Timeline.tsx`**: Precompute a `dayTimezoneMap` that maps each day to its active timezone(s) by scanning flights chronologically. Pass this info down to `CalendarDay`.
-
-### Visual design
-- Left gutter shows two small columns: origin TZ abbreviation on the far left, destination TZ on the right.
-- During the overlap window, both columns are visible with a subtle divider.
-- Outside the overlap, only one column is visible (the other is hidden or fully transparent).
-- The overlap region gets a subtle gradient background to visually indicate the transition.
+- **`EntryCard.tsx`**: Add `onToggleLock` and `canEdit` props. Render a lock button in the bottom-right (normal cards) or far-right (compact cards). On click, call `onToggleLock` (stop propagation to prevent card click).
+- **`CalendarDay.tsx`**: Pass `onToggleLock` and `canEdit` props down to `EntryCard`. The handler calls a Supabase update to toggle `is_locked`.
+- **`Timeline.tsx`**: Pass `isEditor` down to `CalendarDay`.
 
 ---
 
-## 2. Short Entry Condensed Layout
+## 2. Weather Column (Dedicated Right Column)
 
-### Problem
-Line 348 in `CalendarDay.tsx`: `const height = Math.max(60, ...)` forces a 60px minimum. At 80px/hour, a 15-min entry should be 20px but gets forced to 60px, which misrepresents its actual duration.
+### Current state
+Weather badge is absolutely positioned inside the entry card container (`right-2 top-2` at line 413-417 of CalendarDay).
 
-### Fix
-- **Remove the 60px minimum height** in `CalendarDay.tsx` -- let `height` be the true calculated value.
-- **`EntryCard.tsx`**: Detect when the card is "compact" (height below a threshold, e.g. 50px). In compact mode:
-  - Switch to a single-line horizontal layout: `[emoji] Name | 09:00-09:15`
-  - Remove the category badge, distance, and vote elements.
-  - Use smaller text (`text-[11px]`), minimal padding (`p-1 px-2`).
-  - Remove the background image display.
-- Pass a `compact` boolean prop from `CalendarDay` to `EntryCard` based on the calculated pixel height.
+### New layout
+- Add a dedicated column to the **right** of the entry cards area (approx 44px wide).
+- This column shows weather badges at every hour where weather data is available, not just at entry positions.
+- Weather badges are positioned at their corresponding hour offset (same vertical positioning as the time gutter on the left).
+- This gives a full hourly weather strip alongside the timeline.
 
 ### Changes
-- **`CalendarDay.tsx`**: Remove `Math.max(60, ...)`, pass `isCompact={height < 50}` to `EntryCard`.
-- **`EntryCard.tsx`**: Add `isCompact` prop. When true, render the condensed single-line layout.
+- **`CalendarDay.tsx`**:
+  - Remove the weather badge from inside the entry card wrapper (remove lines 413-417).
+  - Add a new absolute-positioned weather column on the right side of the timeline container.
+  - Render a `WeatherBadge` for each hour that has weather data, positioned vertically by hour offset.
+  - Adjust the entry cards area to leave room on the right (e.g. `pr-12` or `right: 48px`).
 
 ---
 
-## 3. Return Flight Double-Prompt Bug
+## 3. Timezone Labels Outside Cards (Sticky Gutter Header)
 
-### Root cause
-In `EntryForm.tsx` line 536: `if (isFlight && !isEditing)` triggers the return flight prompt after every new flight save. When the user confirms a return flight, `handleReturnFlightConfirm` sets `categoryId` to `'flight'`, opens the form again, and when that flight is saved, it hits the same condition again -- prompting for yet another return.
+### Clarification
+The user is **not** asking to move event-specific times (like "09:00 -- 10:30") outside the card. They want the **timezone gutter labels** (the hourly time labels on the left side, and the TZ abbreviation) to be clearly outside and separate from the entry cards, with a sticky TZ indicator at the top.
 
-### Fix
-- Add an `isReturnFlight` state flag (boolean, default `false`).
-- In `handleReturnFlightConfirm`, set `isReturnFlight = true`.
-- Change the prompt condition to: `if (isFlight && !isEditing && !isReturnFlight)`.
-- In `reset()`, set `isReturnFlight = false`.
+### Current state
+- `TimeSlotGrid` renders hour labels at `left-0` with `text-[10px]`. The TZ abbreviation labels are positioned at `-top-5`.
+- Entry cards in `CalendarDay` use `ml-10` or `ml-16` to offset from the gutter, but the gutter labels live inside the same container.
 
 ### Changes
-- **`EntryForm.tsx`**: Add `isReturnFlight` state, guard the prompt, reset it in `reset()`.
-
----
-
-## 4. Ideas Panel as Persistent Sidebar (Desktop) / FAB + Overlay (Mobile)
-
-### Current implementation
-`IdeasPanel` uses a Radix `Sheet` overlay. The toggle button is in the header.
-
-### New behavior
-- **Desktop**: The Ideas panel becomes a persistent sidebar on the right side of the timeline. When toggled open, the main timeline area shrinks to make room (flexbox layout, not overlay). Width: ~320px.
-- **Mobile**: A floating action button (FAB) in the bottom-right corner with a lightbulb emoji. Tapping it opens a full-screen drawer/overlay.
-- **Remove** the lightbulb button from the `TimelineHeader` (it moves to the FAB on mobile and the sidebar toggle on desktop).
-
-### Changes
-- **`IdeasPanel.tsx`**: Replace the `Sheet` with a conditional layout:
-  - Desktop: A `div` with fixed width that sits alongside the timeline in a flex container.
-  - Mobile: Keep the `Sheet` (full overlay).
-- **`Timeline.tsx`**: Wrap the main content area and `IdeasPanel` in a flex row. Add the FAB button (mobile only) in the bottom-right corner with the lightbulb emoji.
-- **`TimelineHeader.tsx`**: Remove the Ideas toggle button from the header (or keep it for desktop only as a subtle toggle).
-- Use the existing `useIsMobile()` hook to switch between sidebar and overlay modes.
-
-### FAB design
-- Fixed position, bottom-right (e.g. `bottom-20 right-6` to sit above the zoom controls).
-- Round button with `💡` emoji, with the count badge overlay.
-- Only visible on mobile.
+- **`TimeSlotGrid.tsx`**: Add a sticky header element at the top of the gutter that shows the timezone abbreviation(s) (e.g., "GMT+0" or "GMT+0 | CET+1"). This uses `position: sticky; top: ...` so it stays visible while scrolling through the day.
+- **`CalendarDay.tsx`**: Ensure the sticky TZ label is positioned in the gutter area (the `ml-10`/`ml-16` gap) and persists while scrolling. Use `z-index` to keep it above entry cards.
+- The sticky label format: e.g., "GMT+0" for single timezone, or "GMT+0 | CET+1" for dual timezone days.
 
 ---
 
 ## Technical Details
 
-### Files to create
-None -- all changes are edits to existing files.
-
 ### Files to edit
 
 | File | Changes |
 |------|---------|
-| `src/components/timeline/TimeSlotGrid.tsx` | Add dual timezone props, render two columns of labels with overlap logic |
-| `src/components/timeline/CalendarDay.tsx` | Pass timezone info to grid, remove 60px min height, pass `isCompact` to cards, widen gutter for dual TZ |
-| `src/components/timeline/EntryCard.tsx` | Add `isCompact` prop with condensed single-line layout |
-| `src/components/timeline/EntryForm.tsx` | Add `isReturnFlight` flag to prevent double prompt |
-| `src/components/timeline/IdeasPanel.tsx` | Replace Sheet with flex sidebar (desktop) / Sheet (mobile) |
-| `src/components/timeline/TimelineHeader.tsx` | Remove or adjust Ideas toggle button |
-| `src/pages/Timeline.tsx` | Compute day timezone map from flights, flex layout for sidebar, add mobile FAB |
+| `src/components/timeline/EntryCard.tsx` | Add lock toggle button (bottom-right for normal, far-right for compact). Add `onToggleLock` and `canEdit` props. Move time to left side in compact mode. |
+| `src/components/timeline/CalendarDay.tsx` | Remove weather from inside card, add weather column on right side with hourly badges. Pass lock toggle handler and `canEdit` to `EntryCard`. Add sticky TZ header in gutter. |
+| `src/components/timeline/TimeSlotGrid.tsx` | Add sticky TZ abbreviation header at top of gutter. |
+| `src/pages/Timeline.tsx` | Pass `isEditor` to `CalendarDay`. |
 
-### Timezone computation pseudocode
+### Lock toggle handler (in CalendarDay or Timeline)
 
 ```text
-let currentTz = trip.timezone
-
-for each day in trip:
-  let flightsToday = entries on this day where category = 'flight'
-  
-  if flightsToday.length == 0:
-    dayTzMap[day] = { activeTz: currentTz }
-  else:
-    for each flight in flightsToday:
-      dayTzMap[day] = {
-        originTz: currentTz,
-        destinationTz: flight.arrival_tz,
-        flightStartHour: getHour(flight.start_time),
-        flightEndHour: getHour(flight.end_time),
-        overlapStart: flightStartHour - 1.5,
-        overlapEnd: flightEndHour + 1.5
-      }
-      currentTz = flight.arrival_tz  // switch for subsequent days
+onToggleLock(entryId):
+  1. Find entry by id
+  2. Update entries table: set is_locked = !current_value
+  3. Refetch entries (or optimistically update local state)
 ```
 
+### Weather column layout
+
+```text
+Timeline container (relative):
+  [Gutter: 40-64px] [Entry cards area] [Weather column: 44px]
+  
+  Weather column:
+    For each hour from startHour to endHour:
+      If weatherData exists for this date+hour:
+        Position WeatherBadge at (hour - startHour) * pixelsPerHour
+```
+
+### Compact entry layout change
+
+```text
+Current compact:  [emoji] Name ........... [time range] [lock?]
+New compact:      [emoji] Name [time range] ........... [lock icon]
+                  ^-- time moves left, lock takes far right
+```
