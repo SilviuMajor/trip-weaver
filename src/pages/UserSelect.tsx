@@ -51,8 +51,8 @@ const UserSelect = () => {
         className="w-full max-w-sm"
       >
         <div className="mb-10 text-center">
-          <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-            <MapPin className="h-8 w-8 text-primary" />
+          <div className="mb-4 inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/15 text-4xl">
+            🧳
           </div>
           <h1 className="mb-2 text-3xl font-bold tracking-tight">
             {tripName || 'Trip Planner'}
@@ -82,9 +82,12 @@ const UserSelect = () => {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.3, delay: index * 0.05 }}
                 onClick={() => handleSelectUser(user)}
-                className="flex w-full items-center gap-3 rounded-lg border border-border bg-card p-4 text-left transition-all hover:border-primary/30 hover:bg-primary/5 hover:shadow-md active:scale-[0.98]"
+                className="flex w-full items-center gap-3 rounded-2xl border-2 border-border bg-card p-4 text-left transition-all hover:border-primary/40 hover:bg-primary/5 hover:shadow-lg active:scale-[0.98]"
               >
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                <div
+                  className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white"
+                  style={{ backgroundColor: `hsl(${(index * 47 + 20) % 360}, 65%, 55%)` }}
+                >
                   {user.name.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1">

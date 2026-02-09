@@ -25,15 +25,9 @@ const VoteButton = ({ optionId, userId, voteCount, hasVoted, locked, onVoteChang
 
     try {
       if (hasVoted) {
-        await supabase
-          .from('votes')
-          .delete()
-          .eq('option_id', optionId)
-          .eq('user_id', userId);
+        await supabase.from('votes').delete().eq('option_id', optionId).eq('user_id', userId);
       } else {
-        await supabase
-          .from('votes')
-          .insert({ option_id: optionId, user_id: userId });
+        await supabase.from('votes').insert({ option_id: optionId, user_id: userId });
       }
       onVoteChange?.();
     } finally {
@@ -47,10 +41,10 @@ const VoteButton = ({ optionId, userId, voteCount, hasVoted, locked, onVoteChang
       onClick={handleVote}
       disabled={busy}
       className={cn(
-        'flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors',
+        'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
         hasVoted
-          ? 'bg-primary text-primary-foreground'
-          : 'bg-muted text-muted-foreground hover:bg-primary/10'
+          ? 'bg-primary text-primary-foreground shadow-sm'
+          : 'bg-secondary text-secondary-foreground hover:bg-primary/20'
       )}
     >
       <ThumbsUp className="h-3 w-3" />

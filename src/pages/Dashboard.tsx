@@ -88,8 +88,8 @@ const Dashboard = () => {
             animate={{ opacity: 1, y: 0 }}
             className="flex flex-col items-center justify-center py-20 text-center"
           >
-            <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-              <MapPin className="h-8 w-8 text-primary" />
+            <div className="mb-4 inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/15 text-4xl">
+              🗺️
             </div>
             <h2 className="mb-2 text-xl font-bold">No trips yet</h2>
             <p className="mb-6 text-sm text-muted-foreground">
@@ -109,15 +109,15 @@ const Dashboard = () => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
                 onClick={() => navigate(`/trip/${trip.id}`)}
-                className="flex w-full items-start gap-4 rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/30 hover:shadow-md"
+                className="flex w-full items-start gap-4 rounded-2xl border-2 border-border bg-card p-4 text-left transition-all hover:border-primary/40 hover:shadow-lg"
               >
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-                  <Calendar className="h-6 w-6 text-primary" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/15 text-2xl">
+                  ✈️
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate font-display text-lg font-bold">{trip.name}</h3>
                   {trip.destination && (
-                    <p className="truncate text-sm text-muted-foreground">{trip.destination}</p>
+                    <p className="truncate text-sm text-muted-foreground">📍 {trip.destination}</p>
                   )}
                   <p className="text-sm text-muted-foreground">
                     {trip.start_date && trip.end_date
