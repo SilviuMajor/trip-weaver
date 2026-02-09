@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
+import { getDateInTimezone } from '@/lib/timezoneUtils';
 import { ArrowDown, ZoomIn, ZoomOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -179,7 +180,8 @@ const Timeline = () => {
   const getEntriesForDay = (day: Date): EntryWithOptions[] => {
     const dayStr = format(day, 'yyyy-MM-dd');
     return entries.filter(entry => {
-      const entryDay = format(new Date(entry.start_time), 'yyyy-MM-dd');
+      // Use trip timezone to determine which day this entry falls on
+      const entryDay = getDateInTimezone(entry.start_time, tripTimezone);
       return entryDay === dayStr;
     });
   };

@@ -173,7 +173,7 @@ const EntryCard = ({
           )}>
             <Plane className="h-3 w-3" />
             <span>
-              {option.departure_location} {formatTimeInTz(startTime, option.departure_tz)} → {option.arrival_location} {formatTimeInTz(endTime, option.arrival_tz)}
+              {option.departure_location?.split(' - ')[0]}{option.departure_terminal ? ` T${option.departure_terminal}` : ''} {formatTimeInTz(startTime, option.departure_tz)} → {option.arrival_location?.split(' - ')[0]}{option.arrival_terminal ? ` T${option.arrival_terminal}` : ''} {formatTimeInTz(endTime, option.arrival_tz)}
             </span>
           </div>
         ) : !isTransfer && (

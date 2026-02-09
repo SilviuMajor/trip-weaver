@@ -3,6 +3,7 @@ import { format, isToday, isPast, addMinutes } from 'date-fns';
 import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
+import { localToUTC } from '@/lib/timezoneUtils';
 import { computeOverlapLayout } from '@/lib/overlapLayout';
 import { Plus } from 'lucide-react';
 import { useDragResize } from '@/hooks/useDragResize';
@@ -98,7 +99,6 @@ const CalendarDay = ({
   // Drag-to-resize/move
   const handleDragCommit = useCallback((entryId: string, newStartHour: number, newEndHour: number) => {
     if (!onEntryTimeChange) return;
-    // Convert hours back to ISO strings using the day's date
     const dateStr = format(dayDate, 'yyyy-MM-dd');
     const startMinutes = Math.round(newStartHour * 60);
     const endMinutes = Math.round(newEndHour * 60);
@@ -106,10 +106,13 @@ const CalendarDay = ({
     const sM = startMinutes % 60;
     const eH = Math.floor(endMinutes / 60);
     const eM = endMinutes % 60;
-    const newStartIso = `${dateStr}T${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}:00+00:00`;
-    const newEndIso = `${dateStr}T${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}:00+00:00`;
+    const startTimeStr = `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`;
+    const endTimeStr = `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`;
+    // Convert local hours in tripTimezone to proper UTC
+    const newStartIso = localToUTC(dateStr, startTimeStr, tripTimezone);
+    const newEndIso = localToUTC(dateStr, endTimeStr, tripTimezone);
     onEntryTimeChange(entryId, newStartIso, newEndIso);
-  }, [onEntryTimeChange, dayDate]);
+  }, [onEntryTimeChange, dayDate, tripTimezone]);
 
   const { dragState, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
     pixelsPerHour: PIXELS_PER_HOUR,
