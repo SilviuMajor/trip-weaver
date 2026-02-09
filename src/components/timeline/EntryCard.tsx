@@ -1,7 +1,9 @@
+import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { MapPin, Clock, Plane, ArrowRight, Lock, LockOpen } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
 
 import { findCategory } from '@/lib/categories';
 import VoteButton from './VoteButton';
@@ -100,6 +102,46 @@ const EntryCard = ({
   const catName = getCategoryName(option.category);
   const isTransfer = option.category === 'transfer';
 
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState(option.name);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditingName && nameInputRef.current) {
+      nameInputRef.current.focus();
+      nameInputRef.current.select();
+    }
+  }, [isEditingName]);
+
+  const handleNameClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditedName(option.name);
+    setIsEditingName(true);
+  };
+
+  const handleNameSave = async () => {
+    const trimmed = editedName.trim();
+    if (!trimmed || trimmed === option.name) {
+      setIsEditingName(false);
+      return;
+    }
+    await supabase
+      .from('entry_options')
+      .update({ name: trimmed })
+      .eq('id', option.id);
+    setIsEditingName(false);
+    onVoteChange(); // triggers data refresh
+  };
+
+  const handleNameKeyDown = (e: React.KeyboardEvent) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      handleNameSave();
+    } else if (e.key === 'Escape') {
+      setIsEditingName(false);
+    }
+  };
+
   const tintBg = isProcessing ? `${catColor}10` : `${catColor}18`;
 
   const handleLockClick = (e: React.MouseEvent) => {
@@ -134,7 +176,24 @@ const EntryCard = ({
       >
         <div className="relative z-10 flex w-full items-center gap-1.5 px-2 py-0.5">
           <span className="text-xs shrink-0">{catEmoji}</span>
-          <span className="truncate text-[11px] font-semibold leading-tight">{option.name}</span>
+          {isEditingName ? (
+            <input
+              ref={nameInputRef}
+              value={editedName}
+              onChange={(e) => setEditedName(e.target.value)}
+              onBlur={handleNameSave}
+              onKeyDown={handleNameKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              className="truncate text-[11px] font-semibold leading-tight bg-transparent border-b border-primary outline-none min-w-0 flex-1"
+            />
+          ) : (
+            <span
+              className="truncate text-[11px] font-semibold leading-tight cursor-text"
+              onClick={handleNameClick}
+            >
+              {option.name}
+            </span>
+          )}
           <span className="shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
             {formatTime(startTime)}–{formatTime(endTime)}
           </span>
@@ -220,13 +279,37 @@ const EntryCard = ({
         </div>
 
         {/* Title with emoji */}
-        <h3 className={cn(
-          'mb-2 flex items-center gap-2 font-display font-bold leading-tight',
-          isProcessing ? 'text-sm' : 'text-lg'
-        )}>
-          {!option.category && <span className="text-xl">{catEmoji}</span>}
-          {option.name}
-        </h3>
+        {isEditingName ? (
+          <div className={cn(
+            'mb-2 flex items-center gap-2 font-display font-bold leading-tight',
+            isProcessing ? 'text-sm' : 'text-lg'
+          )}>
+            {!option.category && <span className="text-xl">{catEmoji}</span>}
+            <input
+              ref={nameInputRef}
+              value={editedName}
+              onChange={(e) => setEditedName(e.target.value)}
+              onBlur={handleNameSave}
+              onKeyDown={handleNameKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                'bg-transparent border-b border-primary outline-none min-w-0 flex-1',
+                firstImage ? 'text-white' : 'text-foreground'
+              )}
+            />
+          </div>
+        ) : (
+          <h3
+            className={cn(
+              'mb-2 flex items-center gap-2 font-display font-bold leading-tight cursor-text',
+              isProcessing ? 'text-sm' : 'text-lg'
+            )}
+            onClick={handleNameClick}
+          >
+            {!option.category && <span className="text-xl">{catEmoji}</span>}
+            {option.name}
+          </h3>
+        )}
 
         {/* Transfer FROM → TO display */}
         {isTransfer && (option.departure_location || option.arrival_location) && (

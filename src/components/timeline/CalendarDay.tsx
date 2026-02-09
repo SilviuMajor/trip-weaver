@@ -542,8 +542,8 @@ const CalendarDay = ({
               );
             })()}
 
-            {/* Weather column on the far left */}
-            <div className="absolute top-0 bottom-0 z-[5]" style={{ left: dayFlights.length > 0 ? -80 : -56, width: 44 }}>
+            {/* Weather column — directly under time labels */}
+            <div className="absolute top-0 bottom-0 z-[5]" style={{ left: dayFlights.length > 0 ? -68 : -46, width: dayFlights.length > 0 ? 52 : 30 }}>
               {Array.from({ length: endHour - startHour }, (_, i) => startHour + i).map(hour => {
                 const dateStr = format(dayDate, 'yyyy-MM-dd');
                 const w = weatherData.find(wd => wd.date === dateStr && wd.hour === hour);
