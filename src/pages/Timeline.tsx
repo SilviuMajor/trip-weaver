@@ -36,6 +36,8 @@ const Timeline = () => {
 
   // Entry form state
   const [entryFormOpen, setEntryFormOpen] = useState(false);
+  const [editEntry, setEditEntry] = useState<EntryWithOptions | null>(null);
+  const [editOption, setEditOption] = useState<EntryOption | null>(null);
 
   // Zoom
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -298,15 +300,29 @@ const Timeline = () => {
             userVotes={userVotes}
             onVoteChange={fetchData}
             onImageUploaded={fetchData}
+            onEdit={(entry, option) => {
+              setEditEntry(entry);
+              setEditOption(option);
+              setEntryFormOpen(true);
+            }}
+            onDeleted={fetchData}
           />
 
           {/* Entry form */}
           <EntryForm
             open={entryFormOpen}
-            onOpenChange={setEntryFormOpen}
+            onOpenChange={(open) => {
+              setEntryFormOpen(open);
+              if (!open) {
+                setEditEntry(null);
+                setEditOption(null);
+              }
+            }}
             tripId={trip.id}
             onCreated={fetchData}
             trip={trip}
+            editEntry={editEntry}
+            editOption={editOption}
           />
         </>
       )}

@@ -249,6 +249,7 @@ export type Database = {
         Row: {
           category_presets: Json | null
           created_at: string
+          destination: string | null
           duration_days: number | null
           end_date: string | null
           id: string
@@ -262,6 +263,7 @@ export type Database = {
         Insert: {
           category_presets?: Json | null
           created_at?: string
+          destination?: string | null
           duration_days?: number | null
           end_date?: string | null
           id?: string
@@ -275,6 +277,7 @@ export type Database = {
         Update: {
           category_presets?: Json | null
           created_at?: string
+          destination?: string | null
           duration_days?: number | null
           end_date?: string | null
           id?: string
