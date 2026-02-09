@@ -450,6 +450,8 @@ export type Database = {
           humidity: number | null
           icon_code: string | null
           id: string
+          latitude: number | null
+          longitude: number | null
           temp_c: number | null
           trip_id: string
           updated_at: string
@@ -463,6 +465,8 @@ export type Database = {
           humidity?: number | null
           icon_code?: string | null
           id?: string
+          latitude?: number | null
+          longitude?: number | null
           temp_c?: number | null
           trip_id: string
           updated_at?: string
@@ -476,6 +480,8 @@ export type Database = {
           humidity?: number | null
           icon_code?: string | null
           id?: string
+          latitude?: number | null
+          longitude?: number | null
           temp_c?: number | null
           trip_id?: string
           updated_at?: string

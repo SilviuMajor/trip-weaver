@@ -114,6 +114,8 @@ export interface WeatherData {
   icon_code: string | null;
   humidity: number | null;
   wind_speed: number | null;
+  latitude: number | null;
+  longitude: number | null;
   created_at: string;
   updated_at: string;
 }

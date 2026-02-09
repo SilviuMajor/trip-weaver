@@ -19,6 +19,13 @@ function mapWeatherCode(code: number): { condition: string; iconCode: string } {
   return { condition: 'Unknown', iconCode: 'clear' };
 }
 
+interface Segment {
+  lat: number;
+  lng: number;
+  startDate: string;
+  endDate: string;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -30,40 +37,33 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { tripId, lat, lng } = await req.json();
-    if (!tripId || lat == null || lng == null) {
-      throw new Error('tripId, lat, and lng are required');
+    const body = await req.json();
+    const { tripId, segments, lat, lng } = body;
+
+    if (!tripId) {
+      throw new Error('tripId is required');
     }
 
-    console.log(`Fetching weather for trip: ${tripId}, coords: ${lat},${lng}`);
+    // Support both new segments API and legacy single lat/lng
+    let locationSegments: Segment[];
 
-    // Get trip date range
-    const { data: trip, error: tripError } = await supabase
-      .from('trips')
-      .select('start_date, end_date')
-      .eq('id', tripId)
-      .single();
-
-    if (tripError) throw tripError;
-    if (!trip) throw new Error('Trip not found');
-
-    // Call Open-Meteo API (free, no key needed)
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m&start_date=${trip.start_date}&end_date=${trip.end_date}&timezone=auto`;
-
-    console.log(`Open-Meteo URL: ${url}`);
-
-    const response = await fetch(url);
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Open-Meteo API error [${response.status}]: ${text}`);
+    if (segments && Array.isArray(segments) && segments.length > 0) {
+      locationSegments = segments;
+    } else if (lat != null && lng != null) {
+      // Legacy: single location for the whole trip
+      const { data: trip, error: tripError } = await supabase
+        .from('trips')
+        .select('start_date, end_date')
+        .eq('id', tripId)
+        .single();
+      if (tripError) throw tripError;
+      if (!trip) throw new Error('Trip not found');
+      locationSegments = [{ lat, lng, startDate: trip.start_date, endDate: trip.end_date }];
+    } else {
+      throw new Error('Either segments array or lat/lng are required');
     }
 
-    const weatherData = await response.json();
-    if (!weatherData.hourly) {
-      throw new Error('No hourly data returned from Open-Meteo');
-    }
-
-    const { time, temperature_2m, weather_code, relative_humidity_2m, wind_speed_10m } = weatherData.hourly;
+    console.log(`Fetching weather for trip: ${tripId}, ${locationSegments.length} segment(s)`);
 
     // Delete existing weather data for this trip (clean slate)
     await supabase
@@ -71,44 +71,69 @@ Deno.serve(async (req) => {
       .delete()
       .eq('trip_id', tripId);
 
-    // Prepare records
-    const records = [];
-    for (let i = 0; i < time.length; i++) {
-      const dateTime = new Date(time[i]);
-      const dateStr = time[i].substring(0, 10); // YYYY-MM-DD
-      const hour = dateTime.getHours();
-      const { condition, iconCode } = mapWeatherCode(weather_code[i]);
+    let totalRecords = 0;
 
-      records.push({
-        trip_id: tripId,
-        date: dateStr,
-        hour,
-        temp_c: temperature_2m[i],
-        condition,
-        icon_code: iconCode,
-        humidity: relative_humidity_2m[i],
-        wind_speed: wind_speed_10m[i],
-      });
-    }
+    for (const seg of locationSegments) {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${seg.lat}&longitude=${seg.lng}&hourly=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m&start_date=${seg.startDate}&end_date=${seg.endDate}&timezone=auto`;
+      console.log(`Open-Meteo URL: ${url}`);
 
-    console.log(`Inserting ${records.length} weather records`);
-
-    // Insert in batches of 100
-    for (let i = 0; i < records.length; i += 100) {
-      const batch = records.slice(i, i + 100);
-      const { error: insertError } = await supabase
-        .from('weather_cache')
-        .insert(batch);
-
-      if (insertError) {
-        console.error('Insert error:', insertError);
+      const response = await fetch(url);
+      if (!response.ok) {
+        const text = await response.text();
+        console.error(`Open-Meteo API error [${response.status}]: ${text}`);
+        continue;
       }
+
+      const weatherData = await response.json();
+      if (!weatherData.hourly) {
+        console.error('No hourly data returned from Open-Meteo for segment', seg);
+        continue;
+      }
+
+      const { time, temperature_2m, weather_code, relative_humidity_2m, wind_speed_10m } = weatherData.hourly;
+
+      const records = [];
+      for (let i = 0; i < time.length; i++) {
+        const dateTime = new Date(time[i]);
+        const dateStr = time[i].substring(0, 10);
+        const hour = dateTime.getHours();
+        const { condition, iconCode } = mapWeatherCode(weather_code[i]);
+
+        records.push({
+          trip_id: tripId,
+          date: dateStr,
+          hour,
+          temp_c: temperature_2m[i],
+          condition,
+          icon_code: iconCode,
+          humidity: relative_humidity_2m[i],
+          wind_speed: wind_speed_10m[i],
+          latitude: seg.lat,
+          longitude: seg.lng,
+        });
+      }
+
+      console.log(`Inserting ${records.length} weather records for segment (${seg.lat},${seg.lng})`);
+
+      // Insert in batches of 100
+      for (let i = 0; i < records.length; i += 100) {
+        const batch = records.slice(i, i + 100);
+        const { error: insertError } = await supabase
+          .from('weather_cache')
+          .insert(batch);
+
+        if (insertError) {
+          console.error('Insert error:', insertError);
+        }
+      }
+
+      totalRecords += records.length;
     }
 
     return new Response(
       JSON.stringify({
-        message: `Cached ${records.length} weather records`,
-        records: records.length,
+        message: `Cached ${totalRecords} weather records across ${locationSegments.length} location(s)`,
+        records: totalRecords,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
