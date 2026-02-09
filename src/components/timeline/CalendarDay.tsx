@@ -110,62 +110,59 @@ const CalendarDay = ({
   const containerHeight = totalHours * PIXELS_PER_HOUR;
 
   // Drag-to-resize/move
-  const handleDragCommit = useCallback((entryId: string, newStartHour: number, newEndHour: number) => {
+  const handleDragCommit = useCallback((entryId: string, newStartHour: number, newEndHour: number, tz?: string) => {
     if (!onEntryTimeChange) return;
     const entry = sortedEntries.find(e => e.id === entryId);
-    // Don't allow dragging locked entries
     if (entry?.is_locked) return;
 
+    const commitTz = tz || activeTz || tripTimezone;
     const dateStr = format(dayDate, 'yyyy-MM-dd');
-    const startMinutes = Math.round(newStartHour * 60);
-    const endMinutes = Math.round(newEndHour * 60);
-    const sH = Math.floor(startMinutes / 60);
-    const sM = startMinutes % 60;
-    const eH = Math.floor(endMinutes / 60);
-    const eM = endMinutes % 60;
-    const startTimeStr = `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`;
-    const endTimeStr = `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`;
-    const newStartIso = localToUTC(dateStr, startTimeStr, tripTimezone);
-    const newEndIso = localToUTC(dateStr, endTimeStr, tripTimezone);
+
+    const toTimeStr = (hour: number) => {
+      const minutes = Math.round(hour * 60);
+      const h = Math.floor(minutes / 60);
+      const m = minutes % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+
+    const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), commitTz);
+    const newEndIso = localToUTC(dateStr, toTimeStr(newEndHour), commitTz);
     onEntryTimeChange(entryId, newStartIso, newEndIso);
 
     // Move linked processing entries if this is a flight
     if (entry) {
+      const primaryOpt = entry.options[0];
       const linkedEntries = allEntries.filter(e => e.linked_flight_id === entry.id);
-      const origStartHour = getHourInTimezone(entry.start_time, tripTimezone);
-      const origEndHour = getHourInTimezone(entry.end_time, tripTimezone);
 
       linkedEntries.forEach(linked => {
-        const linkedStartHour = getHourInTimezone(linked.start_time, tripTimezone);
-        const linkedEndHour = getHourInTimezone(linked.end_time, tripTimezone);
+        // Check-in uses departure TZ, checkout uses arrival TZ
+        const linkedTz = linked.linked_type === 'checkin'
+          ? (primaryOpt?.departure_tz || commitTz)
+          : (primaryOpt?.arrival_tz || commitTz);
+
+        const linkedStartHour = getHourInTimezone(linked.start_time, linkedTz);
+        const linkedEndHour = getHourInTimezone(linked.end_time, linkedTz);
+        const duration = linkedEndHour - linkedStartHour;
 
         let newLinkedStart: number;
         let newLinkedEnd: number;
 
         if (linked.linked_type === 'checkin') {
-          // Check-in ends at flight start
-          const duration = linkedEndHour - linkedStartHour;
           newLinkedEnd = newStartHour;
           newLinkedStart = newLinkedEnd - duration;
         } else {
-          // Checkout starts at flight end
-          const duration = linkedEndHour - linkedStartHour;
           newLinkedStart = newEndHour;
           newLinkedEnd = newLinkedStart + duration;
         }
 
-        const lsMin = Math.round(newLinkedStart * 60);
-        const leMin = Math.round(newLinkedEnd * 60);
-        const lsH = Math.floor(lsMin / 60);
-        const lsM = lsMin % 60;
-        const leH = Math.floor(leMin / 60);
-        const leM = leMin % 60;
-        const lStartStr = `${String(lsH).padStart(2, '0')}:${String(lsM).padStart(2, '0')}`;
-        const lEndStr = `${String(leH).padStart(2, '0')}:${String(leM).padStart(2, '0')}`;
-        onEntryTimeChange(linked.id, localToUTC(dateStr, lStartStr, tripTimezone), localToUTC(dateStr, lEndStr, tripTimezone));
+        onEntryTimeChange(
+          linked.id,
+          localToUTC(dateStr, toTimeStr(newLinkedStart), linkedTz),
+          localToUTC(dateStr, toTimeStr(newLinkedEnd), linkedTz),
+        );
       });
     }
-  }, [onEntryTimeChange, dayDate, tripTimezone, sortedEntries, allEntries]);
+  }, [onEntryTimeChange, dayDate, tripTimezone, activeTz, sortedEntries, allEntries]);
 
   const { dragState, wasDraggedRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
     pixelsPerHour: PIXELS_PER_HOUR,
@@ -444,8 +441,14 @@ const CalendarDay = ({
                 const travelSeg = nextEntry ? getTravelSegment(entry.id, nextEntry.id) : null;
                 const showTravelSeg = travelSeg && nextEntry && !hasTransferBetween(entry, nextEntry);
 
-                const origStartHour = getHourInTimezone(entry.start_time, tripTimezone);
-                let origEndHour = getHourInTimezone(entry.end_time, tripTimezone);
+                // Use the same resolved TZ for drag init as for visual positioning
+                const dragTz = primaryOption.category === 'flight'
+                  ? (primaryOption.departure_tz || resolvedTz)
+                  : resolvedTz;
+                const origStartHour = getHourInTimezone(entry.start_time, dragTz);
+                let origEndHour = primaryOption.category === 'flight'
+                  ? getHourInTimezone(entry.end_time, primaryOption.arrival_tz || dragTz)
+                  : getHourInTimezone(entry.end_time, dragTz);
                 if (origEndHour < origStartHour) origEndHour = 24;
 
                 const canDrag = onEntryTimeChange && !isLocked;
@@ -480,8 +483,8 @@ const CalendarDay = ({
                         {canDrag && !flightGroup && (
                           <div
                             className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
-                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartHour, origEndHour)}
-                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartHour, origEndHour)}
+                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartHour, origEndHour, dragTz)}
+                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartHour, origEndHour, dragTz)}
                             onTouchMove={onTouchMove}
                             onTouchEnd={onTouchEnd}
                           />
@@ -502,10 +505,10 @@ const CalendarDay = ({
                               if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
                             }}
                             onDragStart={canDrag ? (e) => {
-                              onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour);
+                              onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
                             } : undefined}
                             onTouchDragStart={canDrag ? (e) => {
-                              onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour);
+                              onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
                             } : undefined}
                             onTouchDragMove={onTouchMove}
                             onTouchDragEnd={onTouchEnd}
@@ -536,10 +539,10 @@ const CalendarDay = ({
                             canEdit={isEditor}
                             onToggleLock={() => onToggleLock?.(entry.id, !!isLocked)}
                             onDragStart={canDrag ? (e) => {
-                              onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour);
+                              onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
                             } : undefined}
                             onTouchDragStart={canDrag ? (e) => {
-                              onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour);
+                              onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
                             } : undefined}
                             onTouchDragMove={onTouchMove}
                             onTouchDragEnd={onTouchEnd}
@@ -550,8 +553,8 @@ const CalendarDay = ({
                         {canDrag && !flightGroup && (
                           <div
                             className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
-                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartHour, origEndHour)}
-                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartHour, origEndHour)}
+                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz)}
+                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz)}
                             onTouchMove={onTouchMove}
                             onTouchEnd={onTouchEnd}
                           />
@@ -559,20 +562,77 @@ const CalendarDay = ({
                       </div>
                     </div>
 
-                    {/* + button between entries */}
-                    {onAddBetween && (
-                      <div
-                        className="absolute left-0 z-[15] flex w-10 items-center justify-center"
-                        style={{ top: top + height - 2 }}
-                      >
-                        <button
-                          onClick={() => onAddBetween(entry.end_time)}
-                          className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                        >
-                          <Plus className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
+                    {/* + button between/after entries */}
+                    {onAddBetween && (() => {
+                      // Find next non-linked entry
+                      const remainingEntries = sortedEntries.slice(index + 1).filter(e => !linkedEntryIds.has(e.id));
+                      const nextVisibleEntry = remainingEntries[0];
+                      const isLastVisible = !nextVisibleEntry;
+
+                      if (isLastVisible) {
+                        // After last entry
+                        return (
+                          <div
+                            className="absolute left-0 z-[15] flex w-10 items-center justify-center"
+                            style={{ top: top + height + 8 }}
+                          >
+                            <button
+                              onClick={() => onAddBetween(entry.end_time)}
+                              className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      // Gap between this entry and next
+                      const thisEndHour = entryEndHour;
+                      const nextResolvedTz = (() => {
+                        let tz = activeTz || tripTimezone;
+                        if (dayFlights.length > 0 && dayFlights[0].flightEndUtc) {
+                          const nUtc = new Date(nextVisibleEntry.start_time).getTime();
+                          const fEnd = new Date(dayFlights[0].flightEndUtc).getTime();
+                          tz = nUtc >= fEnd ? dayFlights[0].destinationTz : dayFlights[0].originTz;
+                        }
+                        return tz;
+                      })();
+                      const nextStartHour = getHourInTimezone(nextVisibleEntry.start_time, nextResolvedTz);
+                      const gapHours = nextStartHour - thisEndHour;
+
+                      if (gapHours > 0.25) {
+                        // Visible gap — place + in middle
+                        const midTop = top + height + (gapHours * PIXELS_PER_HOUR / 2) - 10;
+                        return (
+                          <div
+                            className="absolute left-0 z-[15] flex w-10 items-center justify-center"
+                            style={{ top: midTop }}
+                          >
+                            <button
+                              onClick={() => onAddBetween(entry.end_time)}
+                              className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </button>
+                          </div>
+                        );
+                      } else {
+                        // Back-to-back — thin plus line
+                        return (
+                          <div
+                            className="absolute left-0 z-[15] flex w-10 items-center justify-center"
+                            style={{ top: top + height - 2 }}
+                          >
+                            <button
+                              onClick={() => onAddBetween(entry.end_time)}
+                              className="flex h-4 w-4 items-center justify-center rounded-full border border-dashed border-muted-foreground/20 bg-background text-muted-foreground/40 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                            >
+                              <Plus className="h-2.5 w-2.5" />
+                            </button>
+                          </div>
+                        );
+                      }
+                    })()}
 
                     {/* Travel segment connector */}
                     {showTravelSeg && (

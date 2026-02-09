@@ -213,7 +213,15 @@ const Timeline = () => {
     if (!trip) return map;
 
     const days = getDays();
+
+    // Auto-detect starting TZ from first flight's departure airport
     let currentTz = tripTimezone;
+    const allFlightEntries = scheduledEntries
+      .filter(e => e.options[0]?.category === 'flight' && e.options[0]?.departure_tz)
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+    if (allFlightEntries.length > 0) {
+      currentTz = allFlightEntries[0].options[0].departure_tz!;
+    }
 
     for (const day of days) {
       const dayStr = format(day, 'yyyy-MM-dd');
@@ -258,6 +266,74 @@ const Timeline = () => {
         map.set(dayStr, { activeTz: currentTz, flights });
         // After this day, the current TZ switches to the last flight's arrival
         currentTz = flightEntries[flightEntries.length - 1].options[0].arrival_tz!;
+      }
+    }
+
+    return map;
+  }, [trip, scheduledEntries, tripTimezone]);
+
+  // Compute per-day location (lat/lng) based on flights for sun gradient & weather
+  const dayLocationMap = useMemo(() => {
+    const map = new Map<string, { lat: number; lng: number }>();
+    if (!trip) return map;
+
+    const days = getDays();
+
+    // Find all flights sorted chronologically
+    const allFlights = scheduledEntries
+      .filter(e => e.options[0]?.category === 'flight')
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+
+    // Determine initial location from first flight's departure, or fallback
+    let currentLat = allFlights[0]?.options[0]?.latitude ?? null;
+    let currentLng = allFlights[0]?.options[0]?.longitude ?? null;
+
+    // For flights, departure_location has "IATA - City" but lat/lng are on the option
+    // We need to derive coords from airport data. For now, use option lat/lng as departure coords
+    // and look for arrival coords from the next entry after the flight or from airport DB
+    // Simple approach: track location changes at flight boundaries
+    if (allFlights.length > 0) {
+      // Before first flight: use departure location coords
+      // Entry options store lat/lng for the primary location; for flights this might be departure
+      const firstOpt = allFlights[0].options[0];
+      if (firstOpt.latitude != null && firstOpt.longitude != null) {
+        currentLat = firstOpt.latitude;
+        currentLng = firstOpt.longitude;
+      }
+    }
+
+    let flightIdx = 0;
+    for (const day of days) {
+      const dayStr = format(day, 'yyyy-MM-dd');
+
+      // Check if any flight lands on or before this day
+      while (flightIdx < allFlights.length) {
+        const flight = allFlights[flightIdx];
+        const flightDay = getDateInTimezone(flight.end_time, tripTimezone);
+        if (flightDay <= dayStr) {
+          // After this flight, location is arrival
+          const opt = flight.options[0];
+          // Try to get arrival coords - check entries right after the flight
+          const arrivalEntries = scheduledEntries.filter(e =>
+            e.linked_flight_id === flight.id && e.linked_type === 'checkout'
+          );
+          if (arrivalEntries[0]?.options[0]?.latitude != null) {
+            currentLat = arrivalEntries[0].options[0].latitude;
+            currentLng = arrivalEntries[0].options[0].longitude;
+          } else if (opt.latitude != null && opt.longitude != null) {
+            // Fallback to flight option coords (which might be departure)
+            // For proper arrival coords we'd need airport DB lookup
+            currentLat = opt.latitude;
+            currentLng = opt.longitude;
+          }
+          flightIdx++;
+        } else {
+          break;
+        }
+      }
+
+      if (currentLat != null && currentLng != null) {
+        map.set(dayStr, { lat: currentLat, lng: currentLng });
       }
     }
 
@@ -450,6 +526,7 @@ const Timeline = () => {
         onDataRefresh={fetchData}
         onToggleIdeas={() => setIdeasPanelOpen(prev => !prev)}
         ideasCount={unscheduledEntries.length}
+        scheduledEntries={scheduledEntries}
       />
 
       {loading ? (
@@ -475,6 +552,7 @@ const Timeline = () => {
               {days.map((day, index) => {
                 const dayStr = format(day, 'yyyy-MM-dd');
                 const tzInfo = dayTimezoneMap.get(dayStr);
+                const dayLoc = dayLocationMap.get(dayStr);
                 return (
                   <CalendarDay
                     key={day.toISOString()}
@@ -483,8 +561,8 @@ const Timeline = () => {
                     allEntries={scheduledEntries}
                     formatTime={formatTime}
                     tripTimezone={tripTimezone}
-                    userLat={userLat}
-                    userLng={userLng}
+                    userLat={dayLoc?.lat ?? userLat}
+                    userLng={dayLoc?.lng ?? userLng}
                     votingLocked={trip.voting_locked}
                     userId={currentUser?.id}
                     userVotes={userVotes}

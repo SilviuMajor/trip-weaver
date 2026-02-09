@@ -7,7 +7,7 @@ import { differenceInDays, parseISO } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import type { Trip } from '@/types/trip';
+import type { Trip, EntryWithOptions } from '@/types/trip';
 
 interface TimelineHeaderProps {
   trip: Trip | null;
@@ -16,9 +16,10 @@ interface TimelineHeaderProps {
   onDataRefresh?: () => void;
   onToggleIdeas?: () => void;
   ideasCount?: number;
+  scheduledEntries?: EntryWithOptions[];
 }
 
-const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas, ideasCount = 0 }: TimelineHeaderProps) => {
+const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas, ideasCount = 0, scheduledEntries = [] }: TimelineHeaderProps) => {
   const { currentUser, logout, isOrganizer, isEditor } = useCurrentUser();
   const navigate = useNavigate();
   const [travelLoading, setTravelLoading] = useState(false);
@@ -64,11 +65,56 @@ const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas
   };
 
   const handleUpdateWeather = async () => {
-    if (!tripId) return;
+    if (!tripId || !trip) return;
     setWeatherLoading(true);
     try {
+      // Build location segments from flights
+      const flights = scheduledEntries
+        .filter(e => e.options[0]?.category === 'flight' && e.options[0]?.departure_tz)
+        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+
+      let segments: Array<{ lat: number; lng: number; startDate: string; endDate: string }> = [];
+
+      if (flights.length > 0 && trip.start_date && trip.end_date) {
+        let currentDate = trip.start_date;
+
+        for (const flight of flights) {
+          const opt = flight.options[0];
+          const flightDate = flight.start_time.substring(0, 10);
+
+          // Segment before this flight: use departure coords
+          if (opt.latitude != null && opt.longitude != null && currentDate <= flightDate) {
+            segments.push({
+              lat: opt.latitude,
+              lng: opt.longitude,
+              startDate: currentDate,
+              endDate: flightDate,
+            });
+          }
+
+          // After flight: update currentDate to flight arrival date
+          currentDate = flight.end_time.substring(0, 10);
+        }
+
+        // Segment after last flight to trip end
+        const lastFlightOpt = flights[flights.length - 1].options[0];
+        if (lastFlightOpt.latitude != null && lastFlightOpt.longitude != null && currentDate <= trip.end_date) {
+          segments.push({
+            lat: lastFlightOpt.latitude,
+            lng: lastFlightOpt.longitude,
+            startDate: currentDate,
+            endDate: trip.end_date,
+          });
+        }
+      }
+
+      // Fallback: if no segments built, use Amsterdam defaults
+      if (segments.length === 0) {
+        segments = [{ lat: 52.37, lng: 4.90, startDate: trip.start_date!, endDate: trip.end_date! }];
+      }
+
       const { data, error } = await supabase.functions.invoke('fetch-weather', {
-        body: { tripId, lat: 52.37, lng: 4.90 },
+        body: { tripId, segments },
       });
       if (error) throw error;
       toast({ title: data?.message ?? 'Weather updated' });

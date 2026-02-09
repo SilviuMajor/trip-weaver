@@ -10,12 +10,13 @@ interface DragState {
   originalEndHour: number;
   currentStartHour: number;
   currentEndHour: number;
+  tz?: string;
 }
 
 interface UseDragResizeOptions {
   pixelsPerHour: number;
   startHour: number;
-  onCommit: (entryId: string, newStartHour: number, newEndHour: number) => void;
+  onCommit: (entryId: string, newStartHour: number, newEndHour: number, tz?: string) => void;
 }
 
 const SNAP_MINUTES = 15;
@@ -47,6 +48,7 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
     clientY: number,
     entryStartHour: number,
     entryEndHour: number,
+    tz?: string,
   ) => {
     const state: DragState = {
       entryId,
@@ -56,6 +58,7 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
       originalEndHour: entryEndHour,
       currentStartHour: entryStartHour,
       currentEndHour: entryEndHour,
+      tz,
     };
     setDragState(state);
     dragStateRef.current = state;
@@ -103,12 +106,11 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
   const commitDrag = useCallback(() => {
     const state = dragStateRef.current;
     if (state) {
-      onCommit(state.entryId, state.currentStartHour, state.currentEndHour);
+      onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz);
     }
     setDragState(null);
     dragStateRef.current = null;
     isDraggingRef.current = false;
-    // Keep wasDragged true for 150ms so click handlers can check
     setTimeout(() => { wasDraggedRef.current = false; }, 150);
   }, [onCommit]);
 
@@ -119,10 +121,11 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
     type: DragType,
     entryStartHour: number,
     entryEndHour: number,
+    tz?: string,
   ) => {
     e.preventDefault();
     e.stopPropagation();
-    startDrag(entryId, type, e.clientY, entryStartHour, entryEndHour);
+    startDrag(entryId, type, e.clientY, entryStartHour, entryEndHour, tz);
   }, [startDrag]);
 
   // Touch handlers with hold-to-drag
@@ -132,12 +135,13 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
     type: DragType,
     entryStartHour: number,
     entryEndHour: number,
+    tz?: string,
   ) => {
     const touch = e.touches[0];
     touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
     
     touchTimerRef.current = setTimeout(() => {
-      startDrag(entryId, type, touch.clientY, entryStartHour, entryEndHour);
+      startDrag(entryId, type, touch.clientY, entryStartHour, entryEndHour, tz);
     }, TOUCH_HOLD_MS);
   }, [startDrag]);
 
