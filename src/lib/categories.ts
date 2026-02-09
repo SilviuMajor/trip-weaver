@@ -24,6 +24,7 @@ export const PREDEFINED_CATEGORIES: CategoryDef[] = [
   { id: 'activity',    name: 'Activity',    emoji: '🎭',  color: 'hsl(170, 60%, 45%)', defaultDurationMin: 120, defaultStartHour: 10, defaultStartMin: 0 },
   { id: 'sightseeing', name: 'Sightseeing', emoji: '🏛️', color: 'hsl(45, 80%, 50%)',  defaultDurationMin: 120, defaultStartHour: 14, defaultStartMin: 0 },
   { id: 'shopping',    name: 'Shopping',    emoji: '🛍️', color: 'hsl(320, 60%, 50%)', defaultDurationMin: 90,  defaultStartHour: 15, defaultStartMin: 0 },
+  { id: 'airport_processing', name: 'Airport', emoji: '🛃', color: 'hsl(210, 50%, 60%)', defaultDurationMin: 120, defaultStartHour: 8, defaultStartMin: 0 },
 ];
 
 export const TRAVEL_MODES = [

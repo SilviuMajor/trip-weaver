@@ -17,6 +17,7 @@ const PIXELS_PER_HOUR = 80;
 interface CalendarDayProps {
   date: Date;
   entries: EntryWithOptions[];
+  allEntries?: EntryWithOptions[];
   formatTime: (iso: string) => string;
   tripTimezone: string;
   userLat: number | null;
@@ -29,6 +30,7 @@ interface CalendarDayProps {
   travelSegments?: TravelSegment[];
   weatherData?: WeatherData[];
   onClickSlot?: (time: Date) => void;
+  onDragSlot?: (startTime: Date, endTime: Date) => void;
   dayLabel?: string;
   isFirstDay?: boolean;
   isLastDay?: boolean;
@@ -52,6 +54,7 @@ function getHourInTimezone(isoString: string, tzName: string): number {
 const CalendarDay = ({
   date: dayDate,
   entries,
+  allEntries = [],
   formatTime,
   tripTimezone,
   userLat,
@@ -64,6 +67,7 @@ const CalendarDay = ({
   travelSegments = [],
   weatherData = [],
   onClickSlot,
+  onDragSlot,
   dayLabel,
   isFirstDay,
   isLastDay,
@@ -99,6 +103,10 @@ const CalendarDay = ({
   // Drag-to-resize/move
   const handleDragCommit = useCallback((entryId: string, newStartHour: number, newEndHour: number) => {
     if (!onEntryTimeChange) return;
+    const entry = sortedEntries.find(e => e.id === entryId);
+    // Don't allow dragging locked entries
+    if (entry?.is_locked) return;
+
     const dateStr = format(dayDate, 'yyyy-MM-dd');
     const startMinutes = Math.round(newStartHour * 60);
     const endMinutes = Math.round(newEndHour * 60);
@@ -108,13 +116,49 @@ const CalendarDay = ({
     const eM = endMinutes % 60;
     const startTimeStr = `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`;
     const endTimeStr = `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`;
-    // Convert local hours in tripTimezone to proper UTC
     const newStartIso = localToUTC(dateStr, startTimeStr, tripTimezone);
     const newEndIso = localToUTC(dateStr, endTimeStr, tripTimezone);
     onEntryTimeChange(entryId, newStartIso, newEndIso);
-  }, [onEntryTimeChange, dayDate, tripTimezone]);
 
-  const { dragState, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
+    // Move linked processing entries if this is a flight
+    if (entry) {
+      const linkedEntries = allEntries.filter(e => e.linked_flight_id === entry.id);
+      const origStartHour = getHourInTimezone(entry.start_time, tripTimezone);
+      const origEndHour = getHourInTimezone(entry.end_time, tripTimezone);
+
+      linkedEntries.forEach(linked => {
+        const linkedStartHour = getHourInTimezone(linked.start_time, tripTimezone);
+        const linkedEndHour = getHourInTimezone(linked.end_time, tripTimezone);
+
+        let newLinkedStart: number;
+        let newLinkedEnd: number;
+
+        if (linked.linked_type === 'checkin') {
+          // Check-in ends at flight start
+          const duration = linkedEndHour - linkedStartHour;
+          newLinkedEnd = newStartHour;
+          newLinkedStart = newLinkedEnd - duration;
+        } else {
+          // Checkout starts at flight end
+          const duration = linkedEndHour - linkedStartHour;
+          newLinkedStart = newEndHour;
+          newLinkedEnd = newLinkedStart + duration;
+        }
+
+        const lsMin = Math.round(newLinkedStart * 60);
+        const leMin = Math.round(newLinkedEnd * 60);
+        const lsH = Math.floor(lsMin / 60);
+        const lsM = lsMin % 60;
+        const leH = Math.floor(leMin / 60);
+        const leM = leMin % 60;
+        const lStartStr = `${String(lsH).padStart(2, '0')}:${String(lsM).padStart(2, '0')}`;
+        const lEndStr = `${String(leH).padStart(2, '0')}:${String(leM).padStart(2, '0')}`;
+        onEntryTimeChange(linked.id, localToUTC(dateStr, lStartStr, tripTimezone), localToUTC(dateStr, lEndStr, tripTimezone));
+      });
+    }
+  }, [onEntryTimeChange, dayDate, tripTimezone, sortedEntries, allEntries]);
+
+  const { dragState, wasDraggedRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
     pixelsPerHour: PIXELS_PER_HOUR,
     startHour,
     onCommit: handleDragCommit,
@@ -141,8 +185,12 @@ const CalendarDay = ({
     return travelSegments.find(s => s.from_entry_id === fromId && s.to_entry_id === toId);
   };
 
-  // Check if a manual Transfer entry exists between two entries
+  // Check if a manual Transfer entry exists between two entries, OR if they are linked flight<->processing
   const hasTransferBetween = (entryA: EntryWithOptions, entryB: EntryWithOptions): boolean => {
+    // Skip travel segments between flight and its linked processing entries
+    if (entryA.linked_flight_id === entryB.id || entryB.linked_flight_id === entryA.id) return true;
+    if (entryA.linked_flight_id && entryB.linked_flight_id && entryA.linked_flight_id === entryB.linked_flight_id) return true;
+
     const aEnd = new Date(entryA.end_time).getTime();
     const bStart = new Date(entryB.start_time).getTime();
     return sortedEntries.some(e => {
@@ -229,6 +277,7 @@ const CalendarDay = ({
               pixelsPerHour={PIXELS_PER_HOUR}
               date={dayDate}
               onClickSlot={onClickSlot}
+              onDragSlot={onDragSlot}
             />
 
             {/* "+" before first entry */}
@@ -258,8 +307,8 @@ const CalendarDay = ({
               const primaryOption = entry.options[0];
               if (!primaryOption) return null;
 
-              // Check if this entry is being dragged
               const isDragged = dragState?.entryId === entry.id;
+              const isLocked = entry.is_locked;
               let entryStartHour: number;
               let entryEndHour: number;
 
@@ -292,10 +341,11 @@ const CalendarDay = ({
               const travelSeg = nextEntry ? getTravelSegment(entry.id, nextEntry.id) : null;
               const showTravelSeg = travelSeg && nextEntry && !hasTransferBetween(entry, nextEntry);
 
-              // Original hours for drag initiation
               const origStartHour = getHourInTimezone(entry.start_time, tripTimezone);
               let origEndHour = getHourInTimezone(entry.end_time, tripTimezone);
               if (origEndHour < origStartHour) origEndHour = 24;
+
+              const canDrag = onEntryTimeChange && !isLocked;
 
               return (
                 <div key={entry.id}>
@@ -312,8 +362,8 @@ const CalendarDay = ({
                     }}
                   >
                     <div className="relative h-full">
-                      {/* Top resize handle */}
-                      {onEntryTimeChange && (
+                      {/* Top resize handle (not for locked entries) */}
+                      {canDrag && (
                         <div
                           className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
                           onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartHour, origEndHour)}
@@ -343,22 +393,25 @@ const CalendarDay = ({
                         hasVoted={userVotes.includes(primaryOption.id)}
                         onVoteChange={onVoteChange}
                         onClick={() => {
-                          if (!isDragged) onCardTap(entry, primaryOption);
+                          if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
                         }}
                         cardSizeClass="h-full"
                         isDragging={isDragged}
-                        onDragStart={onEntryTimeChange ? (e) => {
+                        isLocked={isLocked}
+                        isProcessing={primaryOption.category === 'airport_processing'}
+                        linkedType={entry.linked_type}
+                        onDragStart={canDrag ? (e) => {
                           onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour);
                         } : undefined}
-                        onTouchDragStart={onEntryTimeChange ? (e) => {
+                        onTouchDragStart={canDrag ? (e) => {
                           onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour);
                         } : undefined}
                         onTouchDragMove={onTouchMove}
                         onTouchDragEnd={onTouchEnd}
                       />
 
-                      {/* Bottom resize handle */}
-                      {onEntryTimeChange && (
+                      {/* Bottom resize handle (not for locked entries) */}
+                      {canDrag && (
                         <div
                           className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
                           onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartHour, origEndHour)}
@@ -385,7 +438,7 @@ const CalendarDay = ({
                     </div>
                   )}
 
-                  {/* Travel segment connector (skip if manual Transfer exists between) */}
+                  {/* Travel segment connector */}
                   {showTravelSeg && (
                     <div
                       className="absolute left-0 right-0 z-[5]"

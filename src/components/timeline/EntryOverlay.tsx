@@ -3,7 +3,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Clock, ExternalLink, Pencil, Trash2 } from 'lucide-react';
+import { Clock, ExternalLink, Pencil, Trash2, Lock, Unlock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import type { EntryOption, EntryWithOptions } from '@/types/trip';
@@ -48,6 +48,7 @@ const EntryOverlay = ({
 }: EntryOverlayProps) => {
   const { currentUser, isEditor } = useCurrentUser();
   const [deleting, setDeleting] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   if (!entry || !option) return null;
 
@@ -58,6 +59,24 @@ const EntryOverlay = ({
 
   const hasVoted = userVotes.includes(option.id);
   const images = option.images ?? [];
+  const isLocked = entry.is_locked;
+
+  const handleToggleLock = async () => {
+    setToggling(true);
+    try {
+      const { error } = await supabase
+        .from('entries')
+        .update({ is_locked: !isLocked } as any)
+        .eq('id', entry.id);
+      if (error) throw error;
+      toast({ title: isLocked ? 'Entry unlocked' : 'Entry locked' });
+      onDeleted?.(); // refresh data
+    } catch (err: any) {
+      toast({ title: 'Failed to toggle lock', description: err.message, variant: 'destructive' });
+    } finally {
+      setToggling(false);
+    }
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -83,6 +102,9 @@ const EntryOverlay = ({
           <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Clock className="h-4 w-4" />
             <span>{formatTime(entry.start_time)} — {formatTime(entry.end_time)}</span>
+            {isLocked && (
+              <Lock className="ml-1 h-3.5 w-3.5 text-muted-foreground/60" />
+            )}
           </div>
 
           {/* Distance */}
@@ -128,7 +150,7 @@ const EntryOverlay = ({
             </div>
           )}
 
-          {/* Images at bottom — only if there are any */}
+          {/* Images */}
           {images.length > 0 && (
             <div className="pt-2">
               <ImageGallery images={images} />
@@ -144,7 +166,7 @@ const EntryOverlay = ({
             />
           )}
 
-          {/* Edit / Delete (editors only) */}
+          {/* Edit / Delete / Lock (editors only) */}
           {isEditor && (
             <div className="flex items-center gap-2 border-t border-border pt-4">
               {onEdit && (
@@ -160,6 +182,25 @@ const EntryOverlay = ({
                   Edit
                 </Button>
               )}
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleToggleLock}
+                disabled={toggling}
+              >
+                {isLocked ? (
+                  <>
+                    <Unlock className="mr-1.5 h-3.5 w-3.5" />
+                    Unlock
+                  </>
+                ) : (
+                  <>
+                    <Lock className="mr-1.5 h-3.5 w-3.5" />
+                    Lock
+                  </>
+                )}
+              </Button>
 
               <AlertDialog>
                 <AlertDialogTrigger asChild>

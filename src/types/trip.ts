@@ -22,6 +22,8 @@ export interface Trip {
   voting_locked: boolean;
   owner_id: string | null;
   category_presets: CategoryPreset[] | null;
+  default_checkin_hours: number;
+  default_checkout_min: number;
   created_at: string;
   updated_at: string;
 }
@@ -31,6 +33,9 @@ export interface Entry {
   trip_id: string;
   start_time: string;
   end_time: string;
+  is_locked: boolean;
+  linked_flight_id: string | null;
+  linked_type: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -51,6 +56,8 @@ export interface EntryOption {
   arrival_tz: string | null;
   departure_terminal: string | null;
   arrival_terminal: string | null;
+  airport_checkin_hours: number | null;
+  airport_checkout_min: number | null;
   created_at: string;
   updated_at: string;
   vote_count?: number;

@@ -50,6 +50,7 @@ const Timeline = () => {
   const [editEntry, setEditEntry] = useState<EntryWithOptions | null>(null);
   const [editOption, setEditOption] = useState<EntryOption | null>(null);
   const [prefillStartTime, setPrefillStartTime] = useState<string | undefined>();
+  const [prefillEndTime, setPrefillEndTime] = useState<string | undefined>();
 
   // Zoom
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -180,7 +181,6 @@ const Timeline = () => {
   const getEntriesForDay = (day: Date): EntryWithOptions[] => {
     const dayStr = format(day, 'yyyy-MM-dd');
     return entries.filter(entry => {
-      // Use trip timezone to determine which day this entry falls on
       const entryDay = getDateInTimezone(entry.start_time, tripTimezone);
       return entryDay === dayStr;
     });
@@ -199,6 +199,13 @@ const Timeline = () => {
 
   const handleAddBetween = (prefillTime: string) => {
     setPrefillStartTime(prefillTime);
+    setPrefillEndTime(undefined);
+    setEntryFormOpen(true);
+  };
+
+  const handleDragSlot = (startTime: Date, endTime: Date) => {
+    setPrefillStartTime(startTime.toISOString());
+    setPrefillEndTime(endTime.toISOString());
     setEntryFormOpen(true);
   };
 
@@ -225,6 +232,7 @@ const Timeline = () => {
         tripId={tripId ?? ''}
         onAddEntry={() => {
           setPrefillStartTime(undefined);
+          setPrefillEndTime(undefined);
           setEntryFormOpen(true);
         }}
         onDataRefresh={fetchData}
@@ -254,6 +262,7 @@ const Timeline = () => {
                 key={day.toISOString()}
                 date={day}
                 entries={getEntriesForDay(day)}
+                allEntries={entries}
                 formatTime={formatTime}
                 tripTimezone={tripTimezone}
                 userLat={userLat}
@@ -269,6 +278,7 @@ const Timeline = () => {
                 isFirstDay={index === 0}
                 isLastDay={index === days.length - 1}
                 onAddBetween={handleAddBetween}
+                onDragSlot={handleDragSlot}
                 onEntryTimeChange={handleEntryTimeChange}
               />
             ))}
@@ -324,6 +334,7 @@ const Timeline = () => {
                 setEditEntry(null);
                 setEditOption(null);
                 setPrefillStartTime(undefined);
+                setPrefillEndTime(undefined);
               }
             }}
             tripId={trip.id}
@@ -332,6 +343,7 @@ const Timeline = () => {
             editEntry={editEntry}
             editOption={editOption}
             prefillStartTime={prefillStartTime}
+            prefillEndTime={prefillEndTime}
           />
         </>
       )}
