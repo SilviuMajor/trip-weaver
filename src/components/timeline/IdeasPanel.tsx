@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, Lightbulb, X } from 'lucide-react';
+import { ChevronDown, Lightbulb, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { EntryWithOptions } from '@/types/trip';
@@ -15,6 +15,7 @@ interface IdeasPanelProps {
   scheduledEntries: EntryWithOptions[];
   onDragStart: (e: React.DragEvent, entry: EntryWithOptions) => void;
   onCardTap?: (entry: EntryWithOptions) => void;
+  onAddIdea?: () => void;
 }
 
 const IdeasPanel = ({
@@ -24,6 +25,7 @@ const IdeasPanel = ({
   scheduledEntries,
   onDragStart,
   onCardTap,
+  onAddIdea,
 }: IdeasPanelProps) => {
   const isMobile = useIsMobile();
 
@@ -73,11 +75,18 @@ const IdeasPanel = ({
             </span>
           )}
         </div>
-        {!isMobile && (
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onOpenChange(false)}>
-            <X className="h-4 w-4" />
-          </Button>
-        )}
+        <div className="flex items-center gap-1">
+          {onAddIdea && (
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onAddIdea}>
+              <Plus className="h-4 w-4" />
+            </Button>
+          )}
+          {!isMobile && (
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onOpenChange(false)}>
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 space-y-1 overflow-y-auto p-4">

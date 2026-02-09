@@ -308,7 +308,7 @@ const CalendarDay = ({
         ) : (
           <div
             className={cn("relative", dayFlights.length > 0 ? "ml-20" : "ml-14")}
-            style={{ height: containerHeight, minHeight: 200, marginRight: 48 }}
+            style={{ height: containerHeight, minHeight: 200, marginRight: 8 }}
             onDragOver={(e) => {
               if (onDropFromPanel) {
                 e.preventDefault();
@@ -513,8 +513,8 @@ const CalendarDay = ({
               );
             })}
 
-            {/* Weather column on the right */}
-            <div className="absolute top-0 bottom-0 z-[5]" style={{ right: -44, width: 40 }}>
+            {/* Weather column on the far left */}
+            <div className="absolute top-0 bottom-0 z-[5]" style={{ left: -48, width: 44 }}>
               {Array.from({ length: endHour - startHour }, (_, i) => startHour + i).map(hour => {
                 const dateStr = format(dayDate, 'yyyy-MM-dd');
                 const w = weatherData.find(wd => wd.date === dateStr && wd.hour === hour);
