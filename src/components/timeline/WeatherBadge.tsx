@@ -23,8 +23,8 @@ const WeatherBadge = ({ temp, condition }: WeatherBadgeProps) => {
   if (!Icon || temp === null) return null;
 
   return (
-    <div className="inline-flex items-center gap-1 rounded-full bg-background/80 px-2 py-0.5 text-xs font-medium backdrop-blur-sm border border-border/50">
-      <Icon className="h-3 w-3" />
+    <div className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground shadow-sm">
+      <Icon className="h-3.5 w-3.5" />
       <span>{Math.round(temp)}°</span>
     </div>
   );

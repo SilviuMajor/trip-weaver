@@ -3,7 +3,7 @@ import { MapPin, Clock } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { getTimeOfDayGradient } from '@/lib/timeOfDayColor';
-import { findCategory, categoryLabel } from '@/lib/categories';
+import { findCategory } from '@/lib/categories';
 import VoteButton from './VoteButton';
 
 interface EntryCardProps {
@@ -23,18 +23,21 @@ interface EntryCardProps {
   cardSizeClass?: string;
 }
 
-const getCategoryStyle = (catId: string | null, customColor: string | null) => {
+const getCategoryColor = (catId: string | null, customColor: string | null): string => {
   const predefined = findCategory(catId ?? '');
-  if (predefined) return { backgroundColor: predefined.color, color: '#fff' };
-  if (customColor) return { backgroundColor: customColor, color: '#fff' };
-  return { backgroundColor: 'hsl(240, 40%, 55%)', color: '#fff' };
+  if (predefined) return predefined.color;
+  if (customColor) return customColor;
+  return 'hsl(260, 50%, 55%)';
 };
 
-const getCategoryDisplay = (catId: string | null): string => {
+const getCategoryEmoji = (catId: string | null): string => {
   const predefined = findCategory(catId ?? '');
-  if (predefined) return `${predefined.emoji} ${predefined.name}`;
-  // For legacy/custom categories, catId is the raw text
-  return catId ?? '';
+  return predefined?.emoji ?? '📌';
+};
+
+const getCategoryName = (catId: string | null): string => {
+  const predefined = findCategory(catId ?? '');
+  return predefined?.name ?? catId ?? '';
 };
 
 const EntryCard = ({
@@ -54,11 +57,13 @@ const EntryCard = ({
   cardSizeClass,
 }: EntryCardProps) => {
   const firstImage = option.images?.[0]?.image_url;
-  const categoryStyle = option.category ? getCategoryStyle(option.category, option.category_color) : {};
-  const categoryDisplay = getCategoryDisplay(option.category);
-
-  // Dynamic time-of-day gradient for cards without images
+  const catColor = getCategoryColor(option.category, option.category_color);
+  const catEmoji = getCategoryEmoji(option.category);
+  const catName = getCategoryName(option.category);
   const timeGradient = getTimeOfDayGradient(new Date(startTime), new Date(endTime));
+
+  // For cards without images, use a light tinted bg
+  const tintBg = `${catColor}18`; // ~10% opacity hex suffix
 
   return (
     <motion.div
@@ -67,55 +72,61 @@ const EntryCard = ({
       transition={{ duration: 0.3, delay: optionIndex * 0.05 }}
       onClick={onClick}
       className={cn(
-        'group relative cursor-pointer overflow-hidden rounded-xl border border-border shadow-sm transition-all hover:shadow-md',
+        'group relative cursor-pointer overflow-hidden rounded-2xl border shadow-md transition-all hover:shadow-lg',
         isEntryPast && 'opacity-50 grayscale-[30%]',
         cardSizeClass
       )}
+      style={!firstImage ? { borderColor: catColor, borderLeftWidth: 4 } : undefined}
     >
-      {/* Background image or time-of-day gradient */}
+      {/* Background */}
       {firstImage ? (
         <div className="absolute inset-0">
-          <img
-            src={firstImage}
-            alt={option.name}
-            className="h-full w-full object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-foreground/80 via-foreground/40 to-transparent" />
+          <img src={firstImage} alt={option.name} className="h-full w-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
         </div>
       ) : (
-        <div className="absolute inset-0" style={{ background: timeGradient }}>
-          <div className="absolute inset-0 bg-foreground/10" />
+        <div className="absolute inset-0" style={{ background: tintBg }}>
+          <div className="absolute inset-0" style={{ background: timeGradient, opacity: 0.15 }} />
         </div>
       )}
 
       {/* Content */}
       <div className={cn(
         'relative z-10 p-4',
-        firstImage ? 'text-primary-foreground' : 'text-white'
+        firstImage ? 'text-white' : 'text-foreground'
       )}>
         {/* Top row: Category + Options indicator */}
         <div className="mb-3 flex items-start justify-between">
           {option.category && (
             <span
-              className="inline-block rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-              style={categoryStyle}
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold"
+              style={{ backgroundColor: catColor, color: '#fff' }}
             >
-              {categoryDisplay}
+              <span className="text-sm">{catEmoji}</span>
+              {catName}
             </span>
           )}
-
           {totalOptions > 1 && (
-            <span className="text-[10px] font-medium text-white/70">
+            <span className={cn(
+              'text-[10px] font-medium',
+              firstImage ? 'text-white/70' : 'text-muted-foreground'
+            )}>
               {optionIndex + 1}/{totalOptions}
             </span>
           )}
         </div>
 
-        {/* Title */}
-        <h3 className="mb-2 font-display text-lg font-bold leading-tight">{option.name}</h3>
+        {/* Title with emoji */}
+        <h3 className="mb-2 flex items-center gap-2 font-display text-lg font-bold leading-tight">
+          {!option.category && <span className="text-xl">{catEmoji}</span>}
+          {option.name}
+        </h3>
 
         {/* Time */}
-        <div className="mb-2 flex items-center gap-1.5 text-xs text-white/80">
+        <div className={cn(
+          'mb-2 flex items-center gap-1.5 text-xs',
+          firstImage ? 'text-white/80' : 'text-muted-foreground'
+        )}>
           <Clock className="h-3 w-3" />
           <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
         </div>
@@ -123,7 +134,10 @@ const EntryCard = ({
         {/* Bottom row: Distance + Votes */}
         <div className="flex items-center justify-between">
           {distanceKm !== null && distanceKm !== undefined ? (
-            <div className="flex items-center gap-1 text-xs text-white/70">
+            <div className={cn(
+              'flex items-center gap-1 text-xs',
+              firstImage ? 'text-white/70' : 'text-muted-foreground'
+            )}>
               <MapPin className="h-3 w-3" />
               <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
             </div>

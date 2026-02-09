@@ -59,8 +59,8 @@ const Auth = () => {
         className="w-full max-w-sm"
       >
         <div className="mb-10 text-center">
-          <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-            <MapPin className="h-8 w-8 text-primary" />
+          <div className="mb-4 inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/15 text-4xl">
+            🌍
           </div>
           <h1 className="mb-2 text-3xl font-bold tracking-tight">Trip Planner</h1>
           <p className="text-muted-foreground">

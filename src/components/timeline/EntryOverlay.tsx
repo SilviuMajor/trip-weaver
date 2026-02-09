@@ -61,7 +61,7 @@ const EntryOverlay = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[90vh] overflow-y-auto rounded-t-2xl p-0">
+      <SheetContent side="bottom" className="max-h-[90vh] overflow-y-auto rounded-t-3xl p-0">
         {/* Image Gallery */}
         <div className="p-4 pb-0">
           {images.length > 0 ? (
@@ -78,7 +78,7 @@ const EntryOverlay = ({
             {/* Category */}
             {option.category && (
               <Badge
-                className="w-fit text-[10px] uppercase tracking-wider"
+                className="w-fit gap-1 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
                 style={
                   option.category_color
                     ? { backgroundColor: option.category_color, color: '#fff' }
