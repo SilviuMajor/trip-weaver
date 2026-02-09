@@ -24,6 +24,8 @@ export interface Trip {
   category_presets: CategoryPreset[] | null;
   default_checkin_hours: number;
   default_checkout_min: number;
+  emoji: string | null;
+  image_url: string | null;
   created_at: string;
   updated_at: string;
 }

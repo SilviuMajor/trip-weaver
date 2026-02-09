@@ -153,8 +153,12 @@ const Dashboard = () => {
                 className="flex w-full cursor-pointer items-start gap-4 rounded-2xl border-2 border-border bg-card p-4 text-left transition-all hover:border-primary/40 hover:shadow-lg"
                 style={{ borderLeftColor: CARD_COLORS[i % CARD_COLORS.length], borderLeftWidth: 4 }}
               >
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/15 text-2xl">
-                  ✈️
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/15 text-2xl overflow-hidden">
+                  {trip.image_url ? (
+                    <img src={trip.image_url} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    (trip as any).emoji || '✈️'
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate font-display text-lg font-bold">{trip.name}</h3>

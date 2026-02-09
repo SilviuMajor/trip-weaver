@@ -77,41 +77,14 @@ const TimeSlotGrid = ({
     }));
   }, [flights, hasDualTz]);
 
-  // Determine which TZ columns to show at a given hour
-  const getColumnsAtHour = useCallback((hour: number): { origin?: { abbr: string; opacity: number }; dest?: { abbr: string; opacity: number } } => {
-    if (!tzRanges || tzRanges.length === 0) return {};
-
-    const r = tzRanges[0]; // Primary flight
-    const overlapStart = r.overlapStart;
-    const overlapEnd = r.overlapEnd;
-
-    if (hour < overlapStart) {
-      // Before overlap: only origin
-      return { origin: { abbr: r.originAbbr, opacity: 1 } };
-    } else if (hour >= overlapStart && hour < r.flightStartHour) {
-      // Fade-in zone before flight
-      const progress = (hour - overlapStart) / OVERLAP_HOURS;
-      return {
-        origin: { abbr: r.originAbbr, opacity: 1 - progress * 0.5 },
-        dest: { abbr: r.destAbbr, opacity: progress * 0.7 },
-      };
-    } else if (hour >= r.flightStartHour && hour <= r.flightEndHour) {
-      // During flight: both visible
-      return {
-        origin: { abbr: r.originAbbr, opacity: 0.5 },
-        dest: { abbr: r.destAbbr, opacity: 0.5 },
-      };
-    } else if (hour > r.flightEndHour && hour <= overlapEnd) {
-      // Fade-out zone after flight
-      const progress = (hour - r.flightEndHour) / OVERLAP_HOURS;
-      return {
-        origin: { abbr: r.originAbbr, opacity: 0.5 - progress * 0.5 },
-        dest: { abbr: r.destAbbr, opacity: 0.5 + progress * 0.5 },
-      };
-    } else {
-      // After overlap: only destination
-      return { dest: { abbr: r.destAbbr, opacity: 1 } };
-    }
+  // Determine TZ display state at a given hour
+  type TzState = 'single-origin' | 'dual' | 'single-dest';
+  const getTzStateAtHour = useCallback((hour: number): TzState => {
+    if (!tzRanges || tzRanges.length === 0) return 'single-origin';
+    const r = tzRanges[0];
+    if (hour < r.overlapStart) return 'single-origin';
+    if (hour > r.overlapEnd) return 'single-dest';
+    return 'dual';
   }, [tzRanges]);
 
   // Compute TZ offset in hours between two timezones
@@ -251,7 +224,7 @@ const TimeSlotGrid = ({
       {renderOverlapBg()}
 
       {hours.map(hour => {
-        const cols = hasDualTz ? getColumnsAtHour(hour) : null;
+        const tzState = hasDualTz ? getTzStateAtHour(hour) : null;
         const tzOffset = hasDualTz && tzRanges?.[0]
           ? getTzOffsetHours(tzRanges[0].originTz, tzRanges[0].destinationTz)
           : 0;
@@ -265,30 +238,22 @@ const TimeSlotGrid = ({
             className="absolute left-0 right-0 border-t border-border/30"
             style={{ top: (hour - startHour) * pixelsPerHour }}
           >
-            {hasDualTz && cols ? (
-            <div className="absolute -top-2.5 z-[15] flex select-none gap-0" style={{ left: -58 }}>
-                {cols.origin && (
-                  <span
-                    className="text-[9px] font-medium transition-opacity duration-300"
-                    style={{ opacity: cols.origin.opacity, color: 'hsl(var(--muted-foreground))' }}
-                  >
-                    {String(hour).padStart(2, '0')}:00
-                  </span>
-                )}
-                {cols.origin && cols.dest && (
-                  <span className="mx-0.5 text-[9px] text-muted-foreground/30">│</span>
-                )}
-                {cols.dest && (
-                  <span
-                    className="text-[9px] font-medium transition-opacity duration-300 text-primary/70"
-                    style={{ opacity: cols.dest.opacity }}
-                  >
-                    {String(destH).padStart(2, '0')}:{String(destM).padStart(2, '0')}
-                  </span>
-                )}
+            {hasDualTz && tzState === 'dual' ? (
+              <div className="absolute -top-2.5 z-[15] flex select-none items-center" style={{ left: -58, width: 52 }}>
+                <span className="flex-1 text-center text-[9px] font-medium text-muted-foreground">
+                  {String(hour).padStart(2, '0')}:00
+                </span>
+                <span className="h-3 w-px bg-border/60" />
+                <span className="flex-1 text-center text-[9px] font-medium text-primary/70">
+                  {String(destH).padStart(2, '0')}:{String(destM).padStart(2, '0')}
+                </span>
               </div>
+            ) : hasDualTz && tzState === 'single-dest' ? (
+              <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -36, width: 30 }}>
+                {String(destH).padStart(2, '0')}:{String(destM).padStart(2, '0')}
+              </span>
             ) : (
-              <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50" style={{ left: -36 }}>
+              <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -36, width: 30 }}>
                 {String(hour).padStart(2, '0')}:00
               </span>
             )}
