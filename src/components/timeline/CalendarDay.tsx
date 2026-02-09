@@ -14,6 +14,13 @@ import WeatherBadge from './WeatherBadge';
 
 const PIXELS_PER_HOUR = 80;
 
+interface FlightTzInfo {
+  originTz: string;
+  destinationTz: string;
+  flightStartHour: number;
+  flightEndHour: number;
+}
+
 interface CalendarDayProps {
   date: Date;
   entries: EntryWithOptions[];
@@ -37,6 +44,8 @@ interface CalendarDayProps {
   onAddBetween?: (prefillTime: string) => void;
   onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
   onDropFromPanel?: (entryId: string, hourOffset: number) => void;
+  dayFlights?: FlightTzInfo[];
+  activeTz?: string;
 }
 
 function getHourInTimezone(isoString: string, tzName: string): number {
@@ -75,6 +84,8 @@ const CalendarDay = ({
   onAddBetween,
   onEntryTimeChange,
   onDropFromPanel,
+  dayFlights = [],
+  activeTz,
 }: CalendarDayProps) => {
   const isUndated = !!dayLabel;
   const today = !isUndated && isToday(dayDate);
@@ -273,7 +284,7 @@ const CalendarDay = ({
           </div>
         ) : (
           <div
-            className="relative ml-10"
+            className={cn("relative", dayFlights.length > 0 ? "ml-16" : "ml-10")}
             style={{ height: containerHeight, minHeight: 200 }}
             onDragOver={(e) => {
               if (onDropFromPanel) {
@@ -301,6 +312,8 @@ const CalendarDay = ({
               date={dayDate}
               onClickSlot={onClickSlot}
               onDragSlot={onDragSlot}
+              activeTz={activeTz}
+              flights={dayFlights}
             />
 
             {/* "+" before first entry */}
@@ -345,7 +358,8 @@ const CalendarDay = ({
               }
 
               const top = Math.max(0, (entryStartHour - startHour) * PIXELS_PER_HOUR);
-              const height = Math.max(60, (entryEndHour - entryStartHour) * PIXELS_PER_HOUR);
+              const height = (entryEndHour - entryStartHour) * PIXELS_PER_HOUR;
+              const isCompact = height < 50;
 
               const layoutInfo = layoutMap.get(entry.id);
               const column = layoutInfo?.column ?? 0;
@@ -403,6 +417,7 @@ const CalendarDay = ({
                       )}
 
                       <EntryCard
+                        isCompact={isCompact}
                         option={primaryOption}
                         startTime={entry.start_time}
                         endTime={entry.end_time}

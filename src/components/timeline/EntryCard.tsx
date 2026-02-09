@@ -25,6 +25,7 @@ interface EntryCardProps {
   isLocked?: boolean;
   isProcessing?: boolean;
   linkedType?: string | null;
+  isCompact?: boolean;
   onDragStart?: (e: React.MouseEvent) => void;
   onTouchDragStart?: (e: React.TouchEvent) => void;
   onTouchDragMove?: (e: React.TouchEvent) => void;
@@ -83,6 +84,7 @@ const EntryCard = ({
   isLocked,
   isProcessing,
   linkedType,
+  isCompact,
   onDragStart,
   onTouchDragStart,
   onTouchDragMove,
@@ -96,6 +98,43 @@ const EntryCard = ({
   const isTransfer = option.category === 'transfer';
 
   const tintBg = isProcessing ? `${catColor}10` : `${catColor}18`;
+
+  // Compact single-line layout for very short entries
+  if (isCompact) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        onClick={onClick}
+        onMouseDown={onDragStart}
+        onTouchStart={onTouchDragStart}
+        onTouchMove={onTouchDragMove}
+        onTouchEnd={onTouchDragEnd}
+        className={cn(
+          'group relative flex items-center gap-1.5 overflow-hidden rounded-lg border shadow-sm transition-all hover:shadow-md',
+          isEntryPast && 'opacity-50 grayscale-[30%]',
+          isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+          isLocked && 'border-dashed border-2 border-muted-foreground/40',
+          cardSizeClass
+        )}
+        style={{
+          borderColor: isLocked ? undefined : catColor,
+          borderLeftWidth: isLocked ? undefined : 3,
+          background: tintBg,
+        }}
+      >
+        <div className="relative z-10 flex w-full items-center gap-1.5 px-2 py-0.5">
+          <span className="text-xs shrink-0">{catEmoji}</span>
+          <span className="truncate text-[11px] font-semibold leading-tight">{option.name}</span>
+          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
+            {formatTime(startTime)}–{formatTime(endTime)}
+          </span>
+          {isLocked && <Lock className="h-2.5 w-2.5 shrink-0 text-muted-foreground/60" />}
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
