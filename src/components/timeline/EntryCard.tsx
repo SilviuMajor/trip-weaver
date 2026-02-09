@@ -199,13 +199,10 @@ const EntryCard = ({
         <div className="mb-3 flex items-start justify-between">
           {option.category && (
             <span
-              className={cn(
-                'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold',
-                isProcessing && 'text-[10px] px-2 py-0.5'
-              )}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
               style={{ backgroundColor: catColor, color: '#fff' }}
             >
-              <span className={isProcessing ? 'text-xs' : 'text-sm'}>{catEmoji}</span>
+              <span className="text-xs">{catEmoji}</span>
               {isProcessing
                 ? (linkedType === 'checkin' ? 'Check-in' : 'Checkout')
                 : catName
