@@ -8,8 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { addDays, format, parseISO } from 'date-fns';
-import { PREDEFINED_CATEGORIES, type CategoryDef } from '@/lib/categories';
+import { PREDEFINED_CATEGORIES, TRAVEL_MODES, type CategoryDef } from '@/lib/categories';
 import type { Trip, EntryWithOptions, EntryOption, CategoryPreset } from '@/types/trip';
+import { Loader2 } from 'lucide-react';
 
 const REFERENCE_DATE = '2099-01-01';
 
@@ -62,14 +63,18 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   const [name, setName] = useState('');
   const [website, setWebsite] = useState('');
   const [locationName, setLocationName] = useState('');
-  const [latitude, setLatitude] = useState('');
-  const [longitude, setLongitude] = useState('');
 
   // Flight-specific
   const [departureLocation, setDepartureLocation] = useState('');
   const [arrivalLocation, setArrivalLocation] = useState('');
   const [departureTz, setDepartureTz] = useState('Europe/London');
   const [arrivalTz, setArrivalTz] = useState('Europe/Amsterdam');
+
+  // Transfer-specific
+  const [transferFrom, setTransferFrom] = useState('');
+  const [transferTo, setTransferTo] = useState('');
+  const [transferMode, setTransferMode] = useState('transit');
+  const [calcLoading, setCalcLoading] = useState(false);
 
   // Step 3: When
   const [date, setDate] = useState('');
@@ -86,11 +91,11 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   const dayCount = trip?.duration_days ?? 3;
   const isEditing = !!editEntry;
   const isFlight = categoryId === 'flight';
+  const isTransfer = categoryId === 'transfer';
   const tripTimezone = trip?.timezone ?? 'Europe/Amsterdam';
 
   const selectedCategory = PREDEFINED_CATEGORIES.find(c => c.id === categoryId);
 
-  // Build custom categories from trip presets
   const customCategories = (trip?.category_presets as CategoryPreset[] | null) ?? [];
   const allCategories: CategoryDef[] = [
     ...PREDEFINED_CATEGORIES,
@@ -125,12 +130,15 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         setName(editOption.name);
         setWebsite(editOption.website ?? '');
         setLocationName(editOption.location_name ?? '');
-        setLatitude(editOption.latitude != null ? String(editOption.latitude) : '');
-        setLongitude(editOption.longitude != null ? String(editOption.longitude) : '');
         setDepartureLocation(editOption.departure_location ?? '');
         setArrivalLocation(editOption.arrival_location ?? '');
         setDepartureTz(editOption.departure_tz ?? 'Europe/London');
         setArrivalTz(editOption.arrival_tz ?? 'Europe/Amsterdam');
+        // For transfer: reuse departure/arrival as from/to
+        if (editOption.category === 'transfer') {
+          setTransferFrom(editOption.departure_location ?? '');
+          setTransferTo(editOption.arrival_location ?? '');
+        }
         setStep('details');
       }
     }
@@ -141,14 +149,12 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     if (prefillStartTime && open && !editEntry) {
       const dt = new Date(prefillStartTime);
       setStartTime(format(dt, 'HH:mm'));
-      // Keep category default duration to compute end
     }
   }, [prefillStartTime, open, editEntry]);
 
   const applySmartDefaults = useCallback((cat: CategoryDef) => {
     const h = cat.defaultStartHour;
     const m = cat.defaultStartMin;
-    // Use prefillStartTime if provided
     if (prefillStartTime && !isEditing) {
       const dt = new Date(prefillStartTime);
       const pH = dt.getHours();
@@ -175,12 +181,14 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setName('');
     setWebsite('');
     setLocationName('');
-    setLatitude('');
-    setLongitude('');
     setDepartureLocation('');
     setArrivalLocation('');
     setDepartureTz('Europe/London');
     setArrivalTz('Europe/Amsterdam');
+    setTransferFrom('');
+    setTransferTo('');
+    setTransferMode('transit');
+    setCalcLoading(false);
     setDate('');
     setSelectedDay('0');
     setStartTime('09:00');
@@ -209,14 +217,14 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setStep('when');
   };
 
-  // Auto-calculate flight duration from depart/arrive times + timezones
+  // Auto-calculate flight duration
   const calcFlightDuration = useCallback((sTime: string, eTime: string, dTz: string, aTz: string, dateStr: string) => {
     if (!sTime || !eTime) return;
     const entryDate = dateStr || '2099-01-01';
     const departUTC = new Date(localToUTC(entryDate, sTime, dTz));
     const arriveUTC = new Date(localToUTC(entryDate, eTime, aTz));
     let diffMin = Math.round((arriveUTC.getTime() - departUTC.getTime()) / 60000);
-    if (diffMin <= 0) diffMin += 1440; // next day arrival
+    if (diffMin <= 0) diffMin += 1440;
     setDurationMin(diffMin);
   }, []);
 
@@ -232,36 +240,64 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     calcFlightDuration(startTime, newEnd, departureTz, arrivalTz, entryDate || '2099-01-01');
   };
 
+  // Calculate transfer duration via Google Directions
+  const calcTransferDuration = async () => {
+    if (!transferFrom.trim() || !transferTo.trim()) {
+      toast({ title: 'Enter both From and To locations', variant: 'destructive' });
+      return;
+    }
+    setCalcLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('google-directions', {
+        body: { fromAddress: transferFrom.trim(), toAddress: transferTo.trim(), mode: transferMode },
+      });
+      if (error) throw error;
+      if (data?.duration_min) {
+        setDurationMin(data.duration_min);
+        // Recalculate end time
+        const [h, m] = startTime.split(':').map(Number);
+        const endTotalMin = h * 60 + m + data.duration_min;
+        const endH = Math.floor(endTotalMin / 60) % 24;
+        const endM = endTotalMin % 60;
+        setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
+        toast({ title: `Estimated: ${data.duration_min} min (${data.distance_km} km)` });
+      } else {
+        toast({ title: 'No route found', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Failed to calculate', description: err.message, variant: 'destructive' });
+    } finally {
+      setCalcLoading(false);
+    }
+  };
+
   // Auto-detect trip dates from flight
   const autoDetectTripDates = async (entryDate: string, dayIndex: number) => {
     if (!trip || !isUndated || !isFlight) return;
-    // entryDate is the real date from flight input; dayIndex is which "Day" it was on
     try {
       const startDate = addDays(parseISO(entryDate), -dayIndex);
       const endDate = addDays(startDate, (trip.duration_days ?? 3) - 1);
-      
-      // Update trip dates
+
       await supabase.from('trips').update({
         start_date: format(startDate, 'yyyy-MM-dd'),
         end_date: format(endDate, 'yyyy-MM-dd'),
       } as any).eq('id', trip.id);
 
-      // Shift all existing entries from 2099-01-xx to real dates
       const { data: allEntries } = await supabase.from('entries').select('*').eq('trip_id', trip.id);
       if (allEntries) {
         for (const entry of allEntries) {
           const entryStart = new Date(entry.start_time);
-          const entryEnd = new Date(entry.end_time);
           const refBase = new Date('2099-01-01T00:00:00Z');
           const entryDayOffset = Math.round((entryStart.getTime() - refBase.getTime()) / (1000 * 60 * 60 * 24));
-          
-          if (entryDayOffset >= 0 && entryDayOffset < 365) { // sanity check - it's a 2099 reference date
+
+          if (entryDayOffset >= 0 && entryDayOffset < 365) {
             const realDate = addDays(startDate, entryDayOffset);
+            const entryEnd = new Date(entry.end_time);
             const startTimeStr = format(entryStart, 'HH:mm:ss');
             const endTimeStr = format(entryEnd, 'HH:mm:ss');
             const newStart = `${format(realDate, 'yyyy-MM-dd')}T${startTimeStr}Z`;
             const newEnd = `${format(realDate, 'yyyy-MM-dd')}T${endTimeStr}Z`;
-            
+
             await supabase.from('entries').update({
               start_time: newStart,
               end_time: newEnd,
@@ -269,7 +305,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
           }
         }
       }
-      
+
       toast({ title: 'Trip dates set based on your flight! 🎉' });
     } catch (err) {
       console.error('Failed to auto-detect trip dates:', err);
@@ -294,7 +330,6 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
       if (isFlight) {
         startIso = localToUTC(entryDate, startTime, departureTz);
         endIso = localToUTC(entryDate, endTime, arrivalTz);
-        // Handle next-day arrival
         if (new Date(endIso) <= new Date(startIso)) {
           const nextDay = format(addDays(parseISO(entryDate), 1), 'yyyy-MM-dd');
           endIso = localToUTC(nextDay, endTime, arrivalTz);
@@ -323,7 +358,6 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         entryId = data.id;
       }
 
-      // Save/update the option
       const cat = allCategories.find(c => c.id === categoryId);
       const optionPayload = {
         entry_id: entryId,
@@ -332,10 +366,10 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         category: cat ? cat.id : null,
         category_color: cat?.color ?? null,
         location_name: locationName.trim() || null,
-        latitude: latitude ? parseFloat(latitude) : null,
-        longitude: longitude ? parseFloat(longitude) : null,
-        departure_location: isFlight ? (departureLocation.trim() || null) : null,
-        arrival_location: isFlight ? (arrivalLocation.trim() || null) : null,
+        latitude: null,
+        longitude: null,
+        departure_location: isFlight ? (departureLocation.trim() || null) : isTransfer ? (transferFrom.trim() || null) : null,
+        arrival_location: isFlight ? (arrivalLocation.trim() || null) : isTransfer ? (transferTo.trim() || null) : null,
         departure_tz: isFlight ? departureTz : null,
         arrival_tz: isFlight ? arrivalTz : null,
       };
@@ -382,7 +416,6 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   const handleReturnFlightConfirm = () => {
     if (!returnFlightData) return;
     setShowReturnPrompt(false);
-    // Re-open form with reversed flight data
     setCategoryId('flight');
     setName('');
     setDepartureLocation(returnFlightData.departureLocation);
@@ -391,8 +424,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setArrivalTz(returnFlightData.arrivalTz);
     setWebsite('');
     setLocationName('');
-    setLatitude('');
-    setLongitude('');
+    setTransferFrom('');
+    setTransferTo('');
     setDate('');
     setSelectedDay('0');
     const cat = PREDEFINED_CATEGORIES.find(c => c.id === 'flight');
@@ -434,7 +467,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   const stepTitle = step === 'category'
     ? 'What are you planning?'
     : step === 'details'
-      ? (isFlight ? '✈️ Flight Details' : `${selectedCategory?.emoji ?? '📌'} Details`)
+      ? (isFlight ? '✈️ Flight Details' : isTransfer ? '🚐 Transfer Details' : `${selectedCategory?.emoji ?? '📌'} Details`)
       : 'When?';
 
   return (
@@ -480,7 +513,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                 <Label htmlFor="opt-name">Name *</Label>
                 <Input
                   id="opt-name"
-                  placeholder={isFlight ? 'e.g. BA1234' : 'e.g. Anne Frank House'}
+                  placeholder={isFlight ? 'e.g. BA1234' : isTransfer ? 'e.g. Airport to Hotel' : 'e.g. Anne Frank House'}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   autoFocus
@@ -534,6 +567,49 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                 </>
               )}
 
+              {isTransfer && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>From</Label>
+                      <Input
+                        placeholder="e.g. Heathrow Airport"
+                        value={transferFrom}
+                        onChange={(e) => setTransferFrom(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>To</Label>
+                      <Input
+                        placeholder="e.g. Hotel Krasnapolsky"
+                        value={transferTo}
+                        onChange={(e) => setTransferTo(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Travel mode</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {TRAVEL_MODES.map((mode) => (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => setTransferMode(mode.id)}
+                          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-all ${
+                            transferMode === mode.id
+                              ? 'border-primary bg-primary/10 text-primary font-medium'
+                              : 'border-border bg-background text-muted-foreground hover:border-primary/40'
+                          }`}
+                        >
+                          <span className="text-base">{mode.emoji}</span>
+                          <span>{mode.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="opt-website">Website</Label>
                 <Input
@@ -545,27 +621,15 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                 />
               </div>
 
-              {!isFlight && (
-                <>
-                  <div className="space-y-2">
-                    <Label>Location Name</Label>
-                    <Input
-                      placeholder="e.g. Dam Square"
-                      value={locationName}
-                      onChange={(e) => setLocationName(e.target.value)}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label>Latitude</Label>
-                      <Input type="number" step="any" placeholder="52.3676" value={latitude} onChange={(e) => setLatitude(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Longitude</Label>
-                      <Input type="number" step="any" placeholder="4.9041" value={longitude} onChange={(e) => setLongitude(e.target.value)} />
-                    </div>
-                  </div>
-                </>
+              {!isFlight && !isTransfer && (
+                <div className="space-y-2">
+                  <Label>Location Name</Label>
+                  <Input
+                    placeholder="e.g. Dam Square"
+                    value={locationName}
+                    onChange={(e) => setLocationName(e.target.value)}
+                  />
+                </div>
               )}
 
               <DialogFooter className="gap-2">
@@ -590,7 +654,6 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                         ))}
                       </SelectContent>
                     </Select>
-                    {/* For flights on undated trips, allow entering a real date too */}
                     {isFlight && (
                       <div className="mt-2 space-y-1">
                         <Label htmlFor="flight-real-date" className="text-xs text-muted-foreground">
@@ -651,22 +714,37 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
               {/* Duration override (non-flight only) */}
               {!isFlight && (
                 <div className="space-y-2">
-                  <Label>Duration (minutes)</Label>
-                  <Input
-                    type="number"
-                    min={15}
-                    step={15}
-                    value={durationMin}
-                    onChange={(e) => {
-                      const d = parseInt(e.target.value) || 60;
-                      setDurationMin(d);
-                      const [h, m] = startTime.split(':').map(Number);
-                      const endTotalMin = h * 60 + m + d;
-                      const endH = Math.floor(endTotalMin / 60) % 24;
-                      const endM = endTotalMin % 60;
-                      setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
-                    }}
-                  />
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 space-y-1">
+                      <Label>Duration (minutes)</Label>
+                      <Input
+                        type="number"
+                        min={15}
+                        step={15}
+                        value={durationMin}
+                        onChange={(e) => {
+                          const d = parseInt(e.target.value) || 60;
+                          setDurationMin(d);
+                          const [h, m] = startTime.split(':').map(Number);
+                          const endTotalMin = h * 60 + m + d;
+                          const endH = Math.floor(endTotalMin / 60) % 24;
+                          const endM = endTotalMin % 60;
+                          setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
+                        }}
+                      />
+                    </div>
+                    {isTransfer && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-6"
+                        onClick={calcTransferDuration}
+                        disabled={calcLoading}
+                      >
+                        {calcLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Calculate'}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
 

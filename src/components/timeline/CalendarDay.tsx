@@ -1,9 +1,11 @@
-import { format, isToday, isPast } from 'date-fns';
+import { useCallback } from 'react';
+import { format, isToday, isPast, addMinutes } from 'date-fns';
 import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
 import { computeOverlapLayout } from '@/lib/overlapLayout';
 import { Plus } from 'lucide-react';
+import { useDragResize } from '@/hooks/useDragResize';
 import TimeSlotGrid from './TimeSlotGrid';
 import EntryCard from './EntryCard';
 import TravelSegmentCard from './TravelSegmentCard';
@@ -30,6 +32,7 @@ interface CalendarDayProps {
   isFirstDay?: boolean;
   isLastDay?: boolean;
   onAddBetween?: (prefillTime: string) => void;
+  onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
 }
 
 function getHourInTimezone(isoString: string, tzName: string): number {
@@ -46,7 +49,7 @@ function getHourInTimezone(isoString: string, tzName: string): number {
 }
 
 const CalendarDay = ({
-  date,
+  date: dayDate,
   entries,
   formatTime,
   tripTimezone,
@@ -64,10 +67,11 @@ const CalendarDay = ({
   isFirstDay,
   isLastDay,
   onAddBetween,
+  onEntryTimeChange,
 }: CalendarDayProps) => {
   const isUndated = !!dayLabel;
-  const today = !isUndated && isToday(date);
-  const dayPast = !isUndated && isPast(date) && !today;
+  const today = !isUndated && isToday(dayDate);
+  const dayPast = !isUndated && isPast(dayDate) && !today;
 
   const sortedEntries = [...entries].sort(
     (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
@@ -81,7 +85,6 @@ const CalendarDay = ({
     const hours = sortedEntries.flatMap(e => {
       const s = getHourInTimezone(e.start_time, tripTimezone);
       let en = getHourInTimezone(e.end_time, tripTimezone);
-      // Handle cross-midnight (end < start means next day arrival)
       if (en < s) en = 24;
       return [s, en];
     });
@@ -92,11 +95,33 @@ const CalendarDay = ({
   const totalHours = endHour - startHour;
   const containerHeight = totalHours * PIXELS_PER_HOUR;
 
+  // Drag-to-resize/move
+  const handleDragCommit = useCallback((entryId: string, newStartHour: number, newEndHour: number) => {
+    if (!onEntryTimeChange) return;
+    // Convert hours back to ISO strings using the day's date
+    const dateStr = format(dayDate, 'yyyy-MM-dd');
+    const startMinutes = Math.round(newStartHour * 60);
+    const endMinutes = Math.round(newEndHour * 60);
+    const sH = Math.floor(startMinutes / 60);
+    const sM = startMinutes % 60;
+    const eH = Math.floor(endMinutes / 60);
+    const eM = endMinutes % 60;
+    const newStartIso = `${dateStr}T${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}:00+00:00`;
+    const newEndIso = `${dateStr}T${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}:00+00:00`;
+    onEntryTimeChange(entryId, newStartIso, newEndIso);
+  }, [onEntryTimeChange, dayDate]);
+
+  const { dragState, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
+    pixelsPerHour: PIXELS_PER_HOUR,
+    startHour,
+    onCommit: handleDragCommit,
+  });
+
   // Compute overlap layout
   const layoutEntries = sortedEntries.map(e => {
     const s = (getHourInTimezone(e.start_time, tripTimezone) - startHour) * 60;
     let en = (getHourInTimezone(e.end_time, tripTimezone) - startHour) * 60;
-    if (en <= s) en = s + 120; // cross-midnight: show at least 2h span
+    if (en <= s) en = s + 120;
     return { id: e.id, startMinutes: s, endMinutes: en };
   });
 
@@ -105,12 +130,24 @@ const CalendarDay = ({
 
   const getWeatherForEntry = (entry: EntryWithOptions) => {
     const hour = Math.floor(getHourInTimezone(entry.start_time, tripTimezone));
-    const dateStr = format(date, 'yyyy-MM-dd');
+    const dateStr = format(dayDate, 'yyyy-MM-dd');
     return weatherData.find(w => w.date === dateStr && w.hour === hour);
   };
 
   const getTravelSegment = (fromId: string, toId: string) => {
     return travelSegments.find(s => s.from_entry_id === fromId && s.to_entry_id === toId);
+  };
+
+  // Check if a manual Transfer entry exists between two entries
+  const hasTransferBetween = (entryA: EntryWithOptions, entryB: EntryWithOptions): boolean => {
+    const aEnd = new Date(entryA.end_time).getTime();
+    const bStart = new Date(entryB.start_time).getTime();
+    return sortedEntries.some(e => {
+      const opt = e.options[0];
+      if (!opt || opt.category !== 'transfer') return false;
+      const eStart = new Date(e.start_time).getTime();
+      return eStart >= aEnd && eStart <= bStart;
+    });
   };
 
   return (
@@ -128,19 +165,19 @@ const CalendarDay = ({
             'font-display text-sm font-bold',
             today ? 'text-primary' : dayPast ? 'text-muted-foreground' : 'text-foreground'
           )}>
-            {isUndated ? dayLabel : format(date, 'EEEE')}
+            {isUndated ? dayLabel : format(dayDate, 'EEEE')}
           </span>
           {!isUndated && (
             <span className={cn(
               'text-xs',
               today ? 'text-primary/70' : 'text-muted-foreground'
             )}>
-              {format(date, 'd MMM')}
+              {format(dayDate, 'd MMM')}
             </span>
           )}
           {isUndated && (
             <span className="text-xs text-muted-foreground">
-              {format(date, 'EEEE')}
+              {format(dayDate, 'EEEE')}
             </span>
           )}
           {today && (
@@ -170,11 +207,10 @@ const CalendarDay = ({
             )}>
               No plans yet
             </div>
-            {/* Add button for empty days */}
             {onAddBetween && (
               <div className="flex justify-center pb-2">
                 <button
-                  onClick={() => onAddBetween(date.toISOString())}
+                  onClick={() => onAddBetween(dayDate.toISOString())}
                   className="flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -188,9 +224,30 @@ const CalendarDay = ({
               startHour={startHour}
               endHour={endHour}
               pixelsPerHour={PIXELS_PER_HOUR}
-              date={date}
+              date={dayDate}
               onClickSlot={onClickSlot}
             />
+
+            {/* "+" before first entry */}
+            {onAddBetween && sortedEntries.length > 0 && (() => {
+              const firstEntry = sortedEntries[0];
+              const firstStartHour = getHourInTimezone(firstEntry.start_time, tripTimezone);
+              const firstTop = Math.max(0, (firstStartHour - startHour) * PIXELS_PER_HOUR);
+              const prefillDate = addMinutes(new Date(firstEntry.start_time), -60);
+              return (
+                <div
+                  className="absolute left-0 z-[15] flex w-10 items-center justify-center"
+                  style={{ top: Math.max(0, firstTop - 14) }}
+                >
+                  <button
+                    onClick={() => onAddBetween(prefillDate.toISOString())}
+                    className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })()}
 
             {/* Positioned entries */}
             {sortedEntries.map((entry, index) => {
@@ -198,10 +255,20 @@ const CalendarDay = ({
               const primaryOption = entry.options[0];
               if (!primaryOption) return null;
 
-              const entryStartHour = getHourInTimezone(entry.start_time, tripTimezone);
-              let entryEndHour = getHourInTimezone(entry.end_time, tripTimezone);
-              // Handle cross-midnight
-              if (entryEndHour < entryStartHour) entryEndHour = 24;
+              // Check if this entry is being dragged
+              const isDragged = dragState?.entryId === entry.id;
+              let entryStartHour: number;
+              let entryEndHour: number;
+
+              if (isDragged && dragState) {
+                entryStartHour = dragState.currentStartHour;
+                entryEndHour = dragState.currentEndHour;
+              } else {
+                entryStartHour = getHourInTimezone(entry.start_time, tripTimezone);
+                entryEndHour = getHourInTimezone(entry.end_time, tripTimezone);
+                if (entryEndHour < entryStartHour) entryEndHour = 24;
+              }
+
               const top = Math.max(0, (entryStartHour - startHour) * PIXELS_PER_HOUR);
               const height = Math.max(60, (entryEndHour - entryStartHour) * PIXELS_PER_HOUR);
 
@@ -220,11 +287,20 @@ const CalendarDay = ({
 
               const nextEntry = sortedEntries[index + 1];
               const travelSeg = nextEntry ? getTravelSegment(entry.id, nextEntry.id) : null;
+              const showTravelSeg = travelSeg && nextEntry && !hasTransferBetween(entry, nextEntry);
+
+              // Original hours for drag initiation
+              const origStartHour = getHourInTimezone(entry.start_time, tripTimezone);
+              let origEndHour = getHourInTimezone(entry.end_time, tripTimezone);
+              if (origEndHour < origStartHour) origEndHour = 24;
 
               return (
                 <div key={entry.id}>
                   <div
-                    className="absolute z-10 pr-1"
+                    className={cn(
+                      'absolute z-10 pr-1',
+                      isDragged && 'opacity-80 z-30'
+                    )}
                     style={{
                       top,
                       height,
@@ -233,11 +309,23 @@ const CalendarDay = ({
                     }}
                   >
                     <div className="relative h-full">
+                      {/* Top resize handle */}
+                      {onEntryTimeChange && (
+                        <div
+                          className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
+                          onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartHour, origEndHour)}
+                          onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartHour, origEndHour)}
+                          onTouchMove={onTouchMove}
+                          onTouchEnd={onTouchEnd}
+                        />
+                      )}
+
                       {weather && (
                         <div className="absolute right-2 top-2 z-20">
                           <WeatherBadge temp={weather.temp_c} condition={weather.condition} />
                         </div>
                       )}
+
                       <EntryCard
                         option={primaryOption}
                         startTime={entry.start_time}
@@ -251,9 +339,31 @@ const CalendarDay = ({
                         userId={userId}
                         hasVoted={userVotes.includes(primaryOption.id)}
                         onVoteChange={onVoteChange}
-                        onClick={() => onCardTap(entry, primaryOption)}
+                        onClick={() => {
+                          if (!isDragged) onCardTap(entry, primaryOption);
+                        }}
                         cardSizeClass="h-full"
+                        isDragging={isDragged}
+                        onDragStart={onEntryTimeChange ? (e) => {
+                          onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour);
+                        } : undefined}
+                        onTouchDragStart={onEntryTimeChange ? (e) => {
+                          onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour);
+                        } : undefined}
+                        onTouchDragMove={onTouchMove}
+                        onTouchDragEnd={onTouchEnd}
                       />
+
+                      {/* Bottom resize handle */}
+                      {onEntryTimeChange && (
+                        <div
+                          className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
+                          onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartHour, origEndHour)}
+                          onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartHour, origEndHour)}
+                          onTouchMove={onTouchMove}
+                          onTouchEnd={onTouchEnd}
+                        />
+                      )}
                     </div>
                   </div>
 
@@ -272,8 +382,8 @@ const CalendarDay = ({
                     </div>
                   )}
 
-                  {/* Travel segment connector */}
-                  {travelSeg && (
+                  {/* Travel segment connector (skip if manual Transfer exists between) */}
+                  {showTravelSeg && (
                     <div
                       className="absolute left-0 right-0 z-[5]"
                       style={{ top: top + height }}

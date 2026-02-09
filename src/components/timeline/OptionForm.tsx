@@ -21,32 +21,26 @@ const OptionForm = ({ entryId, onSaved, customCategories = [], editOption }: Opt
   const [categoryId, setCategoryId] = useState('');
   const [travelMode, setTravelMode] = useState('transit');
   const [locationName, setLocationName] = useState('');
-  const [latitude, setLatitude] = useState('');
-  const [longitude, setLongitude] = useState('');
   const [saving, setSaving] = useState(false);
 
   const isEditing = !!editOption;
 
-  // Build the full list: predefined + custom
   const allCategories = [
     ...PREDEFINED_CATEGORIES.map(c => ({ id: c.id, name: c.name, emoji: c.emoji, color: c.color })),
     ...customCategories.map((c, i) => ({ id: `custom_${i}`, name: c.name, emoji: c.emoji || '📌', color: c.color })),
   ];
 
-  // Pre-fill when editing
   useEffect(() => {
     if (editOption) {
       setName(editOption.name);
       setWebsite(editOption.website ?? '');
       setCategoryId(editOption.category ?? '');
       setLocationName(editOption.location_name ?? '');
-      setLatitude(editOption.latitude != null ? String(editOption.latitude) : '');
-      setLongitude(editOption.longitude != null ? String(editOption.longitude) : '');
     }
   }, [editOption]);
 
   const selectedCategory = categoryId ? allCategories.find(c => c.id === categoryId) : null;
-  const isTravel = categoryId === 'travel';
+  const isTransfer = categoryId === 'transfer';
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -66,8 +60,8 @@ const OptionForm = ({ entryId, onSaved, customCategories = [], editOption }: Opt
         category: cat ? cat.id : null,
         category_color: displayColor,
         location_name: locationName.trim() || null,
-        latitude: latitude ? parseFloat(latitude) : null,
-        longitude: longitude ? parseFloat(longitude) : null,
+        latitude: null,
+        longitude: null,
       };
 
       if (isEditing && editOption) {
@@ -93,7 +87,6 @@ const OptionForm = ({ entryId, onSaved, customCategories = [], editOption }: Opt
 
   return (
     <div className="space-y-4">
-      {/* Category picker */}
       <div className="space-y-2">
         <Label>Category</Label>
         <Select value={categoryId} onValueChange={setCategoryId}>
@@ -117,8 +110,7 @@ const OptionForm = ({ entryId, onSaved, customCategories = [], editOption }: Opt
         </Select>
       </div>
 
-      {/* Travel mode selector */}
-      {isTravel && (
+      {isTransfer && (
         <div className="space-y-2">
           <Label>Travel mode</Label>
           <div className="grid grid-cols-2 gap-2">
@@ -170,31 +162,6 @@ const OptionForm = ({ entryId, onSaved, customCategories = [], editOption }: Opt
           value={locationName}
           onChange={(e) => setLocationName(e.target.value)}
         />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-2">
-          <Label htmlFor="opt-lat">Latitude</Label>
-          <Input
-            id="opt-lat"
-            type="number"
-            step="any"
-            placeholder="52.3676"
-            value={latitude}
-            onChange={(e) => setLatitude(e.target.value)}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="opt-lng">Longitude</Label>
-          <Input
-            id="opt-lng"
-            type="number"
-            step="any"
-            placeholder="4.9041"
-            value={longitude}
-            onChange={(e) => setLongitude(e.target.value)}
-          />
-        </div>
       </div>
 
       <Button onClick={handleSave} disabled={saving} className="w-full">

@@ -21,12 +21,43 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { tripId } = await req.json();
-    if (!tripId) throw new Error('tripId is required');
+    const body = await req.json();
+
+    // --- Mode 1: Single address-based lookup (for Transfer entries) ---
+    if (body.fromAddress && body.toAddress) {
+      const { fromAddress, toAddress, mode } = body;
+      const travelMode = mode || 'transit';
+
+      console.log(`Fetching directions: "${fromAddress}" -> "${toAddress}" (${travelMode})`);
+
+      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(fromAddress)}&destination=${encodeURIComponent(toAddress)}&mode=${travelMode}&key=${GOOGLE_MAPS_API_KEY}`;
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (data.status !== 'OK' || !data.routes?.length) {
+        return new Response(
+          JSON.stringify({ error: `No route found: ${data.status}`, duration_min: null, distance_km: null }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const leg = data.routes[0].legs[0];
+      return new Response(
+        JSON.stringify({
+          duration_min: Math.round(leg.duration.value / 60),
+          distance_km: Math.round(leg.distance.value / 100) / 10,
+          mode: travelMode,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // --- Mode 2: Trip-wide batch calculation (existing flow) ---
+    const { tripId } = body;
+    if (!tripId) throw new Error('tripId or fromAddress/toAddress is required');
 
     console.log(`Fetching directions for trip: ${tripId}`);
 
-    // Get all entries ordered by start_time
     const { data: entries, error: entriesError } = await supabase
       .from('entries')
       .select('id, start_time, end_time')
@@ -42,7 +73,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Get options with coordinates for each entry
     const entryIds = entries.map((e: any) => e.id);
     const { data: options, error: optionsError } = await supabase
       .from('entry_options')
@@ -53,7 +83,6 @@ Deno.serve(async (req) => {
 
     if (optionsError) throw optionsError;
 
-    // Map entries to their first option with coordinates
     const entryCoords = new Map<string, { lat: number; lng: number }>();
     for (const opt of (options ?? [])) {
       if (!entryCoords.has(opt.entry_id) && opt.latitude && opt.longitude) {
@@ -61,7 +90,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Delete existing segments
     await supabase
       .from('travel_segments')
       .delete()
@@ -69,7 +97,6 @@ Deno.serve(async (req) => {
 
     const segments = [];
 
-    // Compute directions for consecutive entries
     for (let i = 0; i < entries.length - 1; i++) {
       const fromCoords = entryCoords.get(entries[i].id);
       const toCoords = entryCoords.get(entries[i + 1].id);
