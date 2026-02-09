@@ -86,15 +86,16 @@ const FlightGroupCard = ({
       {/* Check-in section */}
       {checkinEntry && (
         <div
-          className="flex items-center gap-2 px-3 py-1.5 text-[11px] border-b border-border/30"
-          style={{ background: `${catColor}12` }}
+          className="flex items-center gap-2 px-3 py-1.5 text-[10px]"
+          style={{ background: `${catColor}0A`, borderBottom: `2px solid ${catColor}30` }}
         >
-          <span className="font-semibold text-muted-foreground">✈️ Check-in</span>
-          <span className="text-muted-foreground/70">
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: catColor }} />
+          <span className="font-semibold text-muted-foreground/70">Check-in</span>
+          <span className="text-muted-foreground/50">
             {depCode}{flightOption.departure_terminal ? ` T${flightOption.departure_terminal}` : ''}
           </span>
-          <span className="ml-auto text-muted-foreground/60 flex items-center gap-1">
-            <Clock className="h-3 w-3" />
+          <span className="ml-auto text-muted-foreground/50 flex items-center gap-1">
+            <Clock className="h-2.5 w-2.5" />
             {formatTimeInTz(checkinEntry.start_time, flightOption.departure_tz)} – {formatTimeInTz(checkinEntry.end_time, flightOption.departure_tz)}
           </span>
         </div>
@@ -108,10 +109,10 @@ const FlightGroupCard = ({
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
           </div>
         ) : (
-          <div className="absolute inset-0" style={{ background: `${catColor}18` }} />
+          <div className="absolute inset-0" style={{ background: `${catColor}22` }} />
         )}
 
-        <div className={cn('relative z-10 p-3', firstImage ? 'text-white' : 'text-foreground')}>
+        <div className={cn('relative z-10 p-4', firstImage ? 'text-white' : 'text-foreground')}>
           {/* Category badge */}
           <span
             className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold mb-2"
@@ -121,20 +122,20 @@ const FlightGroupCard = ({
           </span>
 
           {/* Flight name */}
-          <h3 className="mb-1.5 font-display text-base font-bold leading-tight">
+          <h3 className="mb-1.5 font-display text-lg font-bold leading-tight">
             {flightOption.name}
           </h3>
 
           {/* Route with times */}
           <div className={cn(
-            'flex items-center gap-1.5 text-xs',
+            'flex items-center gap-2 text-sm',
             firstImage ? 'text-white/80' : 'text-muted-foreground'
           )}>
             <span>
               {depCode}{flightOption.departure_terminal ? ` T${flightOption.departure_terminal}` : ''}{' '}
               {formatTimeInTz(flightEntry.start_time, flightOption.departure_tz)}
             </span>
-            <ArrowRight className="h-3 w-3 shrink-0" />
+            <ArrowRight className="h-3.5 w-3.5 shrink-0" />
             <span>
               {arrCode}{flightOption.arrival_terminal ? ` T${flightOption.arrival_terminal}` : ''}{' '}
               {formatTimeInTz(flightEntry.end_time, flightOption.arrival_tz)}
@@ -146,15 +147,16 @@ const FlightGroupCard = ({
       {/* Checkout section */}
       {checkoutEntry && (
         <div
-          className="flex items-center gap-2 px-3 py-1.5 text-[11px] border-t border-border/30"
-          style={{ background: `${catColor}12` }}
+          className="flex items-center gap-2 px-3 py-1.5 text-[10px]"
+          style={{ background: `${catColor}0A`, borderTop: `2px solid ${catColor}30` }}
         >
-          <span className="font-semibold text-muted-foreground">🛬 Checkout</span>
-          <span className="text-muted-foreground/70">
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: catColor }} />
+          <span className="font-semibold text-muted-foreground/70">Checkout</span>
+          <span className="text-muted-foreground/50">
             {arrCode}{flightOption.arrival_terminal ? ` T${flightOption.arrival_terminal}` : ''}
           </span>
-          <span className="ml-auto text-muted-foreground/60 flex items-center gap-1">
-            <Clock className="h-3 w-3" />
+          <span className="ml-auto text-muted-foreground/50 flex items-center gap-1">
+            <Clock className="h-2.5 w-2.5" />
             {formatTimeInTz(checkoutEntry.start_time, flightOption.arrival_tz)} – {formatTimeInTz(checkoutEntry.end_time, flightOption.arrival_tz)}
           </span>
         </div>
