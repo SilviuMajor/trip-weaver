@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Save, Copy, X, Check, Plus } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { ArrowLeft, Save, Copy, X, Check, Plus, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { toast } from '@/hooks/use-toast';
@@ -22,6 +23,7 @@ const TripSettings = () => {
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
 
   // Add member state
   const [newMemberName, setNewMemberName] = useState('');
@@ -116,6 +118,19 @@ const TripSettings = () => {
     setAddingMember(false);
   };
 
+  const handleDeleteTrip = async () => {
+    if (!tripId) return;
+    setDeleting(true);
+    const { error } = await supabase.from('trips').delete().eq('id', tripId);
+    if (error) {
+      toast({ title: 'Failed to delete trip', description: error.message, variant: 'destructive' });
+      setDeleting(false);
+    } else {
+      toast({ title: 'Trip deleted' });
+      navigate('/dashboard');
+    }
+  };
+
   if (authLoading || loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -139,18 +154,9 @@ const TripSettings = () => {
         {/* Name & Destination */}
         <section className="space-y-3">
           <Label htmlFor="trip-name" className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Trip Name</Label>
-          <Input
-            id="trip-name"
-            value={tripName}
-            onChange={(e) => setTripName(e.target.value)}
-          />
+          <Input id="trip-name" value={tripName} onChange={(e) => setTripName(e.target.value)} />
           <Label htmlFor="trip-destination" className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Destination</Label>
-          <Input
-            id="trip-destination"
-            value={tripDestination}
-            onChange={(e) => setTripDestination(e.target.value)}
-            placeholder="Amsterdam, Netherlands"
-          />
+          <Input id="trip-destination" value={tripDestination} onChange={(e) => setTripDestination(e.target.value)} placeholder="Amsterdam, Netherlands" />
           <Button onClick={handleSave} disabled={saving} size="sm">
             <Save className="mr-1.5 h-4 w-4" />
             {saving ? 'Saving…' : 'Save'}
@@ -183,19 +189,14 @@ const TripSettings = () => {
                   <p className="truncate font-medium">{m.name}</p>
                 </div>
                 <Select value={m.role} onValueChange={(v) => handleRoleChange(m.id, v)}>
-                  <SelectTrigger className="w-28">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="organizer">Organizer</SelectItem>
                     <SelectItem value="editor">Editor</SelectItem>
                     <SelectItem value="viewer">Viewer</SelectItem>
                   </SelectContent>
                 </Select>
-                <button
-                  onClick={() => handleRemoveMember(m.id)}
-                  className="text-muted-foreground hover:text-destructive"
-                >
+                <button onClick={() => handleRemoveMember(m.id)} className="text-muted-foreground hover:text-destructive">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -209,35 +210,56 @@ const TripSettings = () => {
           <div className="flex items-end gap-2 rounded-lg border border-dashed border-border p-3">
             <div className="min-w-0 flex-1 space-y-1">
               <Label className="text-xs text-muted-foreground">Name</Label>
-              <Input
-                value={newMemberName}
-                onChange={(e) => setNewMemberName(e.target.value)}
-                placeholder="New member name"
-                className="h-9"
-              />
+              <Input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="New member name" className="h-9" />
             </div>
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">Role</Label>
               <Select value={newMemberRole} onValueChange={setNewMemberRole}>
-                <SelectTrigger className="h-9 w-28">
-                  <SelectValue />
-                </SelectTrigger>
+                <SelectTrigger className="h-9 w-28"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="editor">Editor</SelectItem>
                   <SelectItem value="viewer">Viewer</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <Button
-              size="sm"
-              className="h-9"
-              disabled={!newMemberName.trim() || addingMember}
-              onClick={handleAddMember}
-            >
-              <Plus className="mr-1 h-3.5 w-3.5" />
-              Add
+            <Button size="sm" className="h-9" disabled={!newMemberName.trim() || addingMember} onClick={handleAddMember}>
+              <Plus className="mr-1 h-3.5 w-3.5" />Add
             </Button>
           </div>
+        </section>
+
+        {/* Danger Zone */}
+        <section className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+          <Label className="text-sm font-semibold uppercase tracking-wider text-destructive">Danger Zone</Label>
+          <p className="text-sm text-muted-foreground">
+            Deleting this trip will permanently remove all entries, options, votes, and travel data. This cannot be undone.
+          </p>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm">
+                <Trash2 className="mr-1.5 h-4 w-4" />
+                Delete Trip
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete "{trip?.name}"?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete the trip and all its entries, options, votes, images, and travel segments. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleDeleteTrip}
+                  disabled={deleting}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  {deleting ? 'Deleting…' : 'Yes, delete trip'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </section>
       </main>
     </div>

@@ -5,7 +5,6 @@ import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
 import { ArrowDown, ZoomIn, ZoomOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useTimezone } from '@/hooks/useTimezone';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useTimelineZoom } from '@/hooks/useTimelineZoom';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
@@ -19,7 +18,6 @@ const Timeline = () => {
   const { tripId } = useParams<{ tripId: string }>();
   const { currentUser } = useCurrentUser();
   const navigate = useNavigate();
-  const { timezone, toggle, formatTime, getTimezoneLabel } = useTimezone();
   const { latitude: userLat, longitude: userLng } = useGeolocation();
 
   const [trip, setTrip] = useState<Trip | null>(null);
@@ -28,6 +26,18 @@ const Timeline = () => {
   const [travelSegments, setTravelSegments] = useState<TravelSegment[]>([]);
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const tripTimezone = trip?.timezone ?? 'Europe/Amsterdam';
+
+  const formatTime = useCallback((isoString: string) => {
+    const d = new Date(isoString);
+    return d.toLocaleTimeString('en-GB', {
+      timeZone: tripTimezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  }, [tripTimezone]);
 
   // Overlay state
   const [overlayEntry, setOverlayEntry] = useState<EntryWithOptions | null>(null);
@@ -204,9 +214,6 @@ const Timeline = () => {
       <TimelineHeader
         trip={trip}
         tripId={tripId ?? ''}
-        timezone={timezone}
-        onToggleTimezone={toggle}
-        timezoneLabel={getTimezoneLabel()}
         onAddEntry={() => setEntryFormOpen(true)}
         onDataRefresh={fetchData}
       />
@@ -236,7 +243,7 @@ const Timeline = () => {
                 date={day}
                 entries={getEntriesForDay(day)}
                 formatTime={formatTime}
-                timezone={timezone}
+                tripTimezone={tripTimezone}
                 userLat={userLat}
                 userLng={userLng}
                 votingLocked={trip.voting_locked}
