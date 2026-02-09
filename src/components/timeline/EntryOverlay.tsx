@@ -3,7 +3,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Clock, ExternalLink, Pencil, Trash2, Lock, Unlock } from 'lucide-react';
+import { Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, Lightbulb } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import type { EntryOption, EntryWithOptions } from '@/types/trip';
@@ -29,6 +29,7 @@ interface EntryOverlayProps {
   onImageUploaded: () => void;
   onEdit?: (entry: EntryWithOptions, option: EntryOption) => void;
   onDeleted?: () => void;
+  onMoveToIdeas?: (entryId: string) => void;
 }
 
 const EntryOverlay = ({
@@ -45,6 +46,7 @@ const EntryOverlay = ({
   onImageUploaded,
   onEdit,
   onDeleted,
+  onMoveToIdeas,
 }: EntryOverlayProps) => {
   const { currentUser, isEditor } = useCurrentUser();
   const [deleting, setDeleting] = useState(false);
@@ -166,9 +168,9 @@ const EntryOverlay = ({
             />
           )}
 
-          {/* Edit / Delete / Lock (editors only) */}
+          {/* Edit / Delete / Lock / Move to Ideas (editors only) */}
           {isEditor && (
-            <div className="flex items-center gap-2 border-t border-border pt-4">
+            <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
               {onEdit && (
                 <Button
                   variant="outline"
@@ -201,6 +203,17 @@ const EntryOverlay = ({
                   </>
                 )}
               </Button>
+
+              {onMoveToIdeas && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onMoveToIdeas(entry.id)}
+                >
+                  <Lightbulb className="mr-1.5 h-3.5 w-3.5" />
+                  Move to ideas
+                </Button>
+              )}
 
               <AlertDialog>
                 <AlertDialogTrigger asChild>

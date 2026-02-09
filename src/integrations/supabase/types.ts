@@ -20,8 +20,11 @@ export type Database = {
           end_time: string
           id: string
           is_locked: boolean
+          is_scheduled: boolean
           linked_flight_id: string | null
           linked_type: string | null
+          option_group_id: string | null
+          scheduled_day: number | null
           start_time: string
           trip_id: string
           updated_at: string
@@ -31,8 +34,11 @@ export type Database = {
           end_time: string
           id?: string
           is_locked?: boolean
+          is_scheduled?: boolean
           linked_flight_id?: string | null
           linked_type?: string | null
+          option_group_id?: string | null
+          scheduled_day?: number | null
           start_time: string
           trip_id: string
           updated_at?: string
@@ -42,8 +48,11 @@ export type Database = {
           end_time?: string
           id?: string
           is_locked?: boolean
+          is_scheduled?: boolean
           linked_flight_id?: string | null
           linked_type?: string | null
+          option_group_id?: string | null
+          scheduled_day?: number | null
           start_time?: string
           trip_id?: string
           updated_at?: string
@@ -54,6 +63,13 @@ export type Database = {
             columns: ["linked_flight_id"]
             isOneToOne: false
             referencedRelation: "entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entries_option_group_id_fkey"
+            columns: ["option_group_id"]
+            isOneToOne: false
+            referencedRelation: "option_groups"
             referencedColumns: ["id"]
           },
           {
@@ -135,6 +151,35 @@ export type Database = {
             columns: ["entry_id"]
             isOneToOne: false
             referencedRelation: "entries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      option_groups: {
+        Row: {
+          created_at: string
+          id: string
+          label: string
+          trip_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          label: string
+          trip_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          label?: string
+          trip_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "option_groups_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
             referencedColumns: ["id"]
           },
         ]
