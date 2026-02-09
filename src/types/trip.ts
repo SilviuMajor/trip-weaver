@@ -34,10 +34,20 @@ export interface Entry {
   start_time: string;
   end_time: string;
   is_locked: boolean;
+  is_scheduled: boolean;
+  scheduled_day: number | null;
+  option_group_id: string | null;
   linked_flight_id: string | null;
   linked_type: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface OptionGroup {
+  id: string;
+  trip_id: string;
+  label: string;
+  created_at: string;
 }
 
 export interface EntryOption {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
@@ -9,11 +9,17 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useTimelineZoom } from '@/hooks/useTimelineZoom';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
+import { useTravelCalculation } from '@/hooks/useTravelCalculation';
+import { analyzeConflict, generateRecommendations } from '@/lib/conflictEngine';
+import { toast } from '@/hooks/use-toast';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
 import CalendarDay from '@/components/timeline/CalendarDay';
 import EntryOverlay from '@/components/timeline/EntryOverlay';
 import EntryForm from '@/components/timeline/EntryForm';
+import IdeasPanel from '@/components/timeline/IdeasPanel';
+import ConflictResolver from '@/components/timeline/ConflictResolver';
 import type { Trip, Entry, EntryOption, EntryWithOptions, TravelSegment, WeatherData } from '@/types/trip';
+import type { ConflictInfo, Recommendation } from '@/lib/conflictEngine';
 
 const Timeline = () => {
   const { tripId } = useParams<{ tripId: string }>();
@@ -51,6 +57,18 @@ const Timeline = () => {
   const [editOption, setEditOption] = useState<EntryOption | null>(null);
   const [prefillStartTime, setPrefillStartTime] = useState<string | undefined>();
   const [prefillEndTime, setPrefillEndTime] = useState<string | undefined>();
+
+  // Ideas panel state
+  const [ideasPanelOpen, setIdeasPanelOpen] = useState(false);
+
+  // Conflict resolution state
+  const [conflictOpen, setConflictOpen] = useState(false);
+  const [currentConflict, setCurrentConflict] = useState<ConflictInfo | null>(null);
+  const [currentRecommendations, setCurrentRecommendations] = useState<Recommendation[]>([]);
+  const [pendingPlacement, setPendingPlacement] = useState<EntryWithOptions | null>(null);
+
+  // Travel calculation
+  const { calculateTravel } = useTravelCalculation();
 
   // Zoom
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -158,6 +176,14 @@ const Timeline = () => {
     }
   };
 
+  // Split entries into scheduled and unscheduled
+  const scheduledEntries = useMemo(() =>
+    entries.filter(e => e.is_scheduled !== false), [entries]
+  );
+  const unscheduledEntries = useMemo(() =>
+    entries.filter(e => e.is_scheduled === false), [entries]
+  );
+
   const isUndated = !trip?.start_date;
   const REFERENCE_DATE = '2099-01-01';
 
@@ -180,7 +206,7 @@ const Timeline = () => {
 
   const getEntriesForDay = (day: Date): EntryWithOptions[] => {
     const dayStr = format(day, 'yyyy-MM-dd');
-    return entries.filter(entry => {
+    return scheduledEntries.filter(entry => {
       const entryDay = getDateInTimezone(entry.start_time, tripTimezone);
       return entryDay === dayStr;
     });
@@ -221,6 +247,120 @@ const Timeline = () => {
     await fetchData();
   };
 
+  // Handle drop from ideas panel onto timeline
+  const handleDropOnTimeline = async (entryId: string, dayDate: Date, hourOffset: number) => {
+    const entry = entries.find(e => e.id === entryId);
+    if (!entry) return;
+
+    const dateStr = format(dayDate, 'yyyy-MM-dd');
+    const startMinutes = Math.round(hourOffset * 60);
+    const sH = Math.floor(startMinutes / 60);
+    const sM = startMinutes % 60;
+
+    // Default 1h duration
+    const endMinutes = startMinutes + 60;
+    const eH = Math.floor(endMinutes / 60);
+    const eM = endMinutes % 60;
+
+    const { localToUTC } = await import('@/lib/timezoneUtils');
+    const startIso = localToUTC(dateStr, `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`, tripTimezone);
+    const endIso = localToUTC(dateStr, `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`, tripTimezone);
+
+    // Update entry to scheduled
+    const { error } = await supabase
+      .from('entries')
+      .update({
+        is_scheduled: true,
+        start_time: startIso,
+        end_time: endIso,
+      } as any)
+      .eq('id', entryId);
+
+    if (error) {
+      toast({ title: 'Failed to place entry', description: error.message, variant: 'destructive' });
+      return;
+    }
+
+    await fetchData();
+
+    // Live travel calculation
+    const updatedEntry = { ...entry, start_time: startIso, end_time: endIso, is_scheduled: true };
+    const dayEntries = getEntriesForDay(dayDate);
+    const sortedDay = [...dayEntries, updatedEntry].sort(
+      (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+    );
+    const placedIdx = sortedDay.findIndex(e => e.id === entryId);
+    const prevEntry = placedIdx > 0 ? sortedDay[placedIdx - 1] : null;
+    const nextEntry = placedIdx < sortedDay.length - 1 ? sortedDay[placedIdx + 1] : null;
+
+    try {
+      const { prevTravel, nextTravel } = await calculateTravel(updatedEntry, prevEntry, nextEntry);
+
+      const conflict = analyzeConflict(
+        updatedEntry,
+        prevEntry,
+        nextEntry,
+        prevTravel?.durationMin ?? null,
+        nextTravel?.durationMin ?? null,
+      );
+
+      if (conflict.discrepancyMin > 0) {
+        const recs = generateRecommendations(conflict, sortedDay, entryId);
+        setCurrentConflict(conflict);
+        setCurrentRecommendations(recs);
+        setPendingPlacement(updatedEntry);
+        setConflictOpen(true);
+      } else {
+        toast({ title: 'Placed on timeline ✨' });
+      }
+    } catch {
+      // Travel calc failed silently, still placed
+      toast({ title: 'Placed on timeline ✨' });
+    }
+  };
+
+  const handleApplyRecommendation = async (rec: Recommendation) => {
+    for (const change of rec.changes) {
+      await supabase
+        .from('entries')
+        .update({ start_time: change.newStartIso, end_time: change.newEndIso })
+        .eq('id', change.entryId);
+    }
+    setConflictOpen(false);
+    setCurrentConflict(null);
+    setPendingPlacement(null);
+    toast({ title: 'Schedule adjusted ✨' });
+    await fetchData();
+  };
+
+  const handleSkipConflict = () => {
+    setConflictOpen(false);
+    setCurrentConflict(null);
+    setPendingPlacement(null);
+    toast({ title: 'Placed with conflict marker ⚠️', description: 'Adjust the schedule manually when ready.' });
+  };
+
+  // Handle "Move to ideas" from overlay
+  const handleMoveToIdeas = async (entryId: string) => {
+    const { error } = await supabase
+      .from('entries')
+      .update({ is_scheduled: false } as any)
+      .eq('id', entryId);
+    if (error) {
+      toast({ title: 'Failed to move', description: error.message, variant: 'destructive' });
+      return;
+    }
+    setOverlayOpen(false);
+    toast({ title: 'Moved to ideas panel 💡' });
+    await fetchData();
+  };
+
+  // Handle drag start from ideas panel
+  const handleIdeaDragStart = (e: React.DragEvent, entry: EntryWithOptions) => {
+    e.dataTransfer.setData('text/plain', entry.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
   const days = getDays();
 
   if (!currentUser) return null;
@@ -236,6 +376,8 @@ const Timeline = () => {
           setEntryFormOpen(true);
         }}
         onDataRefresh={fetchData}
+        onToggleIdeas={() => setIdeasPanelOpen(prev => !prev)}
+        ideasCount={unscheduledEntries.length}
       />
 
       {loading ? (
@@ -262,7 +404,7 @@ const Timeline = () => {
                 key={day.toISOString()}
                 date={day}
                 entries={getEntriesForDay(day)}
-                allEntries={entries}
+                allEntries={scheduledEntries}
                 formatTime={formatTime}
                 tripTimezone={tripTimezone}
                 userLat={userLat}
@@ -280,6 +422,7 @@ const Timeline = () => {
                 onAddBetween={handleAddBetween}
                 onDragSlot={handleDragSlot}
                 onEntryTimeChange={handleEntryTimeChange}
+                onDropFromPanel={(entryId, hourOffset) => handleDropOnTimeline(entryId, day, hourOffset)}
               />
             ))}
           </main>
@@ -324,6 +467,7 @@ const Timeline = () => {
               setEntryFormOpen(true);
             }}
             onDeleted={fetchData}
+            onMoveToIdeas={handleMoveToIdeas}
           />
 
           <EntryForm
@@ -344,6 +488,27 @@ const Timeline = () => {
             editOption={editOption}
             prefillStartTime={prefillStartTime}
             prefillEndTime={prefillEndTime}
+          />
+
+          <IdeasPanel
+            open={ideasPanelOpen}
+            onOpenChange={setIdeasPanelOpen}
+            entries={unscheduledEntries}
+            scheduledEntries={scheduledEntries}
+            onDragStart={handleIdeaDragStart}
+            onCardTap={(entry) => {
+              const opt = entry.options[0];
+              if (opt) handleCardTap(entry, opt);
+            }}
+          />
+
+          <ConflictResolver
+            open={conflictOpen}
+            onOpenChange={setConflictOpen}
+            conflict={currentConflict}
+            recommendations={currentRecommendations}
+            onApply={handleApplyRecommendation}
+            onSkip={handleSkipConflict}
           />
         </>
       )}

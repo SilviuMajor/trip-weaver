@@ -36,6 +36,7 @@ interface CalendarDayProps {
   isLastDay?: boolean;
   onAddBetween?: (prefillTime: string) => void;
   onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
+  onDropFromPanel?: (entryId: string, hourOffset: number) => void;
 }
 
 function getHourInTimezone(isoString: string, tzName: string): number {
@@ -73,6 +74,7 @@ const CalendarDay = ({
   isLastDay,
   onAddBetween,
   onEntryTimeChange,
+  onDropFromPanel,
 }: CalendarDayProps) => {
   const isUndated = !!dayLabel;
   const today = !isUndated && isToday(dayDate);
@@ -270,7 +272,28 @@ const CalendarDay = ({
             )}
           </div>
         ) : (
-          <div className="relative ml-10" style={{ height: containerHeight, minHeight: 200 }}>
+          <div
+            className="relative ml-10"
+            style={{ height: containerHeight, minHeight: 200 }}
+            onDragOver={(e) => {
+              if (onDropFromPanel) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+              }
+            }}
+            onDrop={(e) => {
+              if (!onDropFromPanel) return;
+              e.preventDefault();
+              const entryId = e.dataTransfer.getData('text/plain');
+              if (!entryId) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              const y = e.clientY - rect.top;
+              const hourOffset = startHour + (y / PIXELS_PER_HOUR);
+              // Snap to 15 min
+              const snapped = Math.round(hourOffset * 4) / 4;
+              onDropFromPanel(entryId, snapped);
+            }}
+          >
             <TimeSlotGrid
               startHour={startHour}
               endHour={endHour}

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Button } from '@/components/ui/button';
-import { LogOut, Lock, Unlock, Plus, Route, CloudSun, Loader2, Settings, Home } from 'lucide-react';
+import { LogOut, Lock, Unlock, Plus, Route, CloudSun, Loader2, Settings, Home, Lightbulb } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { differenceInDays, parseISO } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
@@ -14,9 +14,11 @@ interface TimelineHeaderProps {
   tripId: string;
   onAddEntry?: () => void;
   onDataRefresh?: () => void;
+  onToggleIdeas?: () => void;
+  ideasCount?: number;
 }
 
-const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh }: TimelineHeaderProps) => {
+const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas, ideasCount = 0 }: TimelineHeaderProps) => {
   const { currentUser, logout, isOrganizer, isEditor } = useCurrentUser();
   const navigate = useNavigate();
   const [travelLoading, setTravelLoading] = useState(false);
@@ -122,6 +124,17 @@ const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh }: TimelineHea
           {isEditor && onAddEntry && (
             <Button variant="ghost" size="icon" onClick={onAddEntry} className="h-8 w-8">
               <Plus className="h-4 w-4" />
+            </Button>
+          )}
+
+          {onToggleIdeas && (
+            <Button variant="ghost" size="icon" onClick={onToggleIdeas} className="h-8 w-8 relative" title="Ideas panel">
+              <Lightbulb className="h-4 w-4 text-muted-foreground" />
+              {ideasCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
+                  {ideasCount}
+                </span>
+              )}
             </Button>
           )}
 

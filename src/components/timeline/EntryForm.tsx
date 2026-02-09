@@ -335,6 +335,59 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     }
   };
 
+  const handleSaveAsIdea = async () => {
+    if (!name.trim()) {
+      toast({ title: 'Name is required', variant: 'destructive' });
+      return;
+    }
+    setSaving(true);
+    try {
+      // Use a placeholder time for unscheduled entries
+      const placeholderDate = isUndated
+        ? format(addDays(parseISO(REFERENCE_DATE), Number(selectedDay)), 'yyyy-MM-dd')
+        : (date || format(new Date(), 'yyyy-MM-dd'));
+      const startIso = localToUTC(placeholderDate, '00:00', tripTimezone);
+      const endIso = localToUTC(placeholderDate, '01:00', tripTimezone);
+
+      const scheduledDay = isUndated ? Number(selectedDay) : null;
+
+      const { data, error } = await supabase
+        .from('entries')
+        .insert({
+          trip_id: tripId,
+          start_time: startIso,
+          end_time: endIso,
+          is_scheduled: false,
+          scheduled_day: scheduledDay,
+        } as any)
+        .select('id')
+        .single();
+      if (error) throw error;
+
+      const cat = allCategories.find(c => c.id === categoryId);
+      await supabase.from('entry_options').insert({
+        entry_id: data.id,
+        name: name.trim(),
+        website: website.trim() || null,
+        category: cat ? cat.id : null,
+        category_color: cat?.color ?? null,
+        location_name: locationName.trim() || null,
+        departure_location: isFlight ? (departureLocation.trim() || null) : isTransfer ? (transferFrom.trim() || null) : null,
+        arrival_location: isFlight ? (arrivalLocation.trim() || null) : isTransfer ? (transferTo.trim() || null) : null,
+        departure_tz: isFlight ? departureTz : null,
+        arrival_tz: isFlight ? arrivalTz : null,
+      } as any);
+
+      onCreated();
+      handleClose(false);
+      toast({ title: 'Added to ideas panel 💡' });
+    } catch (err: any) {
+      toast({ title: 'Failed to save', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSave = async () => {
     const entryDate = isUndated
       ? format(addDays(parseISO(REFERENCE_DATE), Number(selectedDay)), 'yyyy-MM-dd')
@@ -875,6 +928,13 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
 
               <DialogFooter className="gap-2">
                 <Button variant="outline" onClick={() => setStep('details')}>Back</Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleSaveAsIdea()}
+                  disabled={saving}
+                >
+                  💡 Add to Ideas
+                </Button>
                 <Button onClick={handleSave} disabled={saving}>
                   {saving ? 'Saving…' : (isEditing ? 'Update Entry' : 'Create Entry')}
                 </Button>
