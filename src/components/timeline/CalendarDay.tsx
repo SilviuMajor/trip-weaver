@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { format, isToday, isPast, addMinutes } from 'date-fns';
+import { calculateSunTimes } from '@/lib/sunCalc';
 import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
@@ -223,7 +224,7 @@ const CalendarDay = ({
       {/* Day header */}
       <div
         className={cn(
-          'sticky top-[57px] z-20 border-b border-border bg-background/90 px-4 py-2 backdrop-blur-md',
+          'sticky top-[57px] z-20 border-b border-border bg-background/90 px-4 py-1.5 backdrop-blur-md',
           today && 'border-primary/30 bg-primary/5'
         )}
         id={today ? 'today' : undefined}
@@ -285,7 +286,7 @@ const CalendarDay = ({
       )}
 
       {/* Calendar grid */}
-      <div className="mx-auto max-w-2xl px-4 py-3">
+      <div className="mx-auto max-w-2xl px-4 py-2">
         {sortedEntries.length === 0 ? (
           <div className="relative">
             <div className={cn(
@@ -512,6 +513,36 @@ const CalendarDay = ({
                 </div>
               );
             })}
+
+            {/* Sunrise/Sunset gradient line */}
+            {(() => {
+              // Use trip location or default lat/lng for sun calc
+              const sunTimes = calculateSunTimes(dayDate, userLat ?? 51.5, userLng ?? -0.1);
+              const sunriseHour = sunTimes.sunrise ? sunTimes.sunrise.getUTCHours() + sunTimes.sunrise.getUTCMinutes() / 60 : 6;
+              const sunsetHour = sunTimes.sunset ? sunTimes.sunset.getUTCHours() + sunTimes.sunset.getUTCMinutes() / 60 : 20;
+              
+              // Convert sun hours to percentage of the visible range
+              const toPercent = (h: number) => Math.max(0, Math.min(100, ((h - startHour) / totalHours) * 100));
+              const sunrisePct = toPercent(sunriseHour);
+              const sunsetPct = toPercent(sunsetHour);
+              const midPct = (sunrisePct + sunsetPct) / 2;
+              
+              const gradient = `linear-gradient(to bottom, 
+                hsl(220, 50%, 20%) 0%, 
+                hsl(30, 80%, 55%) ${sunrisePct}%, 
+                hsl(200, 60%, 70%) ${sunrisePct + (midPct - sunrisePct) * 0.3}%, 
+                hsl(200, 70%, 75%) ${midPct}%, 
+                hsl(200, 60%, 70%) ${sunsetPct - (midPct - sunrisePct) * 0.3}%, 
+                hsl(25, 80%, 50%) ${sunsetPct}%, 
+                hsl(220, 50%, 20%) 100%)`;
+              
+              return (
+                <div
+                  className="absolute top-0 bottom-0 rounded-full z-[4]"
+                  style={{ left: -52, width: 5, background: gradient }}
+                />
+              );
+            })()}
 
             {/* Weather column on the far left */}
             <div className="absolute top-0 bottom-0 z-[5]" style={{ left: -48, width: 44 }}>

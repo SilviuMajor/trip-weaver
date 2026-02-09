@@ -60,7 +60,7 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
     setDragState(state);
     dragStateRef.current = state;
     isDraggingRef.current = true;
-    wasDraggedRef.current = true;
+    wasDraggedRef.current = false;
   }, []);
 
   const handlePointerMove = useCallback((clientY: number) => {
@@ -68,6 +68,11 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
     if (!state) return;
 
     const deltaPixels = clientY - state.startY;
+
+    // Only flag as dragged once actual movement exceeds threshold
+    if (!wasDraggedRef.current && Math.abs(deltaPixels) > 5) {
+      wasDraggedRef.current = true;
+    }
     const deltaHours = deltaPixels / pixelsPerHour;
 
     let newStart = state.originalStartHour;

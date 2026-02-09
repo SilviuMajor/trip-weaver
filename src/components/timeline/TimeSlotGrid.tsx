@@ -266,7 +266,7 @@ const TimeSlotGrid = ({
             style={{ top: (hour - startHour) * pixelsPerHour }}
           >
             {hasDualTz && cols ? (
-            <div className="absolute -top-2.5 left-0 z-[15] flex select-none gap-0">
+            <div className="absolute -top-2.5 z-[15] flex select-none gap-0" style={{ left: -80 }}>
                 {cols.origin && (
                   <span
                     className="text-[9px] font-medium transition-opacity duration-300"
@@ -288,7 +288,7 @@ const TimeSlotGrid = ({
                 )}
               </div>
             ) : (
-              <span className="absolute -top-2.5 left-0 z-[15] select-none text-[10px] font-medium text-muted-foreground/50">
+              <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50" style={{ left: -56 }}>
                 {String(hour).padStart(2, '0')}:00
               </span>
             )}
