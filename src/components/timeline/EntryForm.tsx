@@ -10,33 +10,20 @@ import { toast } from '@/hooks/use-toast';
 import { addDays, format, parseISO } from 'date-fns';
 import { PREDEFINED_CATEGORIES, TRAVEL_MODES, type CategoryDef } from '@/lib/categories';
 import type { Trip, EntryWithOptions, EntryOption, CategoryPreset } from '@/types/trip';
+import { localToUTC } from '@/lib/timezoneUtils';
+import AirportPicker from './AirportPicker';
+import type { Airport } from '@/lib/airports';
 import { Loader2 } from 'lucide-react';
 
 const REFERENCE_DATE = '2099-01-01';
-
-const COMMON_TIMEZONES = [
-  { value: 'Europe/London', label: 'London (GMT/BST)' },
-  { value: 'Europe/Amsterdam', label: 'Amsterdam (CET/CEST)' },
-  { value: 'Europe/Paris', label: 'Paris (CET/CEST)' },
-  { value: 'Europe/Berlin', label: 'Berlin (CET/CEST)' },
-  { value: 'Europe/Madrid', label: 'Madrid (CET/CEST)' },
-  { value: 'Europe/Rome', label: 'Rome (CET/CEST)' },
-  { value: 'Europe/Lisbon', label: 'Lisbon (WET/WEST)' },
-  { value: 'Europe/Istanbul', label: 'Istanbul (TRT)' },
-  { value: 'America/New_York', label: 'New York (EST/EDT)' },
-  { value: 'America/Chicago', label: 'Chicago (CST/CDT)' },
-  { value: 'America/Los_Angeles', label: 'Los Angeles (PST/PDT)' },
-  { value: 'Asia/Dubai', label: 'Dubai (GST)' },
-  { value: 'Asia/Tokyo', label: 'Tokyo (JST)' },
-  { value: 'Asia/Singapore', label: 'Singapore (SGT)' },
-  { value: 'Australia/Sydney', label: 'Sydney (AEST/AEDT)' },
-];
 
 interface ReturnFlightData {
   departureLocation: string;
   arrivalLocation: string;
   departureTz: string;
   arrivalTz: string;
+  departureTerminal: string;
+  arrivalTerminal: string;
 }
 
 interface EntryFormProps {
@@ -69,6 +56,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   const [arrivalLocation, setArrivalLocation] = useState('');
   const [departureTz, setDepartureTz] = useState('Europe/London');
   const [arrivalTz, setArrivalTz] = useState('Europe/Amsterdam');
+  const [departureTerminal, setDepartureTerminal] = useState('');
+  const [arrivalTerminal, setArrivalTerminal] = useState('');
 
   // Transfer-specific
   const [transferFrom, setTransferFrom] = useState('');
@@ -134,6 +123,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         setArrivalLocation(editOption.arrival_location ?? '');
         setDepartureTz(editOption.departure_tz ?? 'Europe/London');
         setArrivalTz(editOption.arrival_tz ?? 'Europe/Amsterdam');
+        setDepartureTerminal(editOption.departure_terminal ?? '');
+        setArrivalTerminal(editOption.arrival_terminal ?? '');
         // For transfer: reuse departure/arrival as from/to
         if (editOption.category === 'transfer') {
           setTransferFrom(editOption.departure_location ?? '');
@@ -185,6 +176,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setArrivalLocation('');
     setDepartureTz('Europe/London');
     setArrivalTz('Europe/Amsterdam');
+    setDepartureTerminal('');
+    setArrivalTerminal('');
     setTransferFrom('');
     setTransferTo('');
     setTransferMode('transit');
@@ -240,6 +233,17 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     calcFlightDuration(startTime, newEnd, departureTz, arrivalTz, entryDate || '2099-01-01');
   };
 
+  // Airport selection handlers
+  const handleDepartureAirportChange = (airport: Airport) => {
+    setDepartureLocation(`${airport.iata} - ${airport.name}`);
+    setDepartureTz(airport.timezone);
+  };
+
+  const handleArrivalAirportChange = (airport: Airport) => {
+    setArrivalLocation(`${airport.iata} - ${airport.name}`);
+    setArrivalTz(airport.timezone);
+  };
+
   // Calculate transfer duration via Google Directions
   const calcTransferDuration = async () => {
     if (!transferFrom.trim() || !transferTo.trim()) {
@@ -254,7 +258,6 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
       if (error) throw error;
       if (data?.duration_min) {
         setDurationMin(data.duration_min);
-        // Recalculate end time
         const [h, m] = startTime.split(':').map(Number);
         const endTotalMin = h * 60 + m + data.duration_min;
         const endH = Math.floor(endTotalMin / 60) % 24;
@@ -335,8 +338,9 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
           endIso = localToUTC(nextDay, endTime, arrivalTz);
         }
       } else {
-        startIso = `${entryDate}T${startTime}:00+00:00`;
-        endIso = `${entryDate}T${endTime}:00+00:00`;
+        // Fix: convert local time to proper UTC using trip timezone
+        startIso = localToUTC(entryDate, startTime, tripTimezone);
+        endIso = localToUTC(entryDate, endTime, tripTimezone);
       }
 
       let entryId: string;
@@ -359,7 +363,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
       }
 
       const cat = allCategories.find(c => c.id === categoryId);
-      const optionPayload = {
+      const optionPayload: any = {
         entry_id: entryId,
         name: name.trim(),
         website: website.trim() || null,
@@ -372,6 +376,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         arrival_location: isFlight ? (arrivalLocation.trim() || null) : isTransfer ? (transferTo.trim() || null) : null,
         departure_tz: isFlight ? departureTz : null,
         arrival_tz: isFlight ? arrivalTz : null,
+        departure_terminal: isFlight ? (departureTerminal.trim() || null) : null,
+        arrival_terminal: isFlight ? (arrivalTerminal.trim() || null) : null,
       };
 
       if (isEditing && editOption) {
@@ -403,6 +409,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
           arrivalLocation: departureLocation,
           departureTz: arrivalTz,
           arrivalTz: departureTz,
+          departureTerminal: '',
+          arrivalTerminal: '',
         });
         setShowReturnPrompt(true);
       }
@@ -422,6 +430,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setArrivalLocation(returnFlightData.arrivalLocation);
     setDepartureTz(returnFlightData.departureTz);
     setArrivalTz(returnFlightData.arrivalTz);
+    setDepartureTerminal('');
+    setArrivalTerminal('');
     setWebsite('');
     setLocationName('');
     setTransferFrom('');
@@ -457,12 +467,18 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
   };
 
-  // Dynamic flight location label
-  const flightHintLabel = isFlight ? (() => {
-    const dLabel = departureLocation.trim() || COMMON_TIMEZONES.find(t => t.value === departureTz)?.label || departureTz;
-    const aLabel = arrivalLocation.trim() || COMMON_TIMEZONES.find(t => t.value === arrivalTz)?.label || arrivalTz;
-    return `Depart from ${dLabel} · Arrive at ${aLabel}`;
-  })() : '';
+  // Get timezone abbreviation for display
+  const getTzAbbr = (tz: string): string => {
+    try {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz,
+        timeZoneName: 'short',
+      }).formatToParts(new Date());
+      return parts.find(p => p.type === 'timeZoneName')?.value ?? tz;
+    } catch {
+      return tz;
+    }
+  };
 
   const stepTitle = step === 'category'
     ? 'What are you planning?'
@@ -522,46 +538,51 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
 
               {isFlight && (
                 <>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-3">
                     <div className="space-y-2">
-                      <Label>From (airport/city)</Label>
-                      <Input
-                        placeholder="e.g. LHR"
+                      <Label>Departure Airport</Label>
+                      <AirportPicker
                         value={departureLocation}
-                        onChange={(e) => setDepartureLocation(e.target.value)}
+                        onChange={handleDepartureAirportChange}
+                        placeholder="Search departure airport..."
                       />
+                      {departureTz && (
+                        <p className="text-xs text-muted-foreground">
+                          Timezone: {getTzAbbr(departureTz)}
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-2">
-                      <Label>To (airport/city)</Label>
+                      <Label>Departure Terminal</Label>
                       <Input
-                        placeholder="e.g. AMS"
-                        value={arrivalLocation}
-                        onChange={(e) => setArrivalLocation(e.target.value)}
+                        placeholder="e.g. Terminal 5, T2"
+                        value={departureTerminal}
+                        onChange={(e) => setDepartureTerminal(e.target.value)}
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+
+                  <div className="space-y-3">
                     <div className="space-y-2">
-                      <Label>Departure timezone</Label>
-                      <Select value={departureTz} onValueChange={setDepartureTz}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent className="bg-popover max-h-60">
-                          {COMMON_TIMEZONES.map(tz => (
-                            <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Label>Arrival Airport</Label>
+                      <AirportPicker
+                        value={arrivalLocation}
+                        onChange={handleArrivalAirportChange}
+                        placeholder="Search arrival airport..."
+                      />
+                      {arrivalTz && (
+                        <p className="text-xs text-muted-foreground">
+                          Timezone: {getTzAbbr(arrivalTz)}
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-2">
-                      <Label>Arrival timezone</Label>
-                      <Select value={arrivalTz} onValueChange={setArrivalTz}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent className="bg-popover max-h-60">
-                          {COMMON_TIMEZONES.map(tz => (
-                            <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Label>Arrival Terminal</Label>
+                      <Input
+                        placeholder="e.g. Terminal 1, T3"
+                        value={arrivalTerminal}
+                        onChange={(e) => setArrivalTerminal(e.target.value)}
+                      />
                     </div>
                   </div>
                 </>
@@ -685,7 +706,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">
-                      {isFlight ? 'Depart (local)' : 'Start'}
+                      {isFlight ? `Depart (${getTzAbbr(departureTz)})` : 'Start'}
                     </Label>
                     <Input
                       type="time"
@@ -695,7 +716,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">
-                      {isFlight ? 'Arrive (local)' : 'End'}
+                      {isFlight ? `Arrive (${getTzAbbr(arrivalTz)})` : 'End'}
                     </Label>
                     <Input
                       type="time"
@@ -704,11 +725,6 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                     />
                   </div>
                 </div>
-                {isFlight && (
-                  <p className="text-xs text-muted-foreground">
-                    {flightHintLabel}
-                  </p>
-                )}
               </div>
 
               {/* Duration override (non-flight only) */}
@@ -777,21 +793,5 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     </>
   );
 };
-
-/** Convert a local date+time in a specific timezone to a UTC ISO string */
-function localToUTC(dateStr: string, timeStr: string, tz: string): string {
-  const fakeDate = new Date(`${dateStr}T${timeStr}:00`);
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  });
-  const utcDate = new Date(`${dateStr}T${timeStr}:00Z`);
-  const localInTz = new Date(formatter.format(utcDate).replace(/(\d+)\/(\d+)\/(\d+),?\s*/, '$3-$1-$2T'));
-  const offsetMs = localInTz.getTime() - utcDate.getTime();
-  const adjustedUtc = new Date(fakeDate.getTime() - offsetMs);
-  return adjustedUtc.toISOString();
-}
 
 export default EntryForm;

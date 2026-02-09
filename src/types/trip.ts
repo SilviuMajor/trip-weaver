@@ -49,6 +49,8 @@ export interface EntryOption {
   arrival_location: string | null;
   departure_tz: string | null;
   arrival_tz: string | null;
+  departure_terminal: string | null;
+  arrival_terminal: string | null;
   created_at: string;
   updated_at: string;
   vote_count?: number;
