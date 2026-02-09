@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
-import { MapPin, Users } from 'lucide-react';
+import { Users } from 'lucide-react';
 import type { TripUser } from '@/types/trip';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 
 const UserSelect = () => {
   const { tripId } = useParams<{ tripId: string }>();
@@ -12,13 +13,79 @@ const UserSelect = () => {
   const [tripName, setTripName] = useState('');
   const [loading, setLoading] = useState(true);
   const { currentUser, login } = useCurrentUser();
+  const { adminUser, loading: authLoading } = useAdminAuth();
   const navigate = useNavigate();
+  const [ownerBypassAttempted, setOwnerBypassAttempted] = useState(false);
 
+  // If already logged in as a trip member, go straight to timeline
   useEffect(() => {
     if (currentUser) {
       navigate(`/trip/${tripId}/timeline`);
     }
   }, [currentUser, navigate, tripId]);
+
+  // Auto-bypass: if authenticated owner, auto-create trip_user and enter
+  useEffect(() => {
+    if (authLoading || !tripId || ownerBypassAttempted || currentUser) return;
+
+    if (!adminUser) {
+      setOwnerBypassAttempted(true);
+      return;
+    }
+
+    const autoEnter = async () => {
+      // Check if this user is the trip owner
+      const { data: trip } = await supabase
+        .from('trips')
+        .select('owner_id, name')
+        .eq('id', tripId)
+        .single();
+
+      if (!trip || trip.owner_id !== adminUser.id) {
+        setOwnerBypassAttempted(true);
+        return;
+      }
+
+      // Check if trip_user already exists for this owner
+      const { data: existing } = await supabase
+        .from('trip_users')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('role', 'organizer')
+        .limit(1)
+        .maybeSingle();
+
+      if (existing) {
+        login(existing as TripUser);
+        navigate(`/trip/${tripId}/timeline`);
+        return;
+      }
+
+      // Auto-create organizer entry
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('display_name')
+        .eq('id', adminUser.id)
+        .maybeSingle();
+
+      const name = profile?.display_name || adminUser.email?.split('@')[0] || 'Organizer';
+
+      const { data: newUser } = await supabase
+        .from('trip_users')
+        .insert({ trip_id: tripId, name, role: 'organizer' })
+        .select()
+        .single();
+
+      if (newUser) {
+        login(newUser as TripUser);
+        navigate(`/trip/${tripId}/timeline`);
+      } else {
+        setOwnerBypassAttempted(true);
+      }
+    };
+
+    autoEnter();
+  }, [adminUser, authLoading, tripId, ownerBypassAttempted, currentUser, login, navigate]);
 
   useEffect(() => {
     if (!tripId) return;
@@ -41,6 +108,14 @@ const UserSelect = () => {
     login(user);
     navigate(`/trip/${tripId}/timeline`);
   };
+
+  if (authLoading || (!ownerBypassAttempted && adminUser)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-6">
