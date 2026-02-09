@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +8,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { addDays, format, parseISO } from 'date-fns';
 import OptionForm from './OptionForm';
-import type { Trip } from '@/types/trip';
+import type { Trip, EntryWithOptions, EntryOption } from '@/types/trip';
 
 const REFERENCE_DATE = '2099-01-01';
 
@@ -18,9 +18,12 @@ interface EntryFormProps {
   tripId: string;
   onCreated: () => void;
   trip?: Trip | null;
+  /** When set, form is in edit mode */
+  editEntry?: EntryWithOptions | null;
+  editOption?: EntryOption | null;
 }
 
-const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip }: EntryFormProps) => {
+const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, editOption }: EntryFormProps) => {
   const [date, setDate] = useState('');
   const [selectedDay, setSelectedDay] = useState('0');
   const [startTime, setStartTime] = useState('09:00');
@@ -31,6 +34,30 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip }: EntryFormPro
 
   const isUndated = !trip?.start_date;
   const dayCount = trip?.duration_days ?? 3;
+  const isEditing = !!editEntry;
+
+  // Pre-fill when editing
+  useEffect(() => {
+    if (editEntry && open) {
+      const startDt = parseISO(editEntry.start_time);
+      const endDt = parseISO(editEntry.end_time);
+      setDate(format(startDt, 'yyyy-MM-dd'));
+      setStartTime(format(startDt, 'HH:mm'));
+      setEndTime(format(endDt, 'HH:mm'));
+      setEntryId(editEntry.id);
+
+      if (isUndated) {
+        const refDate = parseISO(REFERENCE_DATE);
+        const diff = Math.round((startDt.getTime() - refDate.getTime()) / (1000 * 60 * 60 * 24));
+        setSelectedDay(String(Math.max(0, diff)));
+      }
+
+      // If editing, go straight to option step if we have an option to edit
+      if (editOption) {
+        setStep('option');
+      }
+    }
+  }, [editEntry, editOption, open, isUndated]);
 
   const reset = () => {
     setDate('');
@@ -47,7 +74,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip }: EntryFormPro
     onOpenChange(open);
   };
 
-  const handleCreateEntry = async () => {
+  const handleCreateOrUpdateEntry = async () => {
     const entryDate = isUndated
       ? format(addDays(parseISO(REFERENCE_DATE), Number(selectedDay)), 'yyyy-MM-dd')
       : date;
@@ -62,18 +89,30 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip }: EntryFormPro
       const startIso = `${entryDate}T${startTime}:00+00:00`;
       const endIso = `${entryDate}T${endTime}:00+00:00`;
 
-      const { data, error } = await supabase
-        .from('entries')
-        .insert({ trip_id: tripId, start_time: startIso, end_time: endIso })
-        .select('id')
-        .single();
+      if (isEditing && editEntry) {
+        // Update existing entry
+        const { error } = await supabase
+          .from('entries')
+          .update({ start_time: startIso, end_time: endIso })
+          .eq('id', editEntry.id);
 
-      if (error) throw error;
+        if (error) throw error;
+        setEntryId(editEntry.id);
+      } else {
+        // Create new entry
+        const { data, error } = await supabase
+          .from('entries')
+          .insert({ trip_id: tripId, start_time: startIso, end_time: endIso })
+          .select('id')
+          .single();
 
-      setEntryId(data.id);
+        if (error) throw error;
+        setEntryId(data.id);
+      }
+
       setStep('option');
     } catch (err: any) {
-      toast({ title: 'Failed to create entry', description: err.message, variant: 'destructive' });
+      toast({ title: `Failed to ${isEditing ? 'update' : 'create'} entry`, description: err.message, variant: 'destructive' });
     } finally {
       setSaving(false);
     }
@@ -82,7 +121,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip }: EntryFormPro
   const handleOptionSaved = () => {
     onCreated();
     handleClose(false);
-    toast({ title: 'Entry created!' });
+    toast({ title: isEditing ? 'Entry updated!' : 'Entry created!' });
   };
 
   return (
@@ -90,7 +129,9 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip }: EntryFormPro
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="font-display">
-            {step === 'time' ? 'New Entry' : 'Add Option'}
+            {step === 'time'
+              ? (isEditing ? 'Edit Entry' : 'New Entry')
+              : (editOption ? 'Edit Option' : 'Add Option')}
           </DialogTitle>
         </DialogHeader>
 
@@ -147,13 +188,22 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip }: EntryFormPro
             </div>
 
             <DialogFooter>
-              <Button onClick={handleCreateEntry} disabled={saving}>
-                {saving ? 'Creating…' : 'Next: Add Option'}
+              <Button onClick={handleCreateOrUpdateEntry} disabled={saving}>
+                {saving
+                  ? (isEditing ? 'Saving…' : 'Creating…')
+                  : (isEditing ? 'Save & Next' : 'Next: Add Option')}
               </Button>
             </DialogFooter>
           </div>
         ) : (
-          entryId && <OptionForm entryId={entryId} onSaved={handleOptionSaved} customCategories={(trip?.category_presets as any[]) ?? []} />
+          entryId && (
+            <OptionForm
+              entryId={entryId}
+              onSaved={handleOptionSaved}
+              customCategories={(trip?.category_presets as any[]) ?? []}
+              editOption={editOption}
+            />
+          )
         )}
       </DialogContent>
     </Dialog>

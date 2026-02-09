@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, Calendar, MapPin, LogOut } from 'lucide-react';
+import { Plus, Calendar, MapPin, LogOut, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
+import { useProfile } from '@/hooks/useProfile';
 import { format, parseISO } from 'date-fns';
 import type { Trip } from '@/types/trip';
 
 const Dashboard = () => {
   const { adminUser, isAdmin, loading: authLoading, signOut } = useAdminAuth();
+  const { displayName } = useProfile(adminUser?.id);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -56,12 +58,15 @@ const Dashboard = () => {
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
           <div>
             <h1 className="text-2xl font-bold">My Trips</h1>
-            <p className="text-sm text-muted-foreground">{adminUser?.email}</p>
+            <p className="text-sm text-muted-foreground">{displayName || adminUser?.email}</p>
           </div>
           <div className="flex items-center gap-2">
             <Button onClick={() => navigate('/trip/new')} size="sm">
               <Plus className="mr-1 h-4 w-4" />
               New Trip
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('/settings')}>
+              <Settings className="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="icon" onClick={handleSignOut}>
               <LogOut className="h-4 w-4" />

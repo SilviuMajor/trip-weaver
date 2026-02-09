@@ -8,6 +8,9 @@ import Dashboard from "./pages/Dashboard";
 import TripWizard from "./pages/TripWizard";
 import UserSelect from "./pages/UserSelect";
 import Timeline from "./pages/Timeline";
+import Settings from "./pages/Settings";
+import TripSettings from "./pages/TripSettings";
+import StyleShowcase from "./pages/StyleShowcase";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,6 +27,9 @@ const App = () => (
           <Route path="/trip/new" element={<TripWizard />} />
           <Route path="/trip/:tripId" element={<UserSelect />} />
           <Route path="/trip/:tripId/timeline" element={<Timeline />} />
+          <Route path="/trip/:tripId/settings" element={<TripSettings />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/styles" element={<StyleShowcase />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
