@@ -10,6 +10,7 @@ import { Plus } from 'lucide-react';
 import { useDragResize } from '@/hooks/useDragResize';
 import TimeSlotGrid from './TimeSlotGrid';
 import EntryCard from './EntryCard';
+import FlightGroupCard from './FlightGroupCard';
 import TravelSegmentCard from './TravelSegmentCard';
 import WeatherBadge from './WeatherBadge';
 
@@ -20,6 +21,7 @@ interface FlightTzInfo {
   destinationTz: string;
   flightStartHour: number;
   flightEndHour: number;
+  flightEndUtc?: string;
 }
 
 interface CalendarDayProps {
@@ -350,167 +352,245 @@ const CalendarDay = ({
               );
             })()}
 
-            {/* Positioned entries */}
-            {sortedEntries.map((entry, index) => {
-              const entryPast = isPast(new Date(entry.end_time));
-              const primaryOption = entry.options[0];
-              if (!primaryOption) return null;
+            {/* Flight group computation */}
+            {(() => {
+              // Build flight groups
+              const flightGroupMap = new Map<string, { flight: EntryWithOptions; checkin?: EntryWithOptions; checkout?: EntryWithOptions }>();
+              const linkedEntryIds = new Set<string>();
 
-              const isDragged = dragState?.entryId === entry.id;
-              const isLocked = entry.is_locked;
-              let entryStartHour: number;
-              let entryEndHour: number;
-
-              if (isDragged && dragState) {
-                entryStartHour = dragState.currentStartHour;
-                entryEndHour = dragState.currentEndHour;
-              } else {
-                // For flights, use departure_tz for start and arrival_tz for end
-                const isFlight = primaryOption.category === 'flight' && primaryOption.departure_tz && primaryOption.arrival_tz;
-                if (isFlight) {
-                  entryStartHour = getHourInTimezone(entry.start_time, primaryOption.departure_tz!);
-                  entryEndHour = getHourInTimezone(entry.end_time, primaryOption.arrival_tz!);
-                } else {
-                  // Non-flight: use activeTz (the timezone the gutter is showing)
-                  const tz = activeTz || tripTimezone;
-                  entryStartHour = getHourInTimezone(entry.start_time, tz);
-                  entryEndHour = getHourInTimezone(entry.end_time, tz);
+              sortedEntries.forEach(entry => {
+                const opt = entry.options[0];
+                if (opt?.category === 'flight') {
+                  const group: { flight: EntryWithOptions; checkin?: EntryWithOptions; checkout?: EntryWithOptions } = { flight: entry };
+                  sortedEntries.forEach(e => {
+                    if (e.linked_flight_id === entry.id) {
+                      linkedEntryIds.add(e.id);
+                      if (e.linked_type === 'checkin') group.checkin = e;
+                      else if (e.linked_type === 'checkout') group.checkout = e;
+                    }
+                  });
+                  flightGroupMap.set(entry.id, group);
                 }
-                if (entryEndHour < entryStartHour) entryEndHour = 24;
-              }
+              });
 
-              const top = Math.max(0, (entryStartHour - startHour) * PIXELS_PER_HOUR);
-              const height = (entryEndHour - entryStartHour) * PIXELS_PER_HOUR;
-              const isCompact = height < 50;
+              return sortedEntries.map((entry, index) => {
+                // Skip linked entries (rendered as part of flight group)
+                if (linkedEntryIds.has(entry.id)) return null;
 
-              const layoutInfo = layoutMap.get(entry.id);
-              const column = layoutInfo?.column ?? 0;
-              const totalColumns = layoutInfo?.totalColumns ?? 1;
-              const widthPercent = 100 / totalColumns;
-              const leftPercent = column * widthPercent;
+                const entryPast = isPast(new Date(entry.end_time));
+                const primaryOption = entry.options[0];
+                if (!primaryOption) return null;
 
-              const distanceKm =
-                userLat != null && userLng != null && primaryOption.latitude != null && primaryOption.longitude != null
-                  ? haversineKm(userLat, userLng, primaryOption.latitude, primaryOption.longitude)
-                  : null;
+                const isDragged = dragState?.entryId === entry.id;
+                const isLocked = entry.is_locked;
+                let entryStartHour: number;
+                let entryEndHour: number;
+                let resolvedTz = activeTz || tripTimezone;
 
-              const weather = getWeatherForEntry(entry);
+                if (isDragged && dragState) {
+                  entryStartHour = dragState.currentStartHour;
+                  entryEndHour = dragState.currentEndHour;
+                } else {
+                  const isFlight = primaryOption.category === 'flight' && primaryOption.departure_tz && primaryOption.arrival_tz;
+                  if (isFlight) {
+                    entryStartHour = getHourInTimezone(entry.start_time, primaryOption.departure_tz!);
+                    entryEndHour = getHourInTimezone(entry.end_time, primaryOption.arrival_tz!);
+                  } else {
+                    // Per-entry TZ: check if entry is before or after flight
+                    if (dayFlights.length > 0 && dayFlights[0].flightEndUtc) {
+                      const entryUtcMs = new Date(entry.start_time).getTime();
+                      const flightEndMs = new Date(dayFlights[0].flightEndUtc).getTime();
+                      resolvedTz = entryUtcMs >= flightEndMs ? dayFlights[0].destinationTz : dayFlights[0].originTz;
+                    }
+                    entryStartHour = getHourInTimezone(entry.start_time, resolvedTz);
+                    entryEndHour = getHourInTimezone(entry.end_time, resolvedTz);
+                  }
+                  if (entryEndHour < entryStartHour) entryEndHour = 24;
+                }
 
-              const nextEntry = sortedEntries[index + 1];
-              const travelSeg = nextEntry ? getTravelSegment(entry.id, nextEntry.id) : null;
-              const showTravelSeg = travelSeg && nextEntry && !hasTransferBetween(entry, nextEntry);
+                // For flight groups, expand bounds to cover checkin + checkout
+                const flightGroup = flightGroupMap.get(entry.id);
+                let groupStartHour = entryStartHour;
+                let groupEndHour = entryEndHour;
 
-              const origStartHour = getHourInTimezone(entry.start_time, tripTimezone);
-              let origEndHour = getHourInTimezone(entry.end_time, tripTimezone);
-              if (origEndHour < origStartHour) origEndHour = 24;
+                if (flightGroup) {
+                  if (flightGroup.checkin) {
+                    groupStartHour = getHourInTimezone(flightGroup.checkin.start_time, primaryOption.departure_tz || tripTimezone);
+                  }
+                  if (flightGroup.checkout) {
+                    groupEndHour = getHourInTimezone(flightGroup.checkout.end_time, primaryOption.arrival_tz || tripTimezone);
+                  }
+                  if (groupEndHour < groupStartHour) groupEndHour = 24;
+                }
 
-              const canDrag = onEntryTimeChange && !isLocked;
+                const top = Math.max(0, (groupStartHour - startHour) * PIXELS_PER_HOUR);
+                const height = (groupEndHour - groupStartHour) * PIXELS_PER_HOUR;
+                const isCompact = height < 50 && !flightGroup;
 
-              return (
-                <div key={entry.id}>
-                  <div
-                    className={cn(
-                      'absolute z-10 pr-1',
-                      isDragged && 'opacity-80 z-30'
-                    )}
-                    style={{
-                      top,
-                      height,
-                      left: `${leftPercent}%`,
-                      width: `${widthPercent}%`,
-                    }}
-                  >
-                    <div className="relative h-full">
-                      {/* Top resize handle (not for locked entries) */}
-                      {canDrag && (
-                        <div
-                          className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
-                          onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartHour, origEndHour)}
-                          onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartHour, origEndHour)}
-                          onTouchMove={onTouchMove}
-                          onTouchEnd={onTouchEnd}
-                        />
-                      )}
+                const layoutInfo = layoutMap.get(entry.id);
+                const column = layoutInfo?.column ?? 0;
+                const totalColumns = layoutInfo?.totalColumns ?? 1;
+                const widthPercent = 100 / totalColumns;
+                const leftPercent = column * widthPercent;
 
+                const distanceKm =
+                  userLat != null && userLng != null && primaryOption.latitude != null && primaryOption.longitude != null
+                    ? haversineKm(userLat, userLng, primaryOption.latitude, primaryOption.longitude)
+                    : null;
 
-                      <EntryCard
-                        isCompact={isCompact}
-                        option={primaryOption}
-                        startTime={entry.start_time}
-                        endTime={entry.end_time}
-                        formatTime={formatTime}
-                        isPast={entryPast}
-                        optionIndex={0}
-                        totalOptions={entry.options.length}
-                        distanceKm={distanceKm}
-                        votingLocked={votingLocked}
-                        userId={userId}
-                        hasVoted={userVotes.includes(primaryOption.id)}
-                        onVoteChange={onVoteChange}
-                        onClick={() => {
-                          if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
-                        }}
-                        cardSizeClass="h-full"
-                        isDragging={isDragged}
-                        isLocked={isLocked}
-                        isProcessing={primaryOption.category === 'airport_processing'}
-                        linkedType={entry.linked_type}
-                        canEdit={isEditor}
-                        onToggleLock={() => onToggleLock?.(entry.id, !!isLocked)}
-                        onDragStart={canDrag ? (e) => {
-                          onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour);
-                        } : undefined}
-                        onTouchDragStart={canDrag ? (e) => {
-                          onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour);
-                        } : undefined}
-                        onTouchDragMove={onTouchMove}
-                        onTouchDragEnd={onTouchEnd}
-                      />
+                const weather = getWeatherForEntry(entry);
 
-                      {/* Bottom resize handle (not for locked entries) */}
-                      {canDrag && (
-                        <div
-                          className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
-                          onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartHour, origEndHour)}
-                          onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartHour, origEndHour)}
-                          onTouchMove={onTouchMove}
-                          onTouchEnd={onTouchEnd}
-                        />
-                      )}
-                    </div>
-                  </div>
+                const nextEntry = sortedEntries[index + 1];
+                const travelSeg = nextEntry ? getTravelSegment(entry.id, nextEntry.id) : null;
+                const showTravelSeg = travelSeg && nextEntry && !hasTransferBetween(entry, nextEntry);
 
-                  {/* + button between entries */}
-                  {onAddBetween && (
+                const origStartHour = getHourInTimezone(entry.start_time, tripTimezone);
+                let origEndHour = getHourInTimezone(entry.end_time, tripTimezone);
+                if (origEndHour < origStartHour) origEndHour = 24;
+
+                const canDrag = onEntryTimeChange && !isLocked;
+
+                // Per-entry formatTime using resolved TZ
+                const entryFormatTime = (iso: string) => {
+                  const d = new Date(iso);
+                  return d.toLocaleTimeString('en-GB', {
+                    timeZone: resolvedTz,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false,
+                  });
+                };
+
+                return (
+                  <div key={entry.id}>
                     <div
-                      className="absolute left-0 z-[15] flex w-10 items-center justify-center"
-                      style={{ top: top + height - 2 }}
+                      className={cn(
+                        'absolute z-10 pr-1',
+                        isDragged && 'opacity-80 z-30'
+                      )}
+                      style={{
+                        top,
+                        height,
+                        left: `${leftPercent}%`,
+                        width: `${widthPercent}%`,
+                      }}
                     >
-                      <button
-                        onClick={() => onAddBetween(entry.end_time)}
-                        className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                      <div className="relative h-full">
+                        {/* Top resize handle (not for locked or flight group entries) */}
+                        {canDrag && !flightGroup && (
+                          <div
+                            className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
+                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartHour, origEndHour)}
+                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartHour, origEndHour)}
+                            onTouchMove={onTouchMove}
+                            onTouchEnd={onTouchEnd}
+                          />
+                        )}
+
+                        {flightGroup ? (
+                          <FlightGroupCard
+                            flightOption={primaryOption}
+                            flightEntry={entry}
+                            checkinEntry={flightGroup.checkin}
+                            checkoutEntry={flightGroup.checkout}
+                            isPast={entryPast}
+                            isDragging={isDragged}
+                            isLocked={isLocked}
+                            canEdit={isEditor}
+                            onToggleLock={() => onToggleLock?.(entry.id, !!isLocked)}
+                            onClick={() => {
+                              if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
+                            }}
+                            onDragStart={canDrag ? (e) => {
+                              onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour);
+                            } : undefined}
+                            onTouchDragStart={canDrag ? (e) => {
+                              onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour);
+                            } : undefined}
+                            onTouchDragMove={onTouchMove}
+                            onTouchDragEnd={onTouchEnd}
+                          />
+                        ) : (
+                          <EntryCard
+                            isCompact={isCompact}
+                            option={primaryOption}
+                            startTime={entry.start_time}
+                            endTime={entry.end_time}
+                            formatTime={entryFormatTime}
+                            isPast={entryPast}
+                            optionIndex={0}
+                            totalOptions={entry.options.length}
+                            distanceKm={distanceKm}
+                            votingLocked={votingLocked}
+                            userId={userId}
+                            hasVoted={userVotes.includes(primaryOption.id)}
+                            onVoteChange={onVoteChange}
+                            onClick={() => {
+                              if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
+                            }}
+                            cardSizeClass="h-full"
+                            isDragging={isDragged}
+                            isLocked={isLocked}
+                            isProcessing={primaryOption.category === 'airport_processing'}
+                            linkedType={entry.linked_type}
+                            canEdit={isEditor}
+                            onToggleLock={() => onToggleLock?.(entry.id, !!isLocked)}
+                            onDragStart={canDrag ? (e) => {
+                              onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour);
+                            } : undefined}
+                            onTouchDragStart={canDrag ? (e) => {
+                              onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour);
+                            } : undefined}
+                            onTouchDragMove={onTouchMove}
+                            onTouchDragEnd={onTouchEnd}
+                          />
+                        )}
+
+                        {/* Bottom resize handle (not for locked or flight group entries) */}
+                        {canDrag && !flightGroup && (
+                          <div
+                            className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
+                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartHour, origEndHour)}
+                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartHour, origEndHour)}
+                            onTouchMove={onTouchMove}
+                            onTouchEnd={onTouchEnd}
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* + button between entries */}
+                    {onAddBetween && (
+                      <div
+                        className="absolute left-0 z-[15] flex w-10 items-center justify-center"
+                        style={{ top: top + height - 2 }}
                       >
-                        <Plus className="h-3 w-3" />
-                      </button>
-                    </div>
-                  )}
+                        <button
+                          onClick={() => onAddBetween(entry.end_time)}
+                          className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
 
-                  {/* Travel segment connector */}
-                  {showTravelSeg && (
-                    <div
-                      className="absolute left-0 right-0 z-[5]"
-                      style={{ top: top + height }}
-                    >
-                      <TravelSegmentCard
-                        durationMin={travelSeg.duration_min}
-                        mode={travelSeg.mode}
-                        departBy={formatTime(entry.end_time)}
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    {/* Travel segment connector */}
+                    {showTravelSeg && (
+                      <div
+                        className="absolute left-0 right-0 z-[5]"
+                        style={{ top: top + height }}
+                      >
+                        <TravelSegmentCard
+                          durationMin={travelSeg.duration_min}
+                          mode={travelSeg.mode}
+                          departBy={entryFormatTime(entry.end_time)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              });
+            })()}
 
             {/* Sunrise/Sunset gradient line */}
             {(() => {
