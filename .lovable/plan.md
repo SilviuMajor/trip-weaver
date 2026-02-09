@@ -1,74 +1,84 @@
 
 
-# Simplified Weather Colors, Bolder Icons, Card Margin Fix, and Flight Block Clarity
+# Weather Emojis, Left-side Weather, Add Idea Button, and Flight Card Alignment
 
-## 1. Simplified Weather Badge Colors
+## 1. Weather Badges: Emojis Instead of Lucide Icons
 
-Replace the current sun-position-based HSL calculation with a straightforward scheme:
+Replace the current circular Lucide icon badges with inline emoji + temperature text. No circle background needed.
 
-| Condition | Background | Text |
-|-----------|-----------|------|
-| Night (21:00-05:59), clear | Dark navy `hsl(225, 40%, 18%)` | White |
-| Night, cloudy/overcast | Dark grey `hsl(220, 15%, 22%)` | White |
-| Night, rain/drizzle/thunder | Dark blue-grey `hsl(215, 25%, 16%)` | White |
-| Day, clear/sunny | Warm yellow `hsl(45, 80%, 72%)` | Dark |
-| Day, partly cloudy | Light blue `hsl(200, 50%, 70%)` | Dark |
-| Day, overcast | Grey-blue `hsl(210, 20%, 55%)` | White |
-| Day, rain/drizzle | Darker blue `hsl(210, 35%, 45%)` | White |
-| Day, thunder | Dark blue-purple `hsl(230, 35%, 38%)` | White |
-| Day, snow | Light grey-white `hsl(200, 15%, 82%)` | Dark |
-| Day, fog | Muted grey `hsl(200, 10%, 68%)` | Dark |
+### Emoji mapping
 
-This removes the `getTimeOfDayColor` import and the `parseHSL`/`applyWeatherModifier` functions entirely.
+| Condition | Day Emoji | Night Emoji |
+|-----------|-----------|-------------|
+| Clear/sunny | ☀️ | 🌙 |
+| Partly cloudy | ⛅ | ☁️ |
+| Cloudy/overcast | ☁️ | ☁️ |
+| Rain/shower | 🌧️ | 🌧️ |
+| Drizzle | 🌦️ | 🌧️ |
+| Thunder | ⛈️ | ⛈️ |
+| Snow | 🌨️ | 🌨️ |
+| Fog | 🌫️ | 🌫️ |
+| Default | ☀️ | 🌙 |
 
-### Changes
-- **`WeatherBadge.tsx`**: Replace all color logic with a single `getWeatherColor(condition, isNight)` function that returns `{ bg, text }` based on the table above. Remove `timeOfDayColor` import.
-
-## 2. Bolder Weather Icons
-
-Increase icon stroke width from 2.5 to 3, and slightly increase icon size from `h-3.5 w-3.5` to `h-4 w-4` for more visual impact.
+### Visual output
+Each hour shows: `☀️ 18°` as a compact inline element. The emoji provides the color naturally.
 
 ### Changes
-- **`WeatherBadge.tsx`**: Update `strokeWidth` to 3 and icon class to `h-4 w-4`.
+- **`WeatherBadge.tsx`**: Remove all Lucide icon imports. Replace with a `getWeatherEmoji(condition, isNight)` function returning an emoji string. Remove the circular div wrapper, render as a simple `span` with emoji + temp. Remove the `getWeatherColor` function entirely since emojis provide their own visual identity.
 
-## 3. Increase Card Left Margin (Fix Time Labels Behind Cards)
+## 2. Move Weather Column to Far Left
 
-From the screenshot, the hour labels (05:00, 06:00, etc.) sit behind the left edge of entry cards. The current card container uses `ml-10` (non-flight days) or `ml-16` (flight days with dual TZ). We need to increase these margins so the time gutter has enough room and labels never overlap cards.
+Currently the weather column sits at `right: -44` (right side of the timeline). Move it to the far left, before the time labels.
+
+### Layout change
+
+```text
+Current:  [time labels] --- [cards] --- [weather]
+New:      [weather] [time labels] --- [cards]
+```
 
 ### Changes
-- **`CalendarDay.tsx`** (line 310): Change `ml-10` to `ml-14` for single-TZ days, and `ml-16` to `ml-20` for dual-TZ (flight) days. This gives the gutter 56px or 80px of space respectively.
+- **`CalendarDay.tsx`** (lines 517-529): Move the weather column from `right: -44` to `left: -48` (or similar), positioning it to the left of the entry container. Since the container already has `ml-14` / `ml-20`, we have space to the left. The weather elements will be positioned absolutely at negative left offset.
+- Adjust `marginRight: 48` on the container (line 311) since we no longer need right-side space for weather. Set it to a smaller value (e.g. 8px).
 
-## 4. Flight Block Positioning Explanation
+## 3. Add Idea Button in Ideas Panel
 
-The flight block (e.g., BA432 LHR 08:15 GMT to AMS 10:46 CET) is positioned on the timeline using the trip's active timezone. Since the timeline gutter shows GMT, the block spans from 08:15 to 09:46 GMT (which equals 10:46 CET). This is correct behavior -- the card already shows both timezone-aware departure and arrival times ("LHR T5 08:15 GMT to AMS 10:46 CET"), so no changes needed here. The visual block length reflects the actual flight duration in the displayed timezone.
+Add a button at the top of the Ideas sidebar that opens the entry form pre-configured as an unscheduled/idea entry.
 
-No code changes for this item.
+### Changes
+- **`IdeasPanel.tsx`**: Add a `+ Add Idea` button in the sticky header bar (line 66-81), next to the "Ideas" title. Wire it to a new `onAddIdea` callback prop.
+- **`Timeline.tsx`**: Pass an `onAddIdea` handler to `IdeasPanel` that opens the `EntryForm` with `is_scheduled: false` pre-set. This means setting `prefillStartTime` to undefined and opening the form.
+- **`EntryForm.tsx`**: May need a new prop like `prefillUnscheduled?: boolean` so the form knows to create the entry as an idea (not scheduled). Need to check if the form already supports this.
+
+## 4. Flight Card Positioning Fix
+
+### The problem
+Flight cards are positioned on the timeline using `tripTimezone` for both start and end times. For a flight departing at 08:15 GMT arriving 10:46 CET:
+- The card starts at 08:15 on the GMT timeline (correct)
+- The card ends at 09:46 GMT (= 10:46 CET), so the card is ~1.5 hours tall (correct duration)
+- But the dual-TZ gutter shows "10:46" in the destination column at the 10:46 position, which is BELOW the card's bottom edge
+- This makes it look like the flight card doesn't reach its arrival time
+
+### Proposed fix
+The card position is actually correct (it represents real elapsed time). The confusion comes from the gutter showing destination times that don't visually align with the card edge. Two improvements:
+
+1. **Add a small arrival time annotation at the bottom of the flight card**: Show a subtle label like "Arrives 10:46 CET" pinned to the bottom-right of the flight card, making it clear where the flight ends relative to the card.
+
+2. **Adjust the `flightEndHour` in the TZ overlap calculation**: Currently `flightEndHour` uses `getHour(f.end_time, opt.arrival_tz!)` which gives 10:46. But the card actually ends at `getHour(f.end_time, tripTimezone)` = 09:46 GMT. The overlap zone should use the trip-timezone-based end hour so the dual-TZ gutter transition aligns with the card edge.
+
+### Changes
+- **`Timeline.tsx`** (lines 236-249): Change `flightEndHour` calculation to use `tripTimezone` (or `originTz`) instead of `arrival_tz` so the overlap zone aligns with the card's visual position.
+- **`EntryCard.tsx`**: No changes needed -- the card already shows "LHR T5 08:15 GMT -> AMS 10:46 CET" which is clear.
 
 ---
 
-## Technical Details
-
-### Files to edit
+## Technical Summary
 
 | File | Changes |
 |------|---------|
-| `src/components/timeline/WeatherBadge.tsx` | Replace color logic with simple day/night + weather condition lookup. Remove `getTimeOfDayColor` import. Bolder icons (strokeWidth 3, h-4 w-4). |
-| `src/components/timeline/CalendarDay.tsx` | Line 310: increase `ml-10` to `ml-14`, `ml-16` to `ml-20`. |
+| `WeatherBadge.tsx` | Replace Lucide icons with emoji strings. Remove circular badge wrapper. Render as inline `emoji temp` text. |
+| `CalendarDay.tsx` | Move weather column from right to far left. Reduce right margin. |
+| `IdeasPanel.tsx` | Add `onAddIdea` prop and render "+ Add Idea" button in header. |
+| `Timeline.tsx` | Pass `onAddIdea` handler to IdeasPanel. Fix `flightEndHour` to use `tripTimezone` instead of `arrival_tz`. |
+| `EntryForm.tsx` | Check if it supports creating unscheduled entries; add `prefillUnscheduled` prop if needed. |
 
-### New color function (WeatherBadge)
-
-```text
-function getWeatherColor(condition, isNight):
-  if isNight:
-    if rain/thunder/drizzle -> dark blue-grey, white text
-    if cloud/overcast -> dark grey, white text
-    else -> dark navy, white text
-  else (day):
-    if thunder -> dark blue-purple, white text
-    if rain/drizzle -> darker blue, white text
-    if overcast -> grey-blue, white text
-    if cloud/partly -> light blue, dark text
-    if snow -> light grey-white, dark text
-    if fog -> muted grey, dark text
-    else (clear/sunny) -> warm yellow, dark text
-```
