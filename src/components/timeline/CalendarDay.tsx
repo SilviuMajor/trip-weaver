@@ -1,6 +1,5 @@
 import { format, isToday, isPast } from 'date-fns';
 import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData } from '@/types/trip';
-import type { Timezone } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
 import { computeOverlapLayout } from '@/lib/overlapLayout';
@@ -15,7 +14,7 @@ interface CalendarDayProps {
   date: Date;
   entries: EntryWithOptions[];
   formatTime: (iso: string) => string;
-  timezone: Timezone;
+  tripTimezone: string;
   userLat: number | null;
   userLng: number | null;
   votingLocked: boolean;
@@ -29,9 +28,8 @@ interface CalendarDayProps {
   dayLabel?: string;
 }
 
-function getHourInTimezone(isoString: string, tz: Timezone): number {
+function getHourInTimezone(isoString: string, tzName: string): number {
   const date = new Date(isoString);
-  const tzName = tz === 'UK' ? 'Europe/London' : 'Europe/Amsterdam';
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: tzName,
     hour: 'numeric',
@@ -47,7 +45,7 @@ const CalendarDay = ({
   date,
   entries,
   formatTime,
-  timezone,
+  tripTimezone,
   userLat,
   userLng,
   votingLocked,
@@ -74,8 +72,8 @@ const CalendarDay = ({
 
   if (sortedEntries.length > 0) {
     const hours = sortedEntries.flatMap(e => [
-      getHourInTimezone(e.start_time, timezone),
-      getHourInTimezone(e.end_time, timezone),
+      getHourInTimezone(e.start_time, tripTimezone),
+      getHourInTimezone(e.end_time, tripTimezone),
     ]);
     startHour = Math.max(0, Math.floor(Math.min(...hours)) - 1);
     endHour = Math.min(24, Math.ceil(Math.max(...hours)) + 1);
@@ -87,15 +85,15 @@ const CalendarDay = ({
   // Compute overlap layout
   const layoutEntries = sortedEntries.map(e => ({
     id: e.id,
-    startMinutes: (getHourInTimezone(e.start_time, timezone) - startHour) * 60,
-    endMinutes: (getHourInTimezone(e.end_time, timezone) - startHour) * 60,
+    startMinutes: (getHourInTimezone(e.start_time, tripTimezone) - startHour) * 60,
+    endMinutes: (getHourInTimezone(e.end_time, tripTimezone) - startHour) * 60,
   }));
 
   const layout = computeOverlapLayout(layoutEntries);
   const layoutMap = new Map(layout.map(l => [l.entryId, l]));
 
   const getWeatherForEntry = (entry: EntryWithOptions) => {
-    const hour = Math.floor(getHourInTimezone(entry.start_time, timezone));
+    const hour = Math.floor(getHourInTimezone(entry.start_time, tripTimezone));
     const dateStr = format(date, 'yyyy-MM-dd');
     return weatherData.find(w => w.date === dateStr && w.hour === hour);
   };
@@ -167,8 +165,8 @@ const CalendarDay = ({
               const primaryOption = entry.options[0];
               if (!primaryOption) return null;
 
-              const entryStartHour = getHourInTimezone(entry.start_time, timezone);
-              const entryEndHour = getHourInTimezone(entry.end_time, timezone);
+              const entryStartHour = getHourInTimezone(entry.start_time, tripTimezone);
+              const entryEndHour = getHourInTimezone(entry.end_time, tripTimezone);
               const top = Math.max(0, (entryStartHour - startHour) * PIXELS_PER_HOUR);
               const height = Math.max(40, (entryEndHour - entryStartHour) * PIXELS_PER_HOUR);
 

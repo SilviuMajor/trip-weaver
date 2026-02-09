@@ -51,9 +51,13 @@ export type Database = {
       }
       entry_options: {
         Row: {
+          arrival_location: string | null
+          arrival_tz: string | null
           category: string | null
           category_color: string | null
           created_at: string
+          departure_location: string | null
+          departure_tz: string | null
           entry_id: string
           id: string
           latitude: number | null
@@ -64,9 +68,13 @@ export type Database = {
           website: string | null
         }
         Insert: {
+          arrival_location?: string | null
+          arrival_tz?: string | null
           category?: string | null
           category_color?: string | null
           created_at?: string
+          departure_location?: string | null
+          departure_tz?: string | null
           entry_id: string
           id?: string
           latitude?: number | null
@@ -77,9 +85,13 @@ export type Database = {
           website?: string | null
         }
         Update: {
+          arrival_location?: string | null
+          arrival_tz?: string | null
           category?: string | null
           category_color?: string | null
           created_at?: string
+          departure_location?: string | null
+          departure_tz?: string | null
           entry_id?: string
           id?: string
           latitude?: number | null

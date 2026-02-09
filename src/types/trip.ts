@@ -45,6 +45,10 @@ export interface EntryOption {
   latitude: number | null;
   longitude: number | null;
   location_name: string | null;
+  departure_location: string | null;
+  arrival_location: string | null;
+  departure_tz: string | null;
+  arrival_tz: string | null;
   created_at: string;
   updated_at: string;
   vote_count?: number;

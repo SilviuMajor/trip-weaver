@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { MapPin, Clock } from 'lucide-react';
+import { MapPin, Clock, Plane } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { getTimeOfDayGradient } from '@/lib/timeOfDayColor';
@@ -38,6 +38,22 @@ const getCategoryEmoji = (catId: string | null): string => {
 const getCategoryName = (catId: string | null): string => {
   const predefined = findCategory(catId ?? '');
   return predefined?.name ?? catId ?? '';
+};
+
+const formatTimeInTz = (isoString: string, tz: string | null): string => {
+  if (!tz) return '';
+  const date = new Date(isoString);
+  const time = date.toLocaleTimeString('en-GB', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const tzAbbr = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    timeZoneName: 'short',
+  }).formatToParts(date).find(p => p.type === 'timeZoneName')?.value ?? '';
+  return `${time} ${tzAbbr}`;
 };
 
 const EntryCard = ({
@@ -122,14 +138,26 @@ const EntryCard = ({
           {option.name}
         </h3>
 
-        {/* Time */}
-        <div className={cn(
-          'mb-2 flex items-center gap-1.5 text-xs',
-          firstImage ? 'text-white/80' : 'text-muted-foreground'
-        )}>
-          <Clock className="h-3 w-3" />
-          <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
-        </div>
+        {/* Time / Flight info */}
+        {option.category === 'flight' && option.departure_location ? (
+          <div className={cn(
+            'mb-2 flex items-center gap-1.5 text-xs',
+            firstImage ? 'text-white/80' : 'text-muted-foreground'
+          )}>
+            <Plane className="h-3 w-3" />
+            <span>
+              {option.departure_location} {formatTimeInTz(startTime, option.departure_tz)} → {option.arrival_location} {formatTimeInTz(endTime, option.arrival_tz)}
+            </span>
+          </div>
+        ) : (
+          <div className={cn(
+            'mb-2 flex items-center gap-1.5 text-xs',
+            firstImage ? 'text-white/80' : 'text-muted-foreground'
+          )}>
+            <Clock className="h-3 w-3" />
+            <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
+          </div>
+        )}
 
         {/* Bottom row: Distance + Votes */}
         <div className="flex items-center justify-between">
