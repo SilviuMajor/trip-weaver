@@ -224,8 +224,6 @@ const TimeSlotGrid = ({
         }
       }}
     >
-      {renderOverlapBg()}
-
       {hours.map(hour => {
         const tzState = hasDualTz ? getTzStateAtHour(hour) : null;
         const tzOffset = hasDualTz && tzRanges?.[0]
@@ -242,7 +240,7 @@ const TimeSlotGrid = ({
             style={{ top: (hour - startHour) * pixelsPerHour }}
           >
             {hasDualTz && tzState === 'dual' ? (
-              <div className="absolute -top-2.5 z-[15] flex select-none items-center" style={{ left: -58, width: 52 }}>
+              <div className="absolute -top-2.5 z-[15] flex select-none items-center" style={{ left: -68, width: 52 }}>
                 <span className="flex-1 text-center text-[9px] font-medium text-muted-foreground">
                   {String(hour).padStart(2, '0')}:00
                 </span>
@@ -252,11 +250,11 @@ const TimeSlotGrid = ({
                 </span>
               </div>
             ) : hasDualTz && tzState === 'single-dest' ? (
-              <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -36, width: 30 }}>
+              <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -46, width: 30 }}>
                 {String(destH).padStart(2, '0')}:{String(destM).padStart(2, '0')}
               </span>
             ) : (
-              <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -36, width: 30 }}>
+              <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -46, width: 30 }}>
                 {String(hour).padStart(2, '0')}:00
               </span>
             )}
