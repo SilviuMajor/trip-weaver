@@ -365,8 +365,17 @@ const CalendarDay = ({
                 entryStartHour = dragState.currentStartHour;
                 entryEndHour = dragState.currentEndHour;
               } else {
-                entryStartHour = getHourInTimezone(entry.start_time, tripTimezone);
-                entryEndHour = getHourInTimezone(entry.end_time, tripTimezone);
+                // For flights, use departure_tz for start and arrival_tz for end
+                const isFlight = primaryOption.category === 'flight' && primaryOption.departure_tz && primaryOption.arrival_tz;
+                if (isFlight) {
+                  entryStartHour = getHourInTimezone(entry.start_time, primaryOption.departure_tz!);
+                  entryEndHour = getHourInTimezone(entry.end_time, primaryOption.arrival_tz!);
+                } else {
+                  // Non-flight: use activeTz (the timezone the gutter is showing)
+                  const tz = activeTz || tripTimezone;
+                  entryStartHour = getHourInTimezone(entry.start_time, tz);
+                  entryEndHour = getHourInTimezone(entry.end_time, tz);
+                }
                 if (entryEndHour < entryStartHour) entryEndHour = 24;
               }
 

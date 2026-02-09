@@ -232,6 +232,12 @@ const Timeline = () => {
       if (flightEntries.length === 0) {
         map.set(dayStr, { activeTz: currentTz, flights: [] });
       } else {
+        // Before the first flight, the user is in the departure city
+        const firstFlightOpt = flightEntries[0].options[0];
+        if (firstFlightOpt.departure_tz) {
+          currentTz = firstFlightOpt.departure_tz;
+        }
+
         const flights = flightEntries.map(f => {
           const opt = f.options[0];
           const getHour = (iso: string, tz: string) => {
@@ -245,7 +251,7 @@ const Timeline = () => {
             originTz: opt.departure_tz!,
             destinationTz: opt.arrival_tz!,
             flightStartHour: getHour(f.start_time, opt.departure_tz!),
-            flightEndHour: getHour(f.end_time, currentTz),
+            flightEndHour: getHour(f.end_time, opt.arrival_tz!),
           };
         });
         map.set(dayStr, { activeTz: currentTz, flights });
