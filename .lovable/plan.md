@@ -1,175 +1,242 @@
 
-# Timeline Improvements: Drag Fix, Locking, Empty Gap Click, Airport Processing, and Wizard Flights
+
+# Unscheduled Options Panel and Smart Scheduling
 
 ## Overview
 
-Six interconnected changes to improve the timeline UX:
-1. Fix drag-and-drop triggering the entry detail popup
-2. Click (and click-drag) empty gaps to create entries
-3. Lock/fix entries so they cannot be dragged
-4. Airport processing entries (check-in before, checkout after flights)
-5. "+" button before flight entries (currently missing)
-6. Optional flight section in the trip creation wizard
+This is a fundamental rethinking of how "options" work. Instead of multiple options swiped within a single time slot, activities can exist as **unscheduled ideas** in a side panel, then be dragged onto the timeline. When placed, the system live-calculates travel times and walks the user through resolving any time conflicts step-by-step.
 
 ---
 
-## 1. Fix Drag Opening Entry Details
+## Core Concepts
 
-**Problem**: When you release a drag, the `onClick` on `EntryCard` fires, opening the overlay.
+### Current Model (being replaced)
+- An `entry` has a fixed time slot. Multiple `entry_options` live inside it (swiped horizontally, voted on).
 
-**Fix in `CalendarDay.tsx`**: Track whether a drag actually moved. The existing `isDraggingRef` in `useDragResize` resets after 50ms. The `onClick` handler already checks `if (!isDragged)`, but `isDragged` comes from the render-time `dragState` which may already be null. Fix: add a `wasDragged` ref that stays true for 100ms after drag ends, and check it in the click handler.
-
-**Files**: `src/hooks/useDragResize.ts`, `src/components/timeline/CalendarDay.tsx`
-
----
-
-## 2. Click Empty Gap to Create Entry (with Click-Drag for Duration)
-
-**Behaviour**:
-- Single click on empty timeline space opens the entry form with that time pre-filled (as start time)
-- Click-and-drag on empty space shows a visual preview (highlighted block with start and end time labels), and on release opens the entry form with both start and end time pre-filled
-
-**Implementation**:
-
-### `TimeSlotGrid.tsx`
-- Add `onMouseDown`, `onMouseMove`, `onMouseUp` handlers instead of just `onClick`
-- Track drag state: `dragStart` position and `dragEnd` position
-- Render a semi-transparent highlight rectangle during drag showing "09:00 - 10:30"
-- On mouse up: if drag distance > threshold (e.g. 10px), call new `onDragSlot(startTime, endTime)` callback; otherwise call existing `onClickSlot(time)`
-- Snap both start and end to 15-minute intervals
-
-### `CalendarDay.tsx`
-- Pass the existing `onAddBetween` for single clicks (already works)
-- Add new `onDragCreateEntry` prop that passes both start and end times
-- Wire `TimeSlotGrid`'s new `onDragSlot` to this
-
-### `Timeline.tsx`
-- Handle the new callback by opening `EntryForm` with both `prefillStartTime` and a new `prefillEndTime` prop
-
-### `EntryForm.tsx`
-- Accept optional `prefillEndTime` prop
-- When provided, auto-set both start time and end time, and calculate duration from them
+### New Model
+- An `entry` can be **scheduled** (has real start/end times) or **unscheduled** (parked in the side panel).
+- Multiple options for the same type of activity (e.g. "lunch spots") are grouped together. When one is placed on the timeline, the others stay in the panel as alternatives.
+- Placing an option triggers live travel calculation and a step-by-step conflict resolution dialog.
 
 ---
 
-## 3. Lock/Fix Entries
+## Database Changes
 
-**Behaviour**: Entries can be marked as "locked" (fixed). Locked entries show a lock icon + a dashed border, and cannot be dragged or resized.
+### `entries` table
+- Add `is_scheduled` (boolean, default true) -- false means it lives in the side panel
+- Add `scheduled_day` (integer, nullable) -- for day-assigned but unscheduled entries (e.g. "Day 2 lunch ideas"). Null means completely unassigned.
+- Add `option_group_id` (uuid, nullable) -- groups related alternatives together (e.g. all lunch spot options share the same group ID)
 
-### Database migration
-- Add `is_locked` (boolean, default false) column to the `entries` table
-
-### `src/types/trip.ts`
-- Add `is_locked: boolean` to the `Entry` interface
-
-### `EntryCard.tsx`
-- Accept `isLocked` prop
-- Show a small lock icon (from lucide) in the top-right corner when locked
-- Apply a dashed border style: `border-dashed border-2`
-
-### `CalendarDay.tsx`
-- When `entry.is_locked` is true, do NOT render the drag handles (resize-top, resize-bottom)
-- Do NOT pass `onDragStart` / `onTouchDragStart` to `EntryCard` for locked entries
-- This completely prevents any drag interaction
-
-### `EntryOverlay.tsx` (detail popup)
-- Add a "Lock" / "Unlock" toggle button so users can lock entries from the detail view
-- Calls `supabase.from('entries').update({ is_locked: !entry.is_locked }).eq('id', entry.id)` then refreshes
+### New table: `option_groups`
+- `id` (uuid, PK, default gen_random_uuid())
+- `trip_id` (uuid, not null)
+- `label` (text, not null) -- e.g. "Lunch spots", "Evening activity"
+- `created_at` (timestamptz, default now())
+- RLS: same open policies as entries
 
 ---
 
-## 4. Airport Processing Entries
+## Feature 1: Side Panel for Unscheduled Options
 
-**Concept**: When creating a flight, the user can set "Arrive at airport X hours early" (default 2h) and "Airport checkout" (default 30min). This auto-creates two linked "Airport Processing" entries:
-- **Check-in**: ends at flight departure time, starts X hours before
-- **Checkout**: starts at flight arrival time, ends Y minutes after
+### UI: Toggle Panel
+- A button in the `TimelineHeader` (e.g. a tray/inbox icon) toggles the panel open/closed
+- Panel slides in from the right side, pushes or overlays the timeline
+- Panel width: approximately 320px on desktop, full-screen drawer on mobile
 
-These entries are linked to the flight and move with it. No auto-generated travel segments between processing entries and their flight.
+### Panel Contents
+- **Unassigned section**: Options not tied to any day
+- **Per-day sections**: Collapsible sections for day-assigned options (e.g. "Day 2 ideas")
+- Each option shown as a compact card (category emoji, name, location)
+- Drag handle on each card for drag-and-drop
 
-### Database changes
-- Add `airport_checkin_hours` (numeric, nullable, default 2) to `entry_options` -- stored on the flight option
-- Add `airport_checkout_min` (integer, nullable, default 30) to `entry_options`
-- Add `linked_flight_id` (uuid, nullable, FK to entries.id) to `entries` -- marks an entry as a processing entry linked to a specific flight
-- Add `linked_type` (text, nullable) to `entries` -- either 'checkin' or 'checkout'
+### Adding Unscheduled Entries
+- In the `EntryForm`, the "When?" step gets a new choice: **"Add to ideas panel"** (instead of picking a specific time)
+- Optional: assign to a specific day or leave completely unassigned
+- Optional: assign to an option group (create new or add to existing)
 
-### `src/types/trip.ts`
-- Add `is_locked`, `linked_flight_id`, `linked_type` to `Entry`
-- Add `airport_checkin_hours`, `airport_checkout_min` to `EntryOption`
-
-### New category in `src/lib/categories.ts`
-- Add `airport_processing` category: `{ id: 'airport_processing', name: 'Airport', emoji: '🛃', color: 'hsl(210, 50%, 60%)', defaultDurationMin: 120, defaultStartHour: 8, defaultStartMin: 0 }`
-
-### `EntryForm.tsx` (flight details step)
-- Add two new fields below the terminal inputs:
-  - "Arrive at airport early" -- number input (hours), default 2
-  - "Airport checkout time" -- number input (minutes), default 30
-- On save (new flight only, not edit): after creating the flight entry, auto-create two additional entries:
-  1. **Check-in entry**: `start_time = flight_start - checkin_hours`, `end_time = flight_start`, `linked_flight_id = flight_entry_id`, `linked_type = 'checkin'`, `is_locked = true`
-  2. **Checkout entry**: `start_time = flight_end`, `end_time = flight_end + checkout_min`, `linked_flight_id = flight_entry_id`, `linked_type = 'checkout'`, `is_locked = true`
-  - Each gets an `entry_option` with category `airport_processing`, name "Airport Check-in" / "Airport Checkout", and the flight's departure/arrival airport as `location_name`
-- Processing entries are auto-locked (cannot be dragged independently)
-
-### `CalendarDay.tsx`
-- When a flight entry is dragged and committed:
-  - Find any entries with `linked_flight_id === flight_entry_id`
-  - Move them by the same time delta (check-in stays anchored to flight start, checkout to flight end)
-  - Call `onEntryTimeChange` for each linked entry as well
-- Skip auto-generated travel segments between a flight and its linked processing entries (extend the existing `hasTransferBetween` logic)
-
-### `EntryCard.tsx`
-- For `airport_processing` category entries, render them with the "Part of flight" visual style:
-  - Slightly muted/lighter background
-  - Show the airport name and "Check-in" or "Checkout" label
-  - Lock icon always visible since they're auto-locked
-
-### `EntryOverlay.tsx`
-- For processing entries, show the linked flight info
-- Allow editing the check-in/checkout duration, which recalculates the entry times
+### Files
+- New: `src/components/timeline/IdeasPanel.tsx` -- the side panel component
+- New: `src/components/timeline/IdeaCard.tsx` -- compact card for panel items
+- Edit: `src/components/timeline/TimelineHeader.tsx` -- add toggle button
+- Edit: `src/pages/Timeline.tsx` -- panel state, layout adjustment
+- Edit: `src/components/timeline/EntryForm.tsx` -- "Add to ideas" option in the "When?" step
 
 ---
 
-## 5. "+" Button Before Flight Entries
+## Feature 2: Drag from Panel to Timeline
 
-**Problem**: The "+" button before the first entry only shows if there are entries, but it skips rendering when the first entry is a flight.
+### Drag-and-Drop Mechanism
+- Uses HTML5 drag and drop (or pointer events for mobile)
+- Dragging from the panel onto a specific day/time slot on the timeline
+- Visual feedback: ghost card follows cursor, timeline highlights valid drop zones
+- Drop snaps to 15-minute intervals (consistent with existing behavior)
 
-**Fix in `CalendarDay.tsx`**: The existing code at lines 235-253 already renders a "+" before the first entry for all entry types. The bug is likely that flight entries have different positioning. Review and ensure the "+" button renders regardless of entry category. The `getHourInTimezone` for flights with different departure timezone may place the entry differently -- the "+" button should still appear above it.
+### On Drop
+1. Update the entry: set `is_scheduled = true`, set `start_time` and `end_time` based on drop position
+2. If the entry belongs to an `option_group_id`, the other entries in that group stay in the panel
+3. Trigger live travel calculation (Feature 4)
+4. Show conflict resolution dialog if needed (Feature 5)
 
----
-
-## 6. Optional Flight Section in Trip Wizard
-
-**Behaviour**: On the Dates step of the trip wizard, add a collapsible "Add flights" section where users can optionally add outbound and return flights with airport pickers. This pre-populates the timeline when the trip is created.
-
-### `src/components/wizard/DateStep.tsx`
-- Add a collapsible section (using Collapsible from radix) titled "Add flights (optional)"
-- When expanded, show:
-  - **Outbound flight**: Departure airport picker, arrival airport picker, departure date (auto-linked to trip start date), departure time, arrival time
-  - **Return flight**: Same fields, arrival date auto-linked to trip end date
-- Export the flight data as part of the step's state
-
-### `src/pages/TripWizard.tsx`
-- Add state for outbound/return flight data
-- Pass to DateStep and receive updates
-- After trip creation, if flight data is provided:
-  - Create entries and entry_options for the flights (using same logic as EntryForm)
-  - Auto-create airport processing entries for each flight
-  - Auto-set trip timezone from the arrival airport of the outbound flight
+### Files
+- Edit: `src/components/timeline/CalendarDay.tsx` -- add drop zone handlers
+- Edit: `src/components/timeline/IdeasPanel.tsx` -- drag source handlers
+- Edit: `src/pages/Timeline.tsx` -- coordinate drag state between panel and timeline
 
 ---
 
-## Technical Details: Files Summary
+## Feature 3: Option Groups (Multiple Choices for Same Slot)
 
-| File | Action | Changes |
-|------|--------|---------|
-| DB migration | Create | Add `is_locked`, `linked_flight_id`, `linked_type` to `entries`; add `airport_checkin_hours`, `airport_checkout_min` to `entry_options` |
-| `src/types/trip.ts` | Edit | Add new fields to Entry and EntryOption interfaces |
-| `src/lib/categories.ts` | Edit | Add `airport_processing` category |
-| `src/hooks/useDragResize.ts` | Edit | Export `wasDragged` ref to prevent click-after-drag |
-| `src/components/timeline/TimeSlotGrid.tsx` | Edit | Add click-drag to create entries with visual preview |
-| `src/components/timeline/CalendarDay.tsx` | Edit | Lock support, linked entry movement, drag-click fix, "+" button fix |
-| `src/components/timeline/EntryCard.tsx` | Edit | Lock icon + dashed border for locked entries, airport processing style |
-| `src/components/timeline/EntryForm.tsx` | Edit | Airport processing fields, prefill end time, create linked entries |
-| `src/components/timeline/EntryOverlay.tsx` | Edit | Lock/unlock toggle, processing entry editing |
-| `src/pages/Timeline.tsx` | Edit | Pass prefillEndTime, handle drag-create callback |
-| `src/components/wizard/DateStep.tsx` | Edit | Add collapsible flight section |
-| `src/pages/TripWizard.tsx` | Edit | Handle flight data, create flight entries on trip creation |
+### Behavior
+- When you place one option from a group, it becomes the "active" choice on the timeline
+- The other options in the group remain in the panel, shown slightly dimmed with a label like "Alternative to: [active option name]"
+- You can swap: drag an alternative onto the active one to replace it (the replaced one goes back to the panel)
+- Locking an entry (existing feature) "confirms" the choice -- alternatives can optionally be dismissed
+
+### Visual on Timeline
+- When an entry has alternatives in the panel, show a small badge/indicator (e.g. "2 alternatives") on the card
+
+### Files
+- Edit: `src/components/timeline/EntryCard.tsx` -- alternatives badge
+- Edit: `src/components/timeline/IdeasPanel.tsx` -- show grouped alternatives
+- Edit: `src/components/timeline/EntryOverlay.tsx` -- show alternatives list, swap button
+
+---
+
+## Feature 4: Live Travel Time Calculation
+
+### Trigger
+- Whenever an entry is placed on the timeline (from panel or moved), calculate travel times to/from adjacent entries
+- Uses the existing `google-directions` edge function
+
+### Display
+- On each entry card, show a small "+X min" or "-X min" badge indicating the travel time impact
+- Green badge = fits within available gap, Red badge = exceeds available gap
+- Travel time shown between entries (reuses existing `TravelSegmentCard`)
+
+### Implementation
+- After placing an entry, find the previous and next scheduled entries for that day
+- Call `google-directions` for both segments (previous-to-new, new-to-next)
+- Compare total travel time against available gaps
+- Calculate the discrepancy (+ or - minutes)
+
+### Files
+- Edit: `src/components/timeline/CalendarDay.tsx` -- trigger calculation on entry placement
+- Edit: `src/components/timeline/EntryCard.tsx` -- show +/- minutes badge
+- New: `src/hooks/useTravelCalculation.ts` -- encapsulate travel calculation logic
+
+---
+
+## Feature 5: Step-by-Step Conflict Resolution
+
+### Trigger
+- When placing an entry creates a time conflict (travel time causes overlap or exceeds available gap)
+
+### Dialog Flow (Step-by-Step)
+1. **Show the problem**: "Placing [Activity] here requires 25 extra minutes of travel time"
+2. **Show smart recommendations**: The system analyzes the day's schedule and suggests fixes:
+   - "Arrive at [Hotel] 25 minutes later" (shift a flexible entry)
+   - "Shorten [Lunch] by 25 minutes"
+   - "Start [Activity] 25 minutes earlier"
+   - Each recommendation shows what it affects
+3. **User picks one** (or picks "I'll figure it out myself")
+4. **If user picks a recommendation**: Apply the time change, recalculate all travel for the day, lock the entry in
+5. **If user picks "I'll figure it out myself"**: Place the entry but show a visible conflict marker on the timeline (e.g. red warning icon, overlapping border)
+
+### Conflict Markers (for "figure it out myself")
+- Red/orange warning icon on the entry card
+- Tooltip or badge showing "-25 min conflict"
+- The entry is placed but NOT locked, so it can be easily adjusted
+
+### Smart Recommendation Engine
+- Looks at all entries on that day
+- Identifies which ones are NOT locked
+- For each unlocked entry, calculates how much it could be shifted or shortened
+- Ranks recommendations by least disruption (prefer shifting end times over start times, prefer entries adjacent to the conflict)
+
+### Files
+- New: `src/components/timeline/ConflictResolver.tsx` -- the step-by-step dialog component
+- New: `src/lib/conflictEngine.ts` -- logic for analyzing conflicts and generating recommendations
+- Edit: `src/components/timeline/EntryCard.tsx` -- conflict marker display
+- Edit: `src/pages/Timeline.tsx` -- manage conflict resolution state
+
+---
+
+## Feature 6: Returning Entries to Panel
+
+### Behavior
+- From the `EntryOverlay` (detail view), add a "Move to ideas" button
+- This sets `is_scheduled = false` and clears the time, moving it back to the panel
+- Alternatives in the same option group remain unaffected
+
+### Files
+- Edit: `src/components/timeline/EntryOverlay.tsx` -- "Move to ideas" button
+
+---
+
+## Technical Details
+
+### Data Flow
+
+```text
+User creates entry
+  |
+  +--> "Add to ideas" --> is_scheduled=false, appears in panel
+  |
+  +--> Pick time --> is_scheduled=true, appears on timeline
+  
+User drags from panel to timeline
+  |
+  +--> Set is_scheduled=true, start_time, end_time
+  |
+  +--> Calculate travel to adjacent entries
+  |
+  +--> If conflict:
+  |     |
+  |     +--> Show ConflictResolver dialog
+  |     |     |
+  |     |     +--> User picks recommendation --> apply changes, lock
+  |     |     |
+  |     |     +--> User picks "figure it out" --> place with warning marker
+  |     |
+  +--> If no conflict:
+        |
+        +--> Place normally, show travel segments
+```
+
+### Updated Types (`src/types/trip.ts`)
+
+- `Entry` gains: `is_scheduled`, `scheduled_day`, `option_group_id`
+- New type: `OptionGroup { id, trip_id, label, created_at }`
+
+### Migration Summary
+
+| Change | Table | Column/Detail |
+|--------|-------|--------------|
+| Add column | entries | `is_scheduled` boolean default true |
+| Add column | entries | `scheduled_day` integer nullable |
+| Add column | entries | `option_group_id` uuid nullable |
+| New table | option_groups | id, trip_id, label, created_at |
+| RLS | option_groups | Same open policies as entries |
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `src/components/timeline/IdeasPanel.tsx` | Side panel with unscheduled options |
+| `src/components/timeline/IdeaCard.tsx` | Compact card for panel items |
+| `src/components/timeline/ConflictResolver.tsx` | Step-by-step conflict dialog |
+| `src/lib/conflictEngine.ts` | Conflict analysis and recommendation logic |
+| `src/hooks/useTravelCalculation.ts` | Live travel time calculation hook |
+
+### Edited Files
+
+| File | Changes |
+|------|---------|
+| `src/types/trip.ts` | New fields on Entry, new OptionGroup type |
+| `src/pages/Timeline.tsx` | Panel state, drag coordination, conflict state |
+| `src/components/timeline/TimelineHeader.tsx` | Panel toggle button |
+| `src/components/timeline/EntryForm.tsx` | "Add to ideas" option in When step |
+| `src/components/timeline/EntryCard.tsx` | Alternatives badge, conflict marker |
+| `src/components/timeline/EntryOverlay.tsx` | "Move to ideas" button, alternatives list |
+| `src/components/timeline/CalendarDay.tsx` | Drop zone handlers |
+
