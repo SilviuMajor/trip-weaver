@@ -541,7 +541,7 @@ const CalendarDay = ({
                 if (!w) return null;
                 const top = (hour - startHour) * PIXELS_PER_HOUR;
                 return (
-                  <div key={hour} className="absolute left-0" style={{ top: top + 2 }}>
+                  <div key={hour} className="absolute left-0" style={{ top: top + (PIXELS_PER_HOUR / 2) - 6 }}>
                     <WeatherBadge temp={w.temp_c} condition={w.condition} hour={hour} date={dayDate} />
                   </div>
                 );

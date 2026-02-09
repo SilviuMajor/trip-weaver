@@ -338,8 +338,10 @@ export type Database = {
           default_checkout_min: number
           destination: string | null
           duration_days: number | null
+          emoji: string | null
           end_date: string | null
           id: string
+          image_url: string | null
           name: string
           owner_id: string | null
           start_date: string | null
@@ -354,8 +356,10 @@ export type Database = {
           default_checkout_min?: number
           destination?: string | null
           duration_days?: number | null
+          emoji?: string | null
           end_date?: string | null
           id?: string
+          image_url?: string | null
           name: string
           owner_id?: string | null
           start_date?: string | null
@@ -370,8 +374,10 @@ export type Database = {
           default_checkout_min?: number
           destination?: string | null
           duration_days?: number | null
+          emoji?: string | null
           end_date?: string | null
           id?: string
+          image_url?: string | null
           name?: string
           owner_id?: string | null
           start_date?: string | null

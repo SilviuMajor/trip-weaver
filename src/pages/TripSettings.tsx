@@ -1,16 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { ArrowLeft, Save, Copy, X, Check, Plus, Trash2, CalendarIcon } from 'lucide-react';
+import { ArrowLeft, Save, Copy, X, Check, Plus, Trash2, CalendarIcon, Upload, ImageIcon } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { toast } from '@/hooks/use-toast';
 import { addDays, format, parseISO } from 'date-fns';
 import type { Trip, TripUser } from '@/types/trip';
+import { cn } from '@/lib/utils';
 
 const TripSettings = () => {
   const { tripId } = useParams<{ tripId: string }>();
@@ -35,6 +36,13 @@ const TripSettings = () => {
   const [startDateInput, setStartDateInput] = useState('');
   const [settingDates, setSettingDates] = useState(false);
 
+  // Icon state
+  const [tripEmoji, setTripEmoji] = useState('');
+  const [uploadingIcon, setUploadingIcon] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const EMOJI_OPTIONS = ['✈️', '🏖️', '🏔️', '🎿', '🗼', '🚗', '🚢', '🏕️', '🎉', '🌍'];
+
   useEffect(() => {
     if (!authLoading && !isAdmin) navigate('/auth');
   }, [authLoading, isAdmin, navigate]);
@@ -51,6 +59,7 @@ const TripSettings = () => {
         setTrip(t);
         setTripName(t.name);
         setTripDestination(t.destination ?? '');
+        setTripEmoji(t.emoji ?? '');
       }
       setMembers((membersData ?? []) as unknown as TripUser[]);
       setLoading(false);
@@ -221,6 +230,115 @@ const TripSettings = () => {
             <Save className="mr-1.5 h-4 w-4" />
             {saving ? 'Saving…' : 'Save'}
           </Button>
+        </section>
+
+        {/* Trip Icon */}
+        <section className="space-y-3">
+          <Label className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            <ImageIcon className="mr-1.5 inline h-4 w-4" />
+            Trip Icon
+          </Label>
+          <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+            {/* Current icon preview */}
+            <div className="flex items-center gap-3">
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/15 text-3xl">
+                {trip?.image_url ? (
+                  <img src={trip.image_url} alt="Trip icon" className="h-full w-full rounded-xl object-cover" />
+                ) : (
+                  tripEmoji || '✈️'
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {trip?.image_url ? 'Custom image' : tripEmoji ? `Emoji: ${tripEmoji}` : 'Default plane icon'}
+              </p>
+            </div>
+
+            {/* Emoji picker */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Pick an emoji</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {EMOJI_OPTIONS.map(e => (
+                  <button
+                    key={e}
+                    onClick={async () => {
+                      setTripEmoji(e);
+                      await supabase.from('trips').update({ emoji: e } as any).eq('id', tripId!);
+                      setTrip(prev => prev ? { ...prev, emoji: e } : prev);
+                      toast({ title: `Icon set to ${e}` });
+                    }}
+                    className={cn(
+                      'flex h-10 w-10 items-center justify-center rounded-lg border text-xl transition-all hover:scale-110',
+                      tripEmoji === e ? 'border-primary bg-primary/10' : 'border-border'
+                    )}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+              <Input
+                placeholder="Or type any emoji…"
+                value={tripEmoji}
+                onChange={async (ev) => {
+                  const val = ev.target.value;
+                  setTripEmoji(val);
+                  await supabase.from('trips').update({ emoji: val || null } as any).eq('id', tripId!);
+                  setTrip(prev => prev ? { ...prev, emoji: val || null } : prev);
+                }}
+                className="mt-1.5 w-32"
+              />
+            </div>
+
+            {/* Image upload */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Or upload an image</Label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (ev) => {
+                  const file = ev.target.files?.[0];
+                  if (!file || !tripId) return;
+                  setUploadingIcon(true);
+                  try {
+                    const ext = file.name.split('.').pop() ?? 'png';
+                    const path = `trips/${tripId}/icon.${ext}`;
+                    const { error: upErr } = await supabase.storage.from('trip-images').upload(path, file, { upsert: true });
+                    if (upErr) throw upErr;
+                    const { data: urlData } = supabase.storage.from('trip-images').getPublicUrl(path);
+                    const imageUrl = urlData.publicUrl + '?t=' + Date.now();
+                    await supabase.from('trips').update({ image_url: imageUrl } as any).eq('id', tripId);
+                    setTrip(prev => prev ? { ...prev, image_url: imageUrl } : prev);
+                    toast({ title: 'Trip image uploaded!' });
+                  } catch (err: any) {
+                    toast({ title: 'Upload failed', description: err.message, variant: 'destructive' });
+                  } finally {
+                    setUploadingIcon(false);
+                  }
+                }}
+              />
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingIcon}>
+                  <Upload className="mr-1.5 h-3.5 w-3.5" />
+                  {uploadingIcon ? 'Uploading…' : 'Upload Image'}
+                </Button>
+                {trip?.image_url && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      await supabase.from('trips').update({ image_url: null } as any).eq('id', tripId!);
+                      setTrip(prev => prev ? { ...prev, image_url: null } : prev);
+                      toast({ title: 'Image removed' });
+                    }}
+                  >
+                    <X className="mr-1 h-3.5 w-3.5" />
+                    Remove
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
         </section>
 
         {/* Trip Dates */}

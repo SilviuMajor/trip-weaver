@@ -88,10 +88,14 @@ const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas
             variant="ghost"
             size="icon"
             onClick={() => navigate('/dashboard')}
-            className="h-8 w-8 shrink-0"
+            className="h-8 w-8 shrink-0 overflow-hidden"
             title="My Trips"
           >
-            <Home className="h-4 w-4" />
+            {trip?.image_url ? (
+              <img src={trip.image_url} alt="" className="h-6 w-6 rounded-full object-cover" />
+            ) : (
+              <span className="text-base">{trip?.emoji || '✈️'}</span>
+            )}
           </Button>
           <div className="min-w-0">
             <h1 className="truncate text-lg font-bold leading-tight">
