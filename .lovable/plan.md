@@ -1,60 +1,89 @@
 
 
-# Lock Toggle on Cards, Weather Column, and Timezone Gutter Improvements
+# Dynamic Weather Column, Day Header Cleanup, Lock Visibility, and Sunset Removal
 
-## 1. Lock/Unlock Button on Entry Cards
+## 1. Remove Sunset/Time-of-Day Gradient from Entry Cards
 
-### Behavior
-- A small lock icon button appears in the **bottom-right corner** of every entry card.
-- When the entry is locked: shows a filled/closed lock icon.
-- When unlocked: shows an open lock icon (subtle/dimmed).
-- Clicking the button toggles `is_locked` on the entry via a database update.
-- **Only users with editor or organizer role** can toggle. For viewers, the button is **not rendered at all** (silent -- no tooltip or error).
-- Uses the existing `isEditor` flag from `useCurrentUser`.
+The `EntryCard` currently applies a `timeOfDayGradient` as a subtle background layer on cards (line 101, then used at line 191). This will be removed entirely -- cards will keep only their category tint background. The import of `getTimeOfDayGradient` will be removed from `EntryCard.tsx`.
 
-### Compact entries
-- On compact (single-line) entries, the time label moves to the **left side** (after the emoji), and the lock icon sits alone on the **far right edge**.
+## 2. Dynamic Circular Weather Badges
 
-### Changes
-- **`EntryCard.tsx`**: Add `onToggleLock` and `canEdit` props. Render a lock button in the bottom-right (normal cards) or far-right (compact cards). On click, call `onToggleLock` (stop propagation to prevent card click).
-- **`CalendarDay.tsx`**: Pass `onToggleLock` and `canEdit` props down to `EntryCard`. The handler calls a Supabase update to toggle `is_locked`.
-- **`Timeline.tsx`**: Pass `isEditor` down to `CalendarDay`.
+### New design
+Replace the current pill-shaped `WeatherBadge` with a **circular badge** that combines:
+- **Time-of-day color**: Background color derived from `getTimeOfDayColor()` using the hour's time and trip coordinates. Nighttime hours get dark indigo/navy backgrounds with white icons/text; daytime gets warm/bright backgrounds.
+- **Weather condition modifier**: The base time-of-day color is adjusted based on weather -- rain makes it cooler/bluer, clear skies keep it warm, clouds desaturate slightly.
+- **Icon**: Lucide weather icon (same set as now) rendered at center-top.
+- **Temperature**: Below the icon in bold text.
+- **Text color**: Automatically switches to white when the background is dark (lightness below 40%), otherwise stays dark.
 
----
+### New props for WeatherBadge
+- `hour: number` -- the hour this badge represents
+- `date: Date` -- the day (for sun position calculation)
+- `latitude?: number` -- trip location lat (defaults to Amsterdam 52.37)
+- `longitude?: number` -- trip location lng (defaults to Amsterdam 4.9)
 
-## 2. Weather Column (Dedicated Right Column)
+### Visual specs
+- Size: 36x36px circle (`w-9 h-9 rounded-full`)
+- Icon: 14px, centered
+- Temp: 10px bold text below icon
+- Shadow: subtle `shadow-sm`
+- Transition: smooth color changes between hours
 
-### Current state
-Weather badge is absolutely positioned inside the entry card container (`right-2 top-2` at line 413-417 of CalendarDay).
+### Weather condition color modifications
+The base HSL from `getTimeOfDayColor` will be modified:
+- **Rain/shower/drizzle**: Shift hue towards blue (+20), reduce lightness (-5%)
+- **Thunder**: Shift hue towards purple, reduce lightness (-10%)
+- **Snow**: Increase lightness (+10%), reduce saturation (-20%)
+- **Fog**: Reduce saturation (-30%), increase lightness (+5%)
+- **Clear/sun**: Keep as-is (the pure time-of-day color)
+- **Cloudy**: Reduce saturation (-15%)
+
+## 3. Day Header Redesign
+
+### Current issue
+The sticky TZ header in `TimeSlotGrid` at line 300 is overlapping and creating visual artifacts. The day header (Saturday 21 Feb) is left-aligned.
 
 ### New layout
-- Add a dedicated column to the **right** of the entry cards area (approx 44px wide).
-- This column shows weather badges at every hour where weather data is available, not just at entry positions.
-- Weather badges are positioned at their corresponding hour offset (same vertical positioning as the time gutter on the left).
-- This gives a full hourly weather strip alongside the timeline.
+Merge the timezone info into the day header bar:
+- **Left side**: Timezone abbreviation(s) (e.g., "GMT+0" or "GMT+0 | CET+1")
+- **Center**: Day name and date (e.g., "Saturday 21 Feb"), with TODAY badge if applicable
+- **Right side**: Empty (clean)
+
+This replaces the separate sticky TZ label inside `TimeSlotGrid`. The sticky TZ header code in `TimeSlotGrid.tsx` (lines 299-312) will be removed.
 
 ### Changes
-- **`CalendarDay.tsx`**:
-  - Remove the weather badge from inside the entry card wrapper (remove lines 413-417).
-  - Add a new absolute-positioned weather column on the right side of the timeline container.
-  - Render a `WeatherBadge` for each hour that has weather data, positioned vertically by hour offset.
-  - Adjust the entry cards area to leave room on the right (e.g. `pr-12` or `right: 48px`).
+- **`CalendarDay.tsx`** (lines 221-257): Restructure the day header `div` to use a 3-column layout. Left column shows TZ abbreviation(s) from `activeTz` and `dayFlights`. Center column shows the day/date (centered). The sticky behavior stays.
+- **`TimeSlotGrid.tsx`**: Remove the sticky TZ header block (lines 299-312).
 
----
+## 4. Fix Time Labels Behind Cards (z-index)
 
-## 3. Timezone Labels Outside Cards (Sticky Gutter Header)
+### Problem
+From the screenshot, the hour labels ("06:00", "07:00", etc.) in the time gutter are rendering behind the entry cards. The hour labels are at `z-index` via the grid, but cards are at `z-10`.
 
-### Clarification
-The user is **not** asking to move event-specific times (like "09:00 -- 10:30") outside the card. They want the **timezone gutter labels** (the hourly time labels on the left side, and the TZ abbreviation) to be clearly outside and separate from the entry cards, with a sticky TZ indicator at the top.
-
-### Current state
-- `TimeSlotGrid` renders hour labels at `left-0` with `text-[10px]`. The TZ abbreviation labels are positioned at `-top-5`.
-- Entry cards in `CalendarDay` use `ml-10` or `ml-16` to offset from the gutter, but the gutter labels live inside the same container.
+### Fix
+- The hour labels in `TimeSlotGrid` are inside `div` elements that just have `border-t`. The labels use `absolute -top-2.5 left-0` positioning. These need a higher z-index than the entry cards, or the entry cards need their left edge to not overlap the gutter labels.
+- The simplest fix: ensure the gutter labels have `z-[15]` (above the cards' `z-10`), so the time text always shows on top. This matches the expectation that times are outside and always visible.
 
 ### Changes
-- **`TimeSlotGrid.tsx`**: Add a sticky header element at the top of the gutter that shows the timezone abbreviation(s) (e.g., "GMT+0" or "GMT+0 | CET+1"). This uses `position: sticky; top: ...` so it stays visible while scrolling through the day.
-- **`CalendarDay.tsx`**: Ensure the sticky TZ label is positioned in the gutter area (the `ml-10`/`ml-16` gap) and persists while scrolling. Use `z-index` to keep it above entry cards.
-- The sticky label format: e.g., "GMT+0" for single timezone, or "GMT+0 | CET+1" for dual timezone days.
+- **`TimeSlotGrid.tsx`**: Add `z-[15]` to each hour label's container div.
+
+## 5. Lock Toggle on All Cards
+
+### Problem
+From the screenshot, only the compact "Airport Checkout" entry shows a lock icon. The larger cards (Coach to the airport, Airport Check-in, BA432 flight) do not show locks.
+
+### Root cause
+In `EntryCard.tsx`, the lock button for normal (non-compact) cards is inside the `!isProcessing` block (line 279). This means:
+1. Processing entries (check-in/checkout with `isProcessing` flag) skip the entire bottom row, so they never render the lock.
+2. The lock button requires both `canEdit` AND `onToggleLock` to be truthy.
+
+### Fix
+- Move the lock button rendering outside the `!isProcessing` conditional, so it appears on ALL card types (normal, processing, flight).
+- For processing cards, add a small absolute-positioned lock button in the bottom-right corner.
+- Ensure `onToggleLock` is always passed from `CalendarDay` for every entry.
+
+### Changes
+- **`EntryCard.tsx`**: Add a lock button that renders in the bottom-right corner for all card types, outside the `!isProcessing` conditional. Use `absolute bottom-2 right-2` positioning so it works regardless of card content layout.
 
 ---
 
@@ -64,36 +93,26 @@ The user is **not** asking to move event-specific times (like "09:00 -- 10:30") 
 
 | File | Changes |
 |------|---------|
-| `src/components/timeline/EntryCard.tsx` | Add lock toggle button (bottom-right for normal, far-right for compact). Add `onToggleLock` and `canEdit` props. Move time to left side in compact mode. |
-| `src/components/timeline/CalendarDay.tsx` | Remove weather from inside card, add weather column on right side with hourly badges. Pass lock toggle handler and `canEdit` to `EntryCard`. Add sticky TZ header in gutter. |
-| `src/components/timeline/TimeSlotGrid.tsx` | Add sticky TZ abbreviation header at top of gutter. |
-| `src/pages/Timeline.tsx` | Pass `isEditor` to `CalendarDay`. |
+| `src/components/timeline/WeatherBadge.tsx` | Complete redesign: circular badge, time-of-day background colors with weather modifiers, dark/light text auto-switching. New props for `hour`, `date`, `latitude`, `longitude`. |
+| `src/components/timeline/EntryCard.tsx` | Remove `timeOfDayGradient` import and usage. Move lock button outside the `!isProcessing` block so it appears on all cards. |
+| `src/components/timeline/CalendarDay.tsx` | Restructure day header to 3-column layout with TZ on left, date centered. Pass `date` and `hour` to each `WeatherBadge`. |
+| `src/components/timeline/TimeSlotGrid.tsx` | Remove sticky TZ header (lines 299-312). Add `z-[15]` to hour label containers so they render above cards. |
 
-### Lock toggle handler (in CalendarDay or Timeline)
+### Weather badge color computation
 
 ```text
-onToggleLock(entryId):
-  1. Find entry by id
-  2. Update entries table: set is_locked = !current_value
-  3. Refetch entries (or optimistically update local state)
+1. Get base HSL from getTimeOfDayColor(dateAtHour, lat, lng)
+2. Parse the HSL string into {h, s, l}
+3. Apply weather modifier to h, s, l
+4. Determine text color: l < 40 ? white : dark
+5. Render circle with background: hsl(h, s%, l%)
 ```
 
-### Weather column layout
+### Day header layout
 
 ```text
-Timeline container (relative):
-  [Gutter: 40-64px] [Entry cards area] [Weather column: 44px]
-  
-  Weather column:
-    For each hour from startHour to endHour:
-      If weatherData exists for this date+hour:
-        Position WeatherBadge at (hour - startHour) * pixelsPerHour
-```
-
-### Compact entry layout change
-
-```text
-Current compact:  [emoji] Name ........... [time range] [lock?]
-New compact:      [emoji] Name [time range] ........... [lock icon]
-                  ^-- time moves left, lock takes far right
+[TZ label]     [Day Date]     [          ]
+ left           center          right
+ "GMT+0"       "Saturday"       (empty)
+               "21 Feb"
 ```
