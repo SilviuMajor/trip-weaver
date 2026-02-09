@@ -5,10 +5,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { ArrowLeft, Save, Copy, X, Check, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Save, Copy, X, Check, Plus, Trash2, CalendarIcon } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { toast } from '@/hooks/use-toast';
+import { addDays, format, parseISO } from 'date-fns';
 import type { Trip, TripUser } from '@/types/trip';
 
 const TripSettings = () => {
@@ -29,6 +30,10 @@ const TripSettings = () => {
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberRole, setNewMemberRole] = useState<string>('viewer');
   const [addingMember, setAddingMember] = useState(false);
+
+  // Date conversion state
+  const [startDateInput, setStartDateInput] = useState('');
+  const [settingDates, setSettingDates] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !isAdmin) navigate('/auth');
@@ -131,6 +136,61 @@ const TripSettings = () => {
     }
   };
 
+  const handleSetDates = async () => {
+    if (!tripId || !trip || !startDateInput) return;
+    setSettingDates(true);
+    try {
+      const startDate = parseISO(startDateInput);
+      const durationDays = trip.duration_days ?? 3;
+      const endDate = addDays(startDate, durationDays - 1);
+
+      // Update trip dates
+      const { error: tripError } = await supabase.from('trips').update({
+        start_date: format(startDate, 'yyyy-MM-dd'),
+        end_date: format(endDate, 'yyyy-MM-dd'),
+      } as any).eq('id', tripId);
+      if (tripError) throw tripError;
+
+      // Shift all entries from 2099-01-xx to real dates
+      const { data: allEntries } = await supabase.from('entries').select('*').eq('trip_id', tripId);
+      if (allEntries) {
+        for (const entry of allEntries) {
+          const entryStart = new Date(entry.start_time);
+          const entryEnd = new Date(entry.end_time);
+          const refBase = new Date('2099-01-01T00:00:00Z');
+          const dayOffset = Math.round((entryStart.getTime() - refBase.getTime()) / (1000 * 60 * 60 * 24));
+
+          if (dayOffset >= 0 && dayOffset < 365) {
+            const realDate = addDays(startDate, dayOffset);
+            const startTimeStr = format(entryStart, 'HH:mm:ss');
+            const endTimeStr = format(entryEnd, 'HH:mm:ss');
+            const newStart = `${format(realDate, 'yyyy-MM-dd')}T${startTimeStr}Z`;
+            const newEnd = `${format(realDate, 'yyyy-MM-dd')}T${endTimeStr}Z`;
+
+            await supabase.from('entries').update({
+              start_time: newStart,
+              end_time: newEnd,
+            }).eq('id', entry.id);
+          }
+        }
+      }
+
+      setTrip(prev => prev ? {
+        ...prev,
+        start_date: format(startDate, 'yyyy-MM-dd'),
+        end_date: format(endDate, 'yyyy-MM-dd'),
+      } : prev);
+
+      toast({ title: 'Trip dates set! All entries shifted to real dates. 🎉' });
+    } catch (err: any) {
+      toast({ title: 'Failed to set dates', description: err.message, variant: 'destructive' });
+    } finally {
+      setSettingDates(false);
+    }
+  };
+
+  const isUndated = !trip?.start_date;
+
   if (authLoading || loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -161,6 +221,44 @@ const TripSettings = () => {
             <Save className="mr-1.5 h-4 w-4" />
             {saving ? 'Saving…' : 'Save'}
           </Button>
+        </section>
+
+        {/* Trip Dates */}
+        <section className="space-y-3">
+          <Label className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            <CalendarIcon className="mr-1.5 inline h-4 w-4" />
+            Trip Dates
+          </Label>
+          {isUndated ? (
+            <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+              <p className="text-sm text-muted-foreground">
+                Currently undated ({trip?.duration_days ?? 3} days: Day 1, Day 2…). Set a start date to convert to real calendar dates.
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="start-date" className="text-xs text-muted-foreground">Start Date</Label>
+                <Input
+                  id="start-date"
+                  type="date"
+                  value={startDateInput}
+                  onChange={(e) => setStartDateInput(e.target.value)}
+                />
+              </div>
+              <Button
+                onClick={handleSetDates}
+                disabled={!startDateInput || settingDates}
+                size="sm"
+              >
+                <CalendarIcon className="mr-1.5 h-4 w-4" />
+                {settingDates ? 'Setting dates…' : 'Set Dates & Shift Entries'}
+              </Button>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-border bg-card p-4">
+              <p className="text-sm">
+                <span className="font-medium">{trip?.start_date}</span> → <span className="font-medium">{trip?.end_date}</span>
+              </p>
+            </div>
+          )}
         </section>
 
         {/* Share link */}
