@@ -228,31 +228,50 @@ const CalendarDay = ({
         )}
         id={today ? 'today' : undefined}
       >
-        <div className="mx-auto flex max-w-2xl items-baseline gap-2">
-          <span className={cn(
-            'font-display text-sm font-bold',
-            today ? 'text-primary' : dayPast ? 'text-muted-foreground' : 'text-foreground'
-          )}>
-            {isUndated ? dayLabel : format(dayDate, 'EEEE')}
-          </span>
-          {!isUndated && (
+        <div className="mx-auto flex max-w-2xl items-center px-0">
+          {/* Left: TZ abbreviation(s) */}
+          <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-muted-foreground/60 w-16 shrink-0">
+            {dayFlights.length > 0 ? (
+              <>
+                <span>{(() => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: dayFlights[0].originTz, timeZoneName: 'short' }).formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value; } catch { return ''; } })()}</span>
+                <span className="text-muted-foreground/30">│</span>
+                <span className="text-primary/60">{(() => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: dayFlights[0].destinationTz, timeZoneName: 'short' }).formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value; } catch { return ''; } })()}</span>
+              </>
+            ) : activeTz ? (
+              <span>{(() => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: activeTz, timeZoneName: 'short' }).formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value; } catch { return activeTz; } })()}</span>
+            ) : null}
+          </div>
+
+          {/* Center: Day name + date */}
+          <div className="flex flex-1 items-baseline justify-center gap-2">
             <span className={cn(
-              'text-xs',
-              today ? 'text-primary/70' : 'text-muted-foreground'
+              'font-display text-sm font-bold',
+              today ? 'text-primary' : dayPast ? 'text-muted-foreground' : 'text-foreground'
             )}>
-              {format(dayDate, 'd MMM')}
+              {isUndated ? dayLabel : format(dayDate, 'EEEE')}
             </span>
-          )}
-          {isUndated && (
-            <span className="text-xs text-muted-foreground">
-              {format(dayDate, 'EEEE')}
-            </span>
-          )}
-          {today && (
-            <span className="ml-1 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">
-              TODAY
-            </span>
-          )}
+            {!isUndated && (
+              <span className={cn(
+                'text-xs',
+                today ? 'text-primary/70' : 'text-muted-foreground'
+              )}>
+                {format(dayDate, 'd MMM')}
+              </span>
+            )}
+            {isUndated && (
+              <span className="text-xs text-muted-foreground">
+                {format(dayDate, 'EEEE')}
+              </span>
+            )}
+            {today && (
+              <span className="ml-1 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">
+                TODAY
+              </span>
+            )}
+          </div>
+
+          {/* Right: empty for balance */}
+          <div className="w-16 shrink-0" />
         </div>
       </div>
 
@@ -503,7 +522,7 @@ const CalendarDay = ({
                 const top = (hour - startHour) * PIXELS_PER_HOUR;
                 return (
                   <div key={hour} className="absolute left-0" style={{ top: top + 2 }}>
-                    <WeatherBadge temp={w.temp_c} condition={w.condition} />
+                    <WeatherBadge temp={w.temp_c} condition={w.condition} hour={hour} date={dayDate} />
                   </div>
                 );
               })}

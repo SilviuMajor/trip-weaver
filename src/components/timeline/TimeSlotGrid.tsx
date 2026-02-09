@@ -266,7 +266,7 @@ const TimeSlotGrid = ({
             style={{ top: (hour - startHour) * pixelsPerHour }}
           >
             {hasDualTz && cols ? (
-              <div className="absolute -top-2.5 left-0 flex select-none gap-0">
+            <div className="absolute -top-2.5 left-0 z-[15] flex select-none gap-0">
                 {cols.origin && (
                   <span
                     className="text-[9px] font-medium transition-opacity duration-300"
@@ -288,7 +288,7 @@ const TimeSlotGrid = ({
                 )}
               </div>
             ) : (
-              <span className="absolute -top-2.5 left-0 select-none text-[10px] font-medium text-muted-foreground/50">
+              <span className="absolute -top-2.5 left-0 z-[15] select-none text-[10px] font-medium text-muted-foreground/50">
                 {String(hour).padStart(2, '0')}:00
               </span>
             )}
@@ -296,20 +296,6 @@ const TimeSlotGrid = ({
         );
       })}
 
-      {/* Sticky TZ abbreviation header */}
-      <div className="sticky top-[57px] z-30 pointer-events-none" style={{ marginLeft: '-100%', width: '100%' }}>
-        <div className="absolute left-0 top-0 flex select-none gap-1 rounded-b bg-background/80 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider backdrop-blur-sm border-b border-x border-border/30">
-          {hasDualTz && tzRanges && tzRanges.length > 0 ? (
-            <>
-              <span className="text-muted-foreground/60">{tzRanges[0].originAbbr}</span>
-              <span className="text-muted-foreground/30">│</span>
-              <span className="text-primary/60">{tzRanges[0].destAbbr}</span>
-            </>
-          ) : activeTz ? (
-            <span className="text-muted-foreground/60">{getTzAbbr(activeTz)}</span>
-          ) : null}
-        </div>
-      </div>
 
       {renderPreview()}
     </div>
