@@ -14,6 +14,7 @@ export interface CategoryPreset {
 export interface Trip {
   id: string;
   name: string;
+  destination: string | null;
   start_date: string | null;
   end_date: string | null;
   duration_days: number | null;

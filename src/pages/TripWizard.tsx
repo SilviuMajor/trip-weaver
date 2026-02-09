@@ -29,6 +29,7 @@ const TripWizard = () => {
 
   // Form state
   const [name, setName] = useState('');
+  const [destination, setDestination] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [datesUnknown, setDatesUnknown] = useState(false);
@@ -65,6 +66,7 @@ const TripWizard = () => {
     try {
       const insertData: Record<string, unknown> = {
         name,
+        destination: destination.trim() || null,
         start_date: datesUnknown ? null : startDate,
         end_date: datesUnknown ? null : endDate,
         duration_days: datesUnknown ? durationDays : null,
@@ -131,7 +133,7 @@ const TripWizard = () => {
           canSkip={step > 1 && !isLastStep}
           onSkip={handleNext}
         >
-          {step === 0 && <NameStep value={name} onChange={setName} />}
+          {step === 0 && <NameStep value={name} onChange={setName} destination={destination} onDestinationChange={setDestination} />}
           {step === 1 && (
             <DateStep
               startDate={startDate}

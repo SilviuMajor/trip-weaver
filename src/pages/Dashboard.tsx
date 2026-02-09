@@ -116,8 +116,15 @@ const Dashboard = () => {
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate font-display text-lg font-bold">{trip.name}</h3>
+                  {trip.destination && (
+                    <p className="truncate text-sm text-muted-foreground">{trip.destination}</p>
+                  )}
                   <p className="text-sm text-muted-foreground">
-                    {format(parseISO(trip.start_date), 'd MMM')} — {format(parseISO(trip.end_date), 'd MMM yyyy')}
+                    {trip.start_date && trip.end_date
+                      ? `${format(parseISO(trip.start_date), 'd MMM')} — ${format(parseISO(trip.end_date), 'd MMM yyyy')}`
+                      : trip.duration_days
+                        ? `${trip.duration_days}-day trip`
+                        : 'Dates TBD'}
                   </p>
                 </div>
               </motion.button>
