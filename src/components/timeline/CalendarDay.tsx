@@ -46,6 +46,8 @@ interface CalendarDayProps {
   onDropFromPanel?: (entryId: string, hourOffset: number) => void;
   dayFlights?: FlightTzInfo[];
   activeTz?: string;
+  isEditor?: boolean;
+  onToggleLock?: (entryId: string, currentLocked: boolean) => void;
 }
 
 function getHourInTimezone(isoString: string, tzName: string): number {
@@ -86,6 +88,8 @@ const CalendarDay = ({
   onDropFromPanel,
   dayFlights = [],
   activeTz,
+  isEditor,
+  onToggleLock,
 }: CalendarDayProps) => {
   const isUndated = !!dayLabel;
   const today = !isUndated && isToday(dayDate);
@@ -285,7 +289,7 @@ const CalendarDay = ({
         ) : (
           <div
             className={cn("relative", dayFlights.length > 0 ? "ml-16" : "ml-10")}
-            style={{ height: containerHeight, minHeight: 200 }}
+            style={{ height: containerHeight, minHeight: 200, marginRight: 48 }}
             onDragOver={(e) => {
               if (onDropFromPanel) {
                 e.preventDefault();
@@ -410,11 +414,6 @@ const CalendarDay = ({
                         />
                       )}
 
-                      {weather && (
-                        <div className="absolute right-2 top-2 z-20">
-                          <WeatherBadge temp={weather.temp_c} condition={weather.condition} />
-                        </div>
-                      )}
 
                       <EntryCard
                         isCompact={isCompact}
@@ -438,6 +437,8 @@ const CalendarDay = ({
                         isLocked={isLocked}
                         isProcessing={primaryOption.category === 'airport_processing'}
                         linkedType={entry.linked_type}
+                        canEdit={isEditor}
+                        onToggleLock={() => onToggleLock?.(entry.id, !!isLocked)}
                         onDragStart={canDrag ? (e) => {
                           onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour);
                         } : undefined}
@@ -492,6 +493,21 @@ const CalendarDay = ({
                 </div>
               );
             })}
+
+            {/* Weather column on the right */}
+            <div className="absolute top-0 bottom-0 z-[5]" style={{ right: -44, width: 40 }}>
+              {Array.from({ length: endHour - startHour }, (_, i) => startHour + i).map(hour => {
+                const dateStr = format(dayDate, 'yyyy-MM-dd');
+                const w = weatherData.find(wd => wd.date === dateStr && wd.hour === hour);
+                if (!w) return null;
+                const top = (hour - startHour) * PIXELS_PER_HOUR;
+                return (
+                  <div key={hour} className="absolute left-0" style={{ top: top + 2 }}>
+                    <WeatherBadge temp={w.temp_c} condition={w.condition} />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
