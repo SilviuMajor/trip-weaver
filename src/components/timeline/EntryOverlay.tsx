@@ -3,7 +3,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, Lightbulb } from 'lucide-react';
+import { Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, Lightbulb, Plane } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import type { EntryOption, EntryWithOptions } from '@/types/trip';
@@ -14,6 +14,28 @@ import ImageGallery from './ImageGallery';
 import ImageUploader from './ImageUploader';
 import MapPreview from './MapPreview';
 import VoteButton from './VoteButton';
+
+function formatTimeInTz(isoString: string, tz: string): string {
+  const d = new Date(isoString);
+  return d.toLocaleTimeString('en-GB', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function getTzAbbr(tz: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz,
+      timeZoneName: 'short',
+    }).formatToParts(new Date());
+    return parts.find(p => p.type === 'timeZoneName')?.value ?? tz.split('/').pop() ?? tz;
+  } catch {
+    return tz.split('/').pop() ?? tz;
+  }
+}
 
 interface EntryOverlayProps {
   entry: EntryWithOptions | null;
@@ -62,6 +84,7 @@ const EntryOverlay = ({
   const hasVoted = userVotes.includes(option.id);
   const images = option.images ?? [];
   const isLocked = entry.is_locked;
+  const isFlight = option.category === 'flight' && option.departure_tz && option.arrival_tz;
 
   const handleToggleLock = async () => {
     setToggling(true);
@@ -80,6 +103,13 @@ const EntryOverlay = ({
     }
   };
 
+  // Flight duration in minutes
+  const flightDurationMin = isFlight
+    ? Math.round((new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 60000)
+    : 0;
+  const flightHours = Math.floor(flightDurationMin / 60);
+  const flightMins = flightDurationMin % 60;
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="bottom" className="max-h-[90vh] overflow-y-auto rounded-t-3xl p-0">
@@ -94,20 +124,77 @@ const EntryOverlay = ({
                     : undefined
                 }
               >
+                {isFlight && <Plane className="h-3 w-3" />}
                 {option.category}
               </Badge>
             )}
             <SheetTitle className="font-display text-xl">{option.name}</SheetTitle>
           </SheetHeader>
 
-          {/* Time */}
-          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <Clock className="h-4 w-4" />
-            <span>{formatTime(entry.start_time)} — {formatTime(entry.end_time)}</span>
-            {isLocked && (
-              <Lock className="ml-1 h-3.5 w-3.5 text-muted-foreground/60" />
-            )}
-          </div>
+          {/* Flight-specific details */}
+          {isFlight ? (
+            <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                {/* Departure */}
+                <div className="flex-1 text-left space-y-0.5">
+                  <p className="text-sm font-bold text-foreground">
+                    {option.departure_location || 'Departure'}
+                  </p>
+                  {option.departure_terminal && (
+                    <p className="text-xs text-muted-foreground">{option.departure_terminal}</p>
+                  )}
+                  <p className="text-lg font-semibold text-foreground">
+                    {formatTimeInTz(entry.start_time, option.departure_tz!)}
+                  </p>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase">
+                    {getTzAbbr(option.departure_tz!)}
+                  </p>
+                </div>
+
+                {/* Arrow */}
+                <div className="flex flex-col items-center gap-1 shrink-0">
+                  <Plane className="h-4 w-4 text-muted-foreground" />
+                  <div className="h-px w-12 bg-border" />
+                  <span className="text-[10px] text-muted-foreground">
+                    {flightHours > 0 ? `${flightHours}h ` : ''}{flightMins}m
+                  </span>
+                </div>
+
+                {/* Arrival */}
+                <div className="flex-1 text-right space-y-0.5">
+                  <p className="text-sm font-bold text-foreground">
+                    {option.arrival_location || 'Arrival'}
+                  </p>
+                  {option.arrival_terminal && (
+                    <p className="text-xs text-muted-foreground">{option.arrival_terminal}</p>
+                  )}
+                  <p className="text-lg font-semibold text-foreground">
+                    {formatTimeInTz(entry.end_time, option.arrival_tz!)}
+                  </p>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase">
+                    {getTzAbbr(option.arrival_tz!)}
+                  </p>
+                </div>
+              </div>
+
+              {isLocked && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Lock className="h-3 w-3" /> Locked
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* Generic time */}
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Clock className="h-4 w-4" />
+                <span>{formatTime(entry.start_time)} — {formatTime(entry.end_time)}</span>
+                {isLocked && (
+                  <Lock className="ml-1 h-3.5 w-3.5 text-muted-foreground/60" />
+                )}
+              </div>
+            </>
+          )}
 
           {/* Distance */}
           {distance !== null && (

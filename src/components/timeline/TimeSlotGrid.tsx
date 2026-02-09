@@ -67,14 +67,17 @@ const TimeSlotGrid = ({
   const tzRanges = useMemo(() => {
     if (!hasDualTz) return null;
 
-    // For each flight, compute when origin fades out and destination fades in
-    return flights.map(f => ({
-      ...f,
-      overlapStart: f.flightStartHour - OVERLAP_HOURS,
-      overlapEnd: f.flightEndHour + OVERLAP_HOURS,
-      originAbbr: getTzAbbr(f.originTz),
-      destAbbr: getTzAbbr(f.destinationTz),
-    }));
+    // Center the 3h overlap on the flight midpoint
+    return flights.map(f => {
+      const midpoint = (f.flightStartHour + f.flightEndHour) / 2;
+      return {
+        ...f,
+        overlapStart: midpoint - OVERLAP_HOURS,
+        overlapEnd: midpoint + OVERLAP_HOURS,
+        originAbbr: getTzAbbr(f.originTz),
+        destAbbr: getTzAbbr(f.destinationTz),
+      };
+    });
   }, [flights, hasDualTz]);
 
   // Determine TZ display state at a given hour
