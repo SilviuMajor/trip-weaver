@@ -3,6 +3,7 @@ import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData } from '
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
 import { computeOverlapLayout } from '@/lib/overlapLayout';
+import { Plus } from 'lucide-react';
 import TimeSlotGrid from './TimeSlotGrid';
 import EntryCard from './EntryCard';
 import TravelSegmentCard from './TravelSegmentCard';
@@ -26,6 +27,9 @@ interface CalendarDayProps {
   weatherData?: WeatherData[];
   onClickSlot?: (time: Date) => void;
   dayLabel?: string;
+  isFirstDay?: boolean;
+  isLastDay?: boolean;
+  onAddBetween?: (prefillTime: string) => void;
 }
 
 function getHourInTimezone(isoString: string, tzName: string): number {
@@ -57,6 +61,9 @@ const CalendarDay = ({
   weatherData = [],
   onClickSlot,
   dayLabel,
+  isFirstDay,
+  isLastDay,
+  onAddBetween,
 }: CalendarDayProps) => {
   const isUndated = !!dayLabel;
   const today = !isUndated && isToday(date);
@@ -71,10 +78,13 @@ const CalendarDay = ({
   let endHour = 24;
 
   if (sortedEntries.length > 0) {
-    const hours = sortedEntries.flatMap(e => [
-      getHourInTimezone(e.start_time, tripTimezone),
-      getHourInTimezone(e.end_time, tripTimezone),
-    ]);
+    const hours = sortedEntries.flatMap(e => {
+      const s = getHourInTimezone(e.start_time, tripTimezone);
+      let en = getHourInTimezone(e.end_time, tripTimezone);
+      // Handle cross-midnight (end < start means next day arrival)
+      if (en < s) en = 24;
+      return [s, en];
+    });
     startHour = Math.max(0, Math.floor(Math.min(...hours)) - 1);
     endHour = Math.min(24, Math.ceil(Math.max(...hours)) + 1);
   }
@@ -83,11 +93,12 @@ const CalendarDay = ({
   const containerHeight = totalHours * PIXELS_PER_HOUR;
 
   // Compute overlap layout
-  const layoutEntries = sortedEntries.map(e => ({
-    id: e.id,
-    startMinutes: (getHourInTimezone(e.start_time, tripTimezone) - startHour) * 60,
-    endMinutes: (getHourInTimezone(e.end_time, tripTimezone) - startHour) * 60,
-  }));
+  const layoutEntries = sortedEntries.map(e => {
+    const s = (getHourInTimezone(e.start_time, tripTimezone) - startHour) * 60;
+    let en = (getHourInTimezone(e.end_time, tripTimezone) - startHour) * 60;
+    if (en <= s) en = s + 120; // cross-midnight: show at least 2h span
+    return { id: e.id, startMinutes: s, endMinutes: en };
+  });
 
   const layout = computeOverlapLayout(layoutEntries);
   const layoutMap = new Map(layout.map(l => [l.entryId, l]));
@@ -140,14 +151,36 @@ const CalendarDay = ({
         </div>
       </div>
 
+      {/* Trip Begins marker */}
+      {isFirstDay && (
+        <div className="mx-auto max-w-2xl px-4 pt-3">
+          <div className="flex items-center justify-center rounded-full bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+            🚩 Trip Begins
+          </div>
+        </div>
+      )}
+
       {/* Calendar grid */}
       <div className="mx-auto max-w-2xl px-4 py-3">
         {sortedEntries.length === 0 ? (
-          <div className={cn(
-            'py-6 text-center text-xs',
-            dayPast ? 'text-muted-foreground/40' : 'text-muted-foreground/60'
-          )}>
-            No plans yet
+          <div className="relative">
+            <div className={cn(
+              'py-6 text-center text-xs',
+              dayPast ? 'text-muted-foreground/40' : 'text-muted-foreground/60'
+            )}>
+              No plans yet
+            </div>
+            {/* Add button for empty days */}
+            {onAddBetween && (
+              <div className="flex justify-center pb-2">
+                <button
+                  onClick={() => onAddBetween(date.toISOString())}
+                  className="flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="relative ml-10" style={{ height: containerHeight, minHeight: 200 }}>
@@ -166,9 +199,11 @@ const CalendarDay = ({
               if (!primaryOption) return null;
 
               const entryStartHour = getHourInTimezone(entry.start_time, tripTimezone);
-              const entryEndHour = getHourInTimezone(entry.end_time, tripTimezone);
+              let entryEndHour = getHourInTimezone(entry.end_time, tripTimezone);
+              // Handle cross-midnight
+              if (entryEndHour < entryStartHour) entryEndHour = 24;
               const top = Math.max(0, (entryStartHour - startHour) * PIXELS_PER_HOUR);
-              const height = Math.max(40, (entryEndHour - entryStartHour) * PIXELS_PER_HOUR);
+              const height = Math.max(60, (entryEndHour - entryStartHour) * PIXELS_PER_HOUR);
 
               const layoutInfo = layoutMap.get(entry.id);
               const column = layoutInfo?.column ?? 0;
@@ -222,6 +257,21 @@ const CalendarDay = ({
                     </div>
                   </div>
 
+                  {/* + button between entries */}
+                  {onAddBetween && (
+                    <div
+                      className="absolute left-0 z-[15] flex w-10 items-center justify-center"
+                      style={{ top: top + height - 2 }}
+                    >
+                      <button
+                        onClick={() => onAddBetween(entry.end_time)}
+                        className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                      >
+                        <Plus className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
+
                   {/* Travel segment connector */}
                   {travelSeg && (
                     <div
@@ -241,6 +291,15 @@ const CalendarDay = ({
           </div>
         )}
       </div>
+
+      {/* Trip Ends marker */}
+      {isLastDay && (
+        <div className="mx-auto max-w-2xl px-4 pb-3">
+          <div className="flex items-center justify-center rounded-full bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+            🏁 Trip Ends
+          </div>
+        </div>
+      )}
     </div>
   );
 };

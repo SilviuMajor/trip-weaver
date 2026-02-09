@@ -24,7 +24,7 @@ interface EntryOverlayProps {
   userLat: number | null;
   userLng: number | null;
   votingLocked: boolean;
-  userVotes: string[]; // option IDs the user has voted for
+  userVotes: string[];
   onVoteChange: () => void;
   onImageUploaded: () => void;
   onEdit?: (entry: EntryWithOptions, option: EntryOption) => void;
@@ -62,20 +62,8 @@ const EntryOverlay = ({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="bottom" className="max-h-[90vh] overflow-y-auto rounded-t-3xl p-0">
-        {/* Image Gallery */}
-        <div className="p-4 pb-0">
-          {images.length > 0 ? (
-            <ImageGallery images={images} />
-          ) : (
-            <div className="flex aspect-[16/10] items-center justify-center rounded-xl bg-muted">
-              <span className="text-sm text-muted-foreground">No photos yet</span>
-            </div>
-          )}
-        </div>
-
         <div className="space-y-4 p-4">
           <SheetHeader className="text-left">
-            {/* Category */}
             {option.category && (
               <Badge
                 className="w-fit gap-1 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
@@ -137,6 +125,13 @@ const EntryOverlay = ({
                 locked={votingLocked}
                 onVoteChange={onVoteChange}
               />
+            </div>
+          )}
+
+          {/* Images at bottom — only if there are any */}
+          {images.length > 0 && (
+            <div className="pt-2">
+              <ImageGallery images={images} />
             </div>
           )}
 

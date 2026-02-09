@@ -48,6 +48,7 @@ const Timeline = () => {
   const [entryFormOpen, setEntryFormOpen] = useState(false);
   const [editEntry, setEditEntry] = useState<EntryWithOptions | null>(null);
   const [editOption, setEditOption] = useState<EntryOption | null>(null);
+  const [prefillStartTime, setPrefillStartTime] = useState<string | undefined>();
 
   // Zoom
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -77,7 +78,6 @@ const Timeline = () => {
 
     setTrip(tripData as unknown as Trip);
 
-    // Get entries, travel segments, and weather in parallel
     const [entriesRes, segmentsRes, weatherRes] = await Promise.all([
       supabase.from('entries').select('*').eq('trip_id', tripId).order('start_time'),
       supabase.from('travel_segments').select('*').eq('trip_id', tripId),
@@ -96,7 +96,6 @@ const Timeline = () => {
 
     const entryIds = entriesData.map(e => e.id);
 
-    // Fetch options, images, and votes in parallel
     const [optionsRes, imagesRes, votesRes] = await Promise.all([
       supabase.from('entry_options').select('*').in('entry_id', entryIds),
       supabase.from('option_images').select('*').order('sort_order'),
@@ -107,27 +106,23 @@ const Timeline = () => {
     const images = imagesRes.data ?? [];
     const votes = votesRes.data ?? [];
 
-    // Count votes per option
     const voteCounts: Record<string, number> = {};
     votes.forEach(v => {
       voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1;
     });
 
-    // User's votes
     if (currentUser) {
       setUserVotes(
         votes.filter(v => v.user_id === currentUser.id).map(v => v.option_id)
       );
     }
 
-    // Attach images to options
     const optionsWithImages = options.map(o => ({
       ...o,
       vote_count: voteCounts[o.id] || 0,
       images: images.filter(img => img.option_id === o.id),
     }));
 
-    // Assemble entries with options
     const entriesWithOptions: EntryWithOptions[] = (entriesData as Entry[]).map(entry => ({
       ...entry,
       options: optionsWithImages.filter(o => o.entry_id === entry.id),
@@ -137,15 +132,12 @@ const Timeline = () => {
     setLoading(false);
   }, [currentUser, tripId]);
 
-  // Initial fetch
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Realtime sync
   useRealtimeSync(fetchData);
 
-  // Scroll to today on load
   useEffect(() => {
     if (!loading) {
       const todayEl = document.getElementById('today');
@@ -165,11 +157,8 @@ const Timeline = () => {
   };
 
   const isUndated = !trip?.start_date;
-
-  // Reference date used for synthetic "Day 1" entries when no real dates
   const REFERENCE_DATE = '2099-01-01';
 
-  // Generate days between trip start and end (or synthetic days)
   const getDays = (): Date[] => {
     if (!trip) return [];
     if (isUndated) {
@@ -187,7 +176,6 @@ const Timeline = () => {
     return days;
   };
 
-  // Group entries by day
   const getEntriesForDay = (day: Date): EntryWithOptions[] => {
     const dayStr = format(day, 'yyyy-MM-dd');
     return entries.filter(entry => {
@@ -207,6 +195,13 @@ const Timeline = () => {
     setOverlayOpen(true);
   };
 
+  const handleAddBetween = (prefillTime: string) => {
+    setPrefillStartTime(prefillTime);
+    setEntryFormOpen(true);
+  };
+
+  const days = getDays();
+
   if (!currentUser) return null;
 
   return (
@@ -214,7 +209,10 @@ const Timeline = () => {
       <TimelineHeader
         trip={trip}
         tripId={tripId ?? ''}
-        onAddEntry={() => setEntryFormOpen(true)}
+        onAddEntry={() => {
+          setPrefillStartTime(undefined);
+          setEntryFormOpen(true);
+        }}
         onDataRefresh={fetchData}
       />
 
@@ -237,7 +235,7 @@ const Timeline = () => {
       ) : (
         <>
           <main className="flex-1 pb-20">
-            {getDays().map((day, index) => (
+            {days.map((day, index) => (
               <CalendarDay
                 key={day.toISOString()}
                 date={day}
@@ -254,6 +252,9 @@ const Timeline = () => {
                 travelSegments={travelSegments}
                 weatherData={getWeatherForDay(day)}
                 dayLabel={isUndated ? `Day ${index + 1}` : undefined}
+                isFirstDay={index === 0}
+                isLastDay={index === days.length - 1}
+                onAddBetween={handleAddBetween}
               />
             ))}
           </main>
@@ -261,40 +262,25 @@ const Timeline = () => {
           {/* Bottom controls */}
           <div className="fixed bottom-6 right-6 z-40 flex flex-col gap-2">
             <div className="flex items-center gap-1 rounded-full bg-card/90 px-2 py-1 shadow-lg backdrop-blur-sm border border-border">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => changeZoom(-1)}
-              >
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => changeZoom(-1)}>
                 <ZoomIn className="h-3.5 w-3.5" />
               </Button>
               <span className="text-[10px] font-medium text-muted-foreground min-w-[36px] text-center">
                 {zoomLabel}
               </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => changeZoom(1)}
-              >
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => changeZoom(1)}>
                 <ZoomOut className="h-3.5 w-3.5" />
               </Button>
             </div>
 
             {!isUndated && (
-              <Button
-                onClick={scrollToToday}
-                size="sm"
-                className="rounded-full shadow-lg"
-              >
+              <Button onClick={scrollToToday} size="sm" className="rounded-full shadow-lg">
                 <ArrowDown className="mr-1 h-3.5 w-3.5" />
                 Today
               </Button>
             )}
           </div>
 
-          {/* Entry overlay */}
           <EntryOverlay
             entry={overlayEntry}
             option={overlayOption}
@@ -315,7 +301,6 @@ const Timeline = () => {
             onDeleted={fetchData}
           />
 
-          {/* Entry form */}
           <EntryForm
             open={entryFormOpen}
             onOpenChange={(open) => {
@@ -323,6 +308,7 @@ const Timeline = () => {
               if (!open) {
                 setEditEntry(null);
                 setEditOption(null);
+                setPrefillStartTime(undefined);
               }
             }}
             tripId={trip.id}
@@ -330,6 +316,7 @@ const Timeline = () => {
             trip={trip}
             editEntry={editEntry}
             editOption={editOption}
+            prefillStartTime={prefillStartTime}
           />
         </>
       )}
