@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { MapPin, Clock, Plane, ArrowRight, Lock } from 'lucide-react';
+import { MapPin, Clock, Plane, ArrowRight, Lock, LockOpen } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { getTimeOfDayGradient } from '@/lib/timeOfDayColor';
@@ -26,6 +26,8 @@ interface EntryCardProps {
   isProcessing?: boolean;
   linkedType?: string | null;
   isCompact?: boolean;
+  canEdit?: boolean;
+  onToggleLock?: () => void;
   onDragStart?: (e: React.MouseEvent) => void;
   onTouchDragStart?: (e: React.TouchEvent) => void;
   onTouchDragMove?: (e: React.TouchEvent) => void;
@@ -85,6 +87,8 @@ const EntryCard = ({
   isProcessing,
   linkedType,
   isCompact,
+  canEdit,
+  onToggleLock,
   onDragStart,
   onTouchDragStart,
   onTouchDragMove,
@@ -98,6 +102,11 @@ const EntryCard = ({
   const isTransfer = option.category === 'transfer';
 
   const tintBg = isProcessing ? `${catColor}10` : `${catColor}18`;
+
+  const handleLockClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleLock?.();
+  };
 
   // Compact single-line layout for very short entries
   if (isCompact) {
@@ -127,10 +136,22 @@ const EntryCard = ({
         <div className="relative z-10 flex w-full items-center gap-1.5 px-2 py-0.5">
           <span className="text-xs shrink-0">{catEmoji}</span>
           <span className="truncate text-[11px] font-semibold leading-tight">{option.name}</span>
-          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
+          <span className="shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
             {formatTime(startTime)}–{formatTime(endTime)}
           </span>
-          {isLocked && <Lock className="h-2.5 w-2.5 shrink-0 text-muted-foreground/60" />}
+          <span className="flex-1" />
+          {canEdit && onToggleLock && (
+            <button
+              onClick={handleLockClick}
+              className="shrink-0 p-0.5 rounded hover:bg-muted/50 transition-colors"
+            >
+              {isLocked ? (
+                <Lock className="h-2.5 w-2.5 text-muted-foreground/80" />
+              ) : (
+                <LockOpen className="h-2.5 w-2.5 text-muted-foreground/30" />
+              )}
+            </button>
+          )}
         </div>
       </motion.div>
     );
@@ -168,13 +189,6 @@ const EntryCard = ({
       ) : (
         <div className="absolute inset-0" style={{ background: tintBg }}>
           <div className="absolute inset-0" style={{ background: timeGradient, opacity: isProcessing ? 0.05 : 0.15 }} />
-        </div>
-      )}
-
-      {/* Lock icon */}
-      {isLocked && (
-        <div className="absolute right-2 top-2 z-20">
-          <Lock className="h-3.5 w-3.5 text-muted-foreground/60" />
         </div>
       )}
 
@@ -261,7 +275,7 @@ const EntryCard = ({
           </div>
         )}
 
-        {/* Bottom row: Distance + Votes */}
+        {/* Bottom row: Distance + Votes + Lock */}
         {!isProcessing && (
           <div className="flex items-center justify-between">
             {distanceKm !== null && distanceKm !== undefined ? (
@@ -276,16 +290,34 @@ const EntryCard = ({
               <div />
             )}
 
-            {userId && totalOptions > 1 && (
-              <VoteButton
-                optionId={option.id}
-                userId={userId}
-                voteCount={option.vote_count ?? 0}
-                hasVoted={hasVoted}
-                locked={votingLocked}
-                onVoteChange={onVoteChange}
-              />
-            )}
+            <div className="flex items-center gap-1.5">
+              {userId && totalOptions > 1 && (
+                <VoteButton
+                  optionId={option.id}
+                  userId={userId}
+                  voteCount={option.vote_count ?? 0}
+                  hasVoted={hasVoted}
+                  locked={votingLocked}
+                  onVoteChange={onVoteChange}
+                />
+              )}
+
+              {canEdit && onToggleLock && (
+                <button
+                  onClick={handleLockClick}
+                  className={cn(
+                    'rounded-md p-1 transition-colors',
+                    firstImage ? 'hover:bg-white/20' : 'hover:bg-muted/50'
+                  )}
+                >
+                  {isLocked ? (
+                    <Lock className={cn('h-3.5 w-3.5', firstImage ? 'text-white/70' : 'text-muted-foreground/80')} />
+                  ) : (
+                    <LockOpen className={cn('h-3.5 w-3.5', firstImage ? 'text-white/30' : 'text-muted-foreground/30')} />
+                  )}
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

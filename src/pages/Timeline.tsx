@@ -24,7 +24,7 @@ import type { ConflictInfo, Recommendation } from '@/lib/conflictEngine';
 
 const Timeline = () => {
   const { tripId } = useParams<{ tripId: string }>();
-  const { currentUser } = useCurrentUser();
+  const { currentUser, isEditor } = useCurrentUser();
   const navigate = useNavigate();
   const { latitude: userLat, longitude: userLng } = useGeolocation();
 
@@ -414,6 +414,18 @@ const Timeline = () => {
     e.dataTransfer.effectAllowed = 'move';
   };
 
+  const handleToggleLock = async (entryId: string, currentLocked: boolean) => {
+    const { error } = await supabase
+      .from('entries')
+      .update({ is_locked: !currentLocked })
+      .eq('id', entryId);
+    if (error) {
+      toast({ title: 'Failed to toggle lock', description: error.message, variant: 'destructive' });
+      return;
+    }
+    await fetchData();
+  };
+
   const days = getDays();
 
   if (!currentUser) return null;
@@ -482,6 +494,8 @@ const Timeline = () => {
                     onDropFromPanel={(entryId, hourOffset) => handleDropOnTimeline(entryId, day, hourOffset)}
                     activeTz={tzInfo?.activeTz}
                     dayFlights={tzInfo?.flights}
+                    isEditor={isEditor}
+                    onToggleLock={handleToggleLock}
                   />
                 );
               })}
