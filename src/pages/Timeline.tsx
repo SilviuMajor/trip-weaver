@@ -245,7 +245,7 @@ const Timeline = () => {
             originTz: opt.departure_tz!,
             destinationTz: opt.arrival_tz!,
             flightStartHour: getHour(f.start_time, opt.departure_tz!),
-            flightEndHour: getHour(f.end_time, opt.arrival_tz!),
+            flightEndHour: getHour(f.end_time, currentTz),
           };
         });
         map.set(dayStr, { activeTz: currentTz, flights });
@@ -513,6 +513,11 @@ const Timeline = () => {
                   const opt = entry.options[0];
                   if (opt) handleCardTap(entry, opt);
                 }}
+                onAddIdea={() => {
+                  setPrefillStartTime(undefined);
+                  setPrefillEndTime(undefined);
+                  setEntryFormOpen(true);
+                }}
               />
             )}
           </div>
@@ -563,6 +568,11 @@ const Timeline = () => {
                 onCardTap={(entry) => {
                   const opt = entry.options[0];
                   if (opt) handleCardTap(entry, opt);
+                }}
+                onAddIdea={() => {
+                  setPrefillStartTime(undefined);
+                  setPrefillEndTime(undefined);
+                  setEntryFormOpen(true);
                 }}
               />
             </>
