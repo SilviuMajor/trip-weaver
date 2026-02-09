@@ -1,242 +1,133 @@
 
 
-# Unscheduled Options Panel and Smart Scheduling
+# Dual Timezone Display, Short Entry Fix, Return Flight Bug, and Ideas Sidebar
 
-## Overview
+## 1. Dual Timezone Gutter in TimeSlotGrid
 
-This is a fundamental rethinking of how "options" work. Instead of multiple options swiped within a single time slot, activities can exist as **unscheduled ideas** in a side panel, then be dragged onto the timeline. When placed, the system live-calculates travel times and walks the user through resolving any time conflicts step-by-step.
+### How it works
+The time gutter (left side of the timeline) currently shows one column of hour labels. We will expand it to support two timezone columns that change based on flights on that day.
 
----
+### Logic
+- **Default (no flight on this day):** Show only the "current" timezone -- this is the trip's destination timezone, OR after a flight lands, the arrival timezone becomes the new "current" one.
+- **Flight day:** Show two timezone columns with a 3-hour overlap period centered around the flight time. Before the flight, show origin timezone. During the overlap (1.5h before to 1.5h after the flight), show both side by side. After the overlap, show only the destination timezone.
+- **Multiple flights same day:** Show a third timezone column during the second flight's overlap.
 
-## Core Concepts
+### Determining which timezone applies
+- Walk through all entries across all days chronologically. Track "current timezone" starting from the trip's timezone.
+- When a flight is encountered, the current timezone switches to the flight's `arrival_tz` after that day.
+- For each day, pass `originTz` and `destinationTz` (if a flight exists) plus the flight's start/end times to `TimeSlotGrid` and `CalendarDay`.
 
-### Current Model (being replaced)
-- An `entry` has a fixed time slot. Multiple `entry_options` live inside it (swiped horizontally, voted on).
+### Changes
+- **`TimeSlotGrid.tsx`**: Add props for `originTz`, `destinationTz`, `flightStartHour`, `flightEndHour`. Render two columns of hour labels. The origin column fades out after the overlap period; the destination column fades in.
+- **`CalendarDay.tsx`**: Compute which flight(s) exist on this day, extract their timezones, and pass them to `TimeSlotGrid`. Widen the left margin from `ml-10` to `ml-16` or `ml-20` when dual timezones are shown.
+- **`Timeline.tsx`**: Precompute a `dayTimezoneMap` that maps each day to its active timezone(s) by scanning flights chronologically. Pass this info down to `CalendarDay`.
 
-### New Model
-- An `entry` can be **scheduled** (has real start/end times) or **unscheduled** (parked in the side panel).
-- Multiple options for the same type of activity (e.g. "lunch spots") are grouped together. When one is placed on the timeline, the others stay in the panel as alternatives.
-- Placing an option triggers live travel calculation and a step-by-step conflict resolution dialog.
-
----
-
-## Database Changes
-
-### `entries` table
-- Add `is_scheduled` (boolean, default true) -- false means it lives in the side panel
-- Add `scheduled_day` (integer, nullable) -- for day-assigned but unscheduled entries (e.g. "Day 2 lunch ideas"). Null means completely unassigned.
-- Add `option_group_id` (uuid, nullable) -- groups related alternatives together (e.g. all lunch spot options share the same group ID)
-
-### New table: `option_groups`
-- `id` (uuid, PK, default gen_random_uuid())
-- `trip_id` (uuid, not null)
-- `label` (text, not null) -- e.g. "Lunch spots", "Evening activity"
-- `created_at` (timestamptz, default now())
-- RLS: same open policies as entries
+### Visual design
+- Left gutter shows two small columns: origin TZ abbreviation on the far left, destination TZ on the right.
+- During the overlap window, both columns are visible with a subtle divider.
+- Outside the overlap, only one column is visible (the other is hidden or fully transparent).
+- The overlap region gets a subtle gradient background to visually indicate the transition.
 
 ---
 
-## Feature 1: Side Panel for Unscheduled Options
+## 2. Short Entry Condensed Layout
 
-### UI: Toggle Panel
-- A button in the `TimelineHeader` (e.g. a tray/inbox icon) toggles the panel open/closed
-- Panel slides in from the right side, pushes or overlays the timeline
-- Panel width: approximately 320px on desktop, full-screen drawer on mobile
+### Problem
+Line 348 in `CalendarDay.tsx`: `const height = Math.max(60, ...)` forces a 60px minimum. At 80px/hour, a 15-min entry should be 20px but gets forced to 60px, which misrepresents its actual duration.
 
-### Panel Contents
-- **Unassigned section**: Options not tied to any day
-- **Per-day sections**: Collapsible sections for day-assigned options (e.g. "Day 2 ideas")
-- Each option shown as a compact card (category emoji, name, location)
-- Drag handle on each card for drag-and-drop
+### Fix
+- **Remove the 60px minimum height** in `CalendarDay.tsx` -- let `height` be the true calculated value.
+- **`EntryCard.tsx`**: Detect when the card is "compact" (height below a threshold, e.g. 50px). In compact mode:
+  - Switch to a single-line horizontal layout: `[emoji] Name | 09:00-09:15`
+  - Remove the category badge, distance, and vote elements.
+  - Use smaller text (`text-[11px]`), minimal padding (`p-1 px-2`).
+  - Remove the background image display.
+- Pass a `compact` boolean prop from `CalendarDay` to `EntryCard` based on the calculated pixel height.
 
-### Adding Unscheduled Entries
-- In the `EntryForm`, the "When?" step gets a new choice: **"Add to ideas panel"** (instead of picking a specific time)
-- Optional: assign to a specific day or leave completely unassigned
-- Optional: assign to an option group (create new or add to existing)
-
-### Files
-- New: `src/components/timeline/IdeasPanel.tsx` -- the side panel component
-- New: `src/components/timeline/IdeaCard.tsx` -- compact card for panel items
-- Edit: `src/components/timeline/TimelineHeader.tsx` -- add toggle button
-- Edit: `src/pages/Timeline.tsx` -- panel state, layout adjustment
-- Edit: `src/components/timeline/EntryForm.tsx` -- "Add to ideas" option in the "When?" step
+### Changes
+- **`CalendarDay.tsx`**: Remove `Math.max(60, ...)`, pass `isCompact={height < 50}` to `EntryCard`.
+- **`EntryCard.tsx`**: Add `isCompact` prop. When true, render the condensed single-line layout.
 
 ---
 
-## Feature 2: Drag from Panel to Timeline
+## 3. Return Flight Double-Prompt Bug
 
-### Drag-and-Drop Mechanism
-- Uses HTML5 drag and drop (or pointer events for mobile)
-- Dragging from the panel onto a specific day/time slot on the timeline
-- Visual feedback: ghost card follows cursor, timeline highlights valid drop zones
-- Drop snaps to 15-minute intervals (consistent with existing behavior)
+### Root cause
+In `EntryForm.tsx` line 536: `if (isFlight && !isEditing)` triggers the return flight prompt after every new flight save. When the user confirms a return flight, `handleReturnFlightConfirm` sets `categoryId` to `'flight'`, opens the form again, and when that flight is saved, it hits the same condition again -- prompting for yet another return.
 
-### On Drop
-1. Update the entry: set `is_scheduled = true`, set `start_time` and `end_time` based on drop position
-2. If the entry belongs to an `option_group_id`, the other entries in that group stay in the panel
-3. Trigger live travel calculation (Feature 4)
-4. Show conflict resolution dialog if needed (Feature 5)
+### Fix
+- Add an `isReturnFlight` state flag (boolean, default `false`).
+- In `handleReturnFlightConfirm`, set `isReturnFlight = true`.
+- Change the prompt condition to: `if (isFlight && !isEditing && !isReturnFlight)`.
+- In `reset()`, set `isReturnFlight = false`.
 
-### Files
-- Edit: `src/components/timeline/CalendarDay.tsx` -- add drop zone handlers
-- Edit: `src/components/timeline/IdeasPanel.tsx` -- drag source handlers
-- Edit: `src/pages/Timeline.tsx` -- coordinate drag state between panel and timeline
+### Changes
+- **`EntryForm.tsx`**: Add `isReturnFlight` state, guard the prompt, reset it in `reset()`.
 
 ---
 
-## Feature 3: Option Groups (Multiple Choices for Same Slot)
+## 4. Ideas Panel as Persistent Sidebar (Desktop) / FAB + Overlay (Mobile)
 
-### Behavior
-- When you place one option from a group, it becomes the "active" choice on the timeline
-- The other options in the group remain in the panel, shown slightly dimmed with a label like "Alternative to: [active option name]"
-- You can swap: drag an alternative onto the active one to replace it (the replaced one goes back to the panel)
-- Locking an entry (existing feature) "confirms" the choice -- alternatives can optionally be dismissed
+### Current implementation
+`IdeasPanel` uses a Radix `Sheet` overlay. The toggle button is in the header.
 
-### Visual on Timeline
-- When an entry has alternatives in the panel, show a small badge/indicator (e.g. "2 alternatives") on the card
+### New behavior
+- **Desktop**: The Ideas panel becomes a persistent sidebar on the right side of the timeline. When toggled open, the main timeline area shrinks to make room (flexbox layout, not overlay). Width: ~320px.
+- **Mobile**: A floating action button (FAB) in the bottom-right corner with a lightbulb emoji. Tapping it opens a full-screen drawer/overlay.
+- **Remove** the lightbulb button from the `TimelineHeader` (it moves to the FAB on mobile and the sidebar toggle on desktop).
 
-### Files
-- Edit: `src/components/timeline/EntryCard.tsx` -- alternatives badge
-- Edit: `src/components/timeline/IdeasPanel.tsx` -- show grouped alternatives
-- Edit: `src/components/timeline/EntryOverlay.tsx` -- show alternatives list, swap button
+### Changes
+- **`IdeasPanel.tsx`**: Replace the `Sheet` with a conditional layout:
+  - Desktop: A `div` with fixed width that sits alongside the timeline in a flex container.
+  - Mobile: Keep the `Sheet` (full overlay).
+- **`Timeline.tsx`**: Wrap the main content area and `IdeasPanel` in a flex row. Add the FAB button (mobile only) in the bottom-right corner with the lightbulb emoji.
+- **`TimelineHeader.tsx`**: Remove the Ideas toggle button from the header (or keep it for desktop only as a subtle toggle).
+- Use the existing `useIsMobile()` hook to switch between sidebar and overlay modes.
 
----
-
-## Feature 4: Live Travel Time Calculation
-
-### Trigger
-- Whenever an entry is placed on the timeline (from panel or moved), calculate travel times to/from adjacent entries
-- Uses the existing `google-directions` edge function
-
-### Display
-- On each entry card, show a small "+X min" or "-X min" badge indicating the travel time impact
-- Green badge = fits within available gap, Red badge = exceeds available gap
-- Travel time shown between entries (reuses existing `TravelSegmentCard`)
-
-### Implementation
-- After placing an entry, find the previous and next scheduled entries for that day
-- Call `google-directions` for both segments (previous-to-new, new-to-next)
-- Compare total travel time against available gaps
-- Calculate the discrepancy (+ or - minutes)
-
-### Files
-- Edit: `src/components/timeline/CalendarDay.tsx` -- trigger calculation on entry placement
-- Edit: `src/components/timeline/EntryCard.tsx` -- show +/- minutes badge
-- New: `src/hooks/useTravelCalculation.ts` -- encapsulate travel calculation logic
-
----
-
-## Feature 5: Step-by-Step Conflict Resolution
-
-### Trigger
-- When placing an entry creates a time conflict (travel time causes overlap or exceeds available gap)
-
-### Dialog Flow (Step-by-Step)
-1. **Show the problem**: "Placing [Activity] here requires 25 extra minutes of travel time"
-2. **Show smart recommendations**: The system analyzes the day's schedule and suggests fixes:
-   - "Arrive at [Hotel] 25 minutes later" (shift a flexible entry)
-   - "Shorten [Lunch] by 25 minutes"
-   - "Start [Activity] 25 minutes earlier"
-   - Each recommendation shows what it affects
-3. **User picks one** (or picks "I'll figure it out myself")
-4. **If user picks a recommendation**: Apply the time change, recalculate all travel for the day, lock the entry in
-5. **If user picks "I'll figure it out myself"**: Place the entry but show a visible conflict marker on the timeline (e.g. red warning icon, overlapping border)
-
-### Conflict Markers (for "figure it out myself")
-- Red/orange warning icon on the entry card
-- Tooltip or badge showing "-25 min conflict"
-- The entry is placed but NOT locked, so it can be easily adjusted
-
-### Smart Recommendation Engine
-- Looks at all entries on that day
-- Identifies which ones are NOT locked
-- For each unlocked entry, calculates how much it could be shifted or shortened
-- Ranks recommendations by least disruption (prefer shifting end times over start times, prefer entries adjacent to the conflict)
-
-### Files
-- New: `src/components/timeline/ConflictResolver.tsx` -- the step-by-step dialog component
-- New: `src/lib/conflictEngine.ts` -- logic for analyzing conflicts and generating recommendations
-- Edit: `src/components/timeline/EntryCard.tsx` -- conflict marker display
-- Edit: `src/pages/Timeline.tsx` -- manage conflict resolution state
-
----
-
-## Feature 6: Returning Entries to Panel
-
-### Behavior
-- From the `EntryOverlay` (detail view), add a "Move to ideas" button
-- This sets `is_scheduled = false` and clears the time, moving it back to the panel
-- Alternatives in the same option group remain unaffected
-
-### Files
-- Edit: `src/components/timeline/EntryOverlay.tsx` -- "Move to ideas" button
+### FAB design
+- Fixed position, bottom-right (e.g. `bottom-20 right-6` to sit above the zoom controls).
+- Round button with `💡` emoji, with the count badge overlay.
+- Only visible on mobile.
 
 ---
 
 ## Technical Details
 
-### Data Flow
+### Files to create
+None -- all changes are edits to existing files.
 
-```text
-User creates entry
-  |
-  +--> "Add to ideas" --> is_scheduled=false, appears in panel
-  |
-  +--> Pick time --> is_scheduled=true, appears on timeline
-  
-User drags from panel to timeline
-  |
-  +--> Set is_scheduled=true, start_time, end_time
-  |
-  +--> Calculate travel to adjacent entries
-  |
-  +--> If conflict:
-  |     |
-  |     +--> Show ConflictResolver dialog
-  |     |     |
-  |     |     +--> User picks recommendation --> apply changes, lock
-  |     |     |
-  |     |     +--> User picks "figure it out" --> place with warning marker
-  |     |
-  +--> If no conflict:
-        |
-        +--> Place normally, show travel segments
-```
-
-### Updated Types (`src/types/trip.ts`)
-
-- `Entry` gains: `is_scheduled`, `scheduled_day`, `option_group_id`
-- New type: `OptionGroup { id, trip_id, label, created_at }`
-
-### Migration Summary
-
-| Change | Table | Column/Detail |
-|--------|-------|--------------|
-| Add column | entries | `is_scheduled` boolean default true |
-| Add column | entries | `scheduled_day` integer nullable |
-| Add column | entries | `option_group_id` uuid nullable |
-| New table | option_groups | id, trip_id, label, created_at |
-| RLS | option_groups | Same open policies as entries |
-
-### New Files
-
-| File | Purpose |
-|------|---------|
-| `src/components/timeline/IdeasPanel.tsx` | Side panel with unscheduled options |
-| `src/components/timeline/IdeaCard.tsx` | Compact card for panel items |
-| `src/components/timeline/ConflictResolver.tsx` | Step-by-step conflict dialog |
-| `src/lib/conflictEngine.ts` | Conflict analysis and recommendation logic |
-| `src/hooks/useTravelCalculation.ts` | Live travel time calculation hook |
-
-### Edited Files
+### Files to edit
 
 | File | Changes |
 |------|---------|
-| `src/types/trip.ts` | New fields on Entry, new OptionGroup type |
-| `src/pages/Timeline.tsx` | Panel state, drag coordination, conflict state |
-| `src/components/timeline/TimelineHeader.tsx` | Panel toggle button |
-| `src/components/timeline/EntryForm.tsx` | "Add to ideas" option in When step |
-| `src/components/timeline/EntryCard.tsx` | Alternatives badge, conflict marker |
-| `src/components/timeline/EntryOverlay.tsx` | "Move to ideas" button, alternatives list |
-| `src/components/timeline/CalendarDay.tsx` | Drop zone handlers |
+| `src/components/timeline/TimeSlotGrid.tsx` | Add dual timezone props, render two columns of labels with overlap logic |
+| `src/components/timeline/CalendarDay.tsx` | Pass timezone info to grid, remove 60px min height, pass `isCompact` to cards, widen gutter for dual TZ |
+| `src/components/timeline/EntryCard.tsx` | Add `isCompact` prop with condensed single-line layout |
+| `src/components/timeline/EntryForm.tsx` | Add `isReturnFlight` flag to prevent double prompt |
+| `src/components/timeline/IdeasPanel.tsx` | Replace Sheet with flex sidebar (desktop) / Sheet (mobile) |
+| `src/components/timeline/TimelineHeader.tsx` | Remove or adjust Ideas toggle button |
+| `src/pages/Timeline.tsx` | Compute day timezone map from flights, flex layout for sidebar, add mobile FAB |
+
+### Timezone computation pseudocode
+
+```text
+let currentTz = trip.timezone
+
+for each day in trip:
+  let flightsToday = entries on this day where category = 'flight'
+  
+  if flightsToday.length == 0:
+    dayTzMap[day] = { activeTz: currentTz }
+  else:
+    for each flight in flightsToday:
+      dayTzMap[day] = {
+        originTz: currentTz,
+        destinationTz: flight.arrival_tz,
+        flightStartHour: getHour(flight.start_time),
+        flightEndHour: getHour(flight.end_time),
+        overlapStart: flightStartHour - 1.5,
+        overlapEnd: flightEndHour + 1.5
+      }
+      currentTz = flight.arrival_tz  // switch for subsequent days
+```
 
