@@ -307,7 +307,7 @@ const CalendarDay = ({
           </div>
         ) : (
           <div
-            className={cn("relative", dayFlights.length > 0 ? "ml-16" : "ml-10")}
+            className={cn("relative", dayFlights.length > 0 ? "ml-20" : "ml-14")}
             style={{ height: containerHeight, minHeight: 200, marginRight: 48 }}
             onDragOver={(e) => {
               if (onDropFromPanel) {

@@ -1,5 +1,4 @@
 import { Sun, Cloud, CloudRain, CloudSnow, CloudLightning, CloudFog, CloudDrizzle, Moon, CloudMoon, CloudSun } from 'lucide-react';
-import { getTimeOfDayColor } from '@/lib/timeOfDayColor';
 
 const getWeatherIcon = (condition: string | null, isNight: boolean) => {
   if (!condition) return isNight ? Moon : Sun;
@@ -15,35 +14,24 @@ const getWeatherIcon = (condition: string | null, isNight: boolean) => {
   return isNight ? Moon : Sun;
 };
 
-function parseHSL(hslStr: string): { h: number; s: number; l: number } {
-  const match = hslStr.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
-  if (!match) return { h: 200, s: 70, l: 65 };
-  return { h: parseInt(match[1]), s: parseInt(match[2]), l: parseInt(match[3]) };
-}
-
-function applyWeatherModifier(hsl: { h: number; s: number; l: number }, condition: string | null): { h: number; s: number; l: number } {
-  if (!condition) return hsl;
-  const lower = condition.toLowerCase();
-  let { h, s, l } = hsl;
-
-  if (lower.includes('thunder')) {
-    h = Math.min(360, h + 30); // towards purple
-    l = Math.max(10, l - 10);
-  } else if (lower.includes('rain') || lower.includes('shower') || lower.includes('drizzle')) {
-    h = Math.min(360, h + 20); // towards blue
-    l = Math.max(10, l - 5);
-  } else if (lower.includes('snow')) {
-    l = Math.min(90, l + 10);
-    s = Math.max(0, s - 20);
-  } else if (lower.includes('fog')) {
-    s = Math.max(0, s - 30);
-    l = Math.min(90, l + 5);
-  } else if (lower.includes('cloud') || lower.includes('overcast')) {
-    s = Math.max(0, s - 15);
+function getWeatherColor(condition: string | null, isNight: boolean): { bg: string; text: string } {
+  const lower = (condition || '').toLowerCase();
+  if (isNight) {
+    if (lower.includes('rain') || lower.includes('shower') || lower.includes('drizzle') || lower.includes('thunder'))
+      return { bg: 'hsl(215, 25%, 16%)', text: 'white' };
+    if (lower.includes('cloud') || lower.includes('overcast'))
+      return { bg: 'hsl(220, 15%, 22%)', text: 'white' };
+    return { bg: 'hsl(225, 40%, 18%)', text: 'white' };
   }
-  // clear/sun: keep as-is
-
-  return { h, s, l };
+  if (lower.includes('thunder')) return { bg: 'hsl(230, 35%, 38%)', text: 'white' };
+  if (lower.includes('rain') || lower.includes('shower') || lower.includes('drizzle'))
+    return { bg: 'hsl(210, 35%, 45%)', text: 'white' };
+  if (lower.includes('overcast')) return { bg: 'hsl(210, 20%, 55%)', text: 'white' };
+  if (lower.includes('partly') || lower.includes('cloud'))
+    return { bg: 'hsl(200, 50%, 70%)', text: 'hsl(220, 20%, 15%)' };
+  if (lower.includes('snow')) return { bg: 'hsl(200, 15%, 82%)', text: 'hsl(220, 20%, 15%)' };
+  if (lower.includes('fog')) return { bg: 'hsl(200, 10%, 68%)', text: 'hsl(220, 20%, 15%)' };
+  return { bg: 'hsl(45, 80%, 72%)', text: 'hsl(220, 20%, 15%)' };
 }
 
 interface WeatherBadgeProps {
@@ -55,30 +43,19 @@ interface WeatherBadgeProps {
   longitude?: number;
 }
 
-const WeatherBadge = ({ temp, condition, hour, date, latitude = 52.37, longitude = 4.9 }: WeatherBadgeProps) => {
+const WeatherBadge = ({ temp, condition, hour }: WeatherBadgeProps) => {
   if (temp === null) return null;
-
-  // Build a Date for this specific hour
-  const hourDate = new Date(date);
-  hourDate.setHours(hour, 0, 0, 0);
 
   const isNight = hour < 6 || hour >= 21;
   const Icon = getWeatherIcon(condition, isNight);
-
-  // Get time-of-day base color and apply weather modifier
-  const baseHSL = parseHSL(getTimeOfDayColor(hourDate, latitude, longitude));
-  const modifiedHSL = applyWeatherModifier(baseHSL, condition);
-  const { h, s, l } = modifiedHSL;
-
-  const bgColor = `hsl(${h}, ${s}%, ${l}%)`;
-  const textColor = l < 40 ? 'white' : 'hsl(220, 20%, 15%)';
+  const { bg, text } = getWeatherColor(condition, isNight);
 
   return (
     <div
       className="flex flex-col items-center justify-center w-9 h-9 rounded-full shadow-sm transition-colors duration-500"
-      style={{ backgroundColor: bgColor, color: textColor }}
+      style={{ backgroundColor: bg, color: text }}
     >
-      <Icon className="h-3.5 w-3.5" strokeWidth={2.5} />
+      <Icon className="h-4 w-4" strokeWidth={3} />
       <span className="text-[9px] font-bold leading-none mt-0.5">{Math.round(temp)}°</span>
     </div>
   );
