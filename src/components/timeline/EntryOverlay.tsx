@@ -1,10 +1,15 @@
+import { useState } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
-import { Clock, ExternalLink } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Clock, ExternalLink, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
 import type { EntryOption, EntryWithOptions } from '@/types/trip';
 import { haversineKm } from '@/lib/distance';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { toast } from '@/hooks/use-toast';
 import ImageGallery from './ImageGallery';
 import ImageUploader from './ImageUploader';
 import MapPreview from './MapPreview';
@@ -22,6 +27,8 @@ interface EntryOverlayProps {
   userVotes: string[]; // option IDs the user has voted for
   onVoteChange: () => void;
   onImageUploaded: () => void;
+  onEdit?: (entry: EntryWithOptions, option: EntryOption) => void;
+  onDeleted?: () => void;
 }
 
 const EntryOverlay = ({
@@ -36,8 +43,11 @@ const EntryOverlay = ({
   userVotes,
   onVoteChange,
   onImageUploaded,
+  onEdit,
+  onDeleted,
 }: EntryOverlayProps) => {
   const { currentUser, isEditor } = useCurrentUser();
+  const [deleting, setDeleting] = useState(false);
 
   if (!entry || !option) return null;
 
@@ -137,6 +147,68 @@ const EntryOverlay = ({
               currentCount={images.length}
               onUploaded={onImageUploaded}
             />
+          )}
+
+          {/* Edit / Delete (editors only) */}
+          {isEditor && (
+            <div className="flex items-center gap-2 border-t border-border pt-4">
+              {onEdit && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    onEdit(entry, option);
+                    onOpenChange(false);
+                  }}
+                >
+                  <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                  Edit
+                </Button>
+              )}
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="text-destructive hover:text-destructive">
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    Delete
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete the entry and all its options. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      disabled={deleting}
+                      onClick={async () => {
+                        setDeleting(true);
+                        try {
+                          const { error } = await supabase
+                            .from('entries')
+                            .delete()
+                            .eq('id', entry.id);
+                          if (error) throw error;
+                          toast({ title: 'Entry deleted' });
+                          onOpenChange(false);
+                          onDeleted?.();
+                        } catch (err: any) {
+                          toast({ title: 'Failed to delete', description: err.message, variant: 'destructive' });
+                        } finally {
+                          setDeleting(false);
+                        }
+                      }}
+                    >
+                      {deleting ? 'Deleting…' : 'Delete'}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
           )}
         </div>
       </SheetContent>

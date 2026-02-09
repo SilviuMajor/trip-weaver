@@ -1,20 +1,21 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
-import { PREDEFINED_CATEGORIES, TRAVEL_MODES, findCategory } from '@/lib/categories';
-import type { CategoryPreset } from '@/types/trip';
+import { PREDEFINED_CATEGORIES, TRAVEL_MODES } from '@/lib/categories';
+import type { CategoryPreset, EntryOption } from '@/types/trip';
 
 interface OptionFormProps {
   entryId: string;
   onSaved: () => void;
   customCategories?: CategoryPreset[];
+  editOption?: EntryOption | null;
 }
 
-const OptionForm = ({ entryId, onSaved, customCategories = [] }: OptionFormProps) => {
+const OptionForm = ({ entryId, onSaved, customCategories = [], editOption }: OptionFormProps) => {
   const [name, setName] = useState('');
   const [website, setWebsite] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -24,11 +25,25 @@ const OptionForm = ({ entryId, onSaved, customCategories = [] }: OptionFormProps
   const [longitude, setLongitude] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const isEditing = !!editOption;
+
   // Build the full list: predefined + custom
   const allCategories = [
     ...PREDEFINED_CATEGORIES.map(c => ({ id: c.id, name: c.name, emoji: c.emoji, color: c.color })),
     ...customCategories.map((c, i) => ({ id: `custom_${i}`, name: c.name, emoji: c.emoji || '📌', color: c.color })),
   ];
+
+  // Pre-fill when editing
+  useEffect(() => {
+    if (editOption) {
+      setName(editOption.name);
+      setWebsite(editOption.website ?? '');
+      setCategoryId(editOption.category ?? '');
+      setLocationName(editOption.location_name ?? '');
+      setLatitude(editOption.latitude != null ? String(editOption.latitude) : '');
+      setLongitude(editOption.longitude != null ? String(editOption.longitude) : '');
+    }
+  }, [editOption]);
 
   const selectedCategory = categoryId ? allCategories.find(c => c.id === categoryId) : null;
   const isTravel = categoryId === 'travel';
@@ -40,12 +55,11 @@ const OptionForm = ({ entryId, onSaved, customCategories = [] }: OptionFormProps
     }
 
     const cat = selectedCategory;
-    const displayName = cat ? `${cat.emoji} ${cat.name}` : null;
     const displayColor = cat?.color ?? null;
 
     setSaving(true);
     try {
-      const { error } = await supabase.from('entry_options').insert({
+      const payload = {
         entry_id: entryId,
         name: name.trim(),
         website: website.trim() || null,
@@ -54,9 +68,21 @@ const OptionForm = ({ entryId, onSaved, customCategories = [] }: OptionFormProps
         location_name: locationName.trim() || null,
         latitude: latitude ? parseFloat(latitude) : null,
         longitude: longitude ? parseFloat(longitude) : null,
-      });
+      };
 
-      if (error) throw error;
+      if (isEditing && editOption) {
+        const { error } = await supabase
+          .from('entry_options')
+          .update(payload)
+          .eq('id', editOption.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('entry_options')
+          .insert(payload);
+        if (error) throw error;
+      }
+
       onSaved();
     } catch (err: any) {
       toast({ title: 'Failed to save option', description: err.message, variant: 'destructive' });
@@ -172,7 +198,7 @@ const OptionForm = ({ entryId, onSaved, customCategories = [] }: OptionFormProps
       </div>
 
       <Button onClick={handleSave} disabled={saving} className="w-full">
-        {saving ? 'Saving…' : 'Save Option'}
+        {saving ? 'Saving…' : (isEditing ? 'Update Option' : 'Save Option')}
       </Button>
     </div>
   );

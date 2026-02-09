@@ -3,7 +3,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { LogOut, Globe, Lock, Unlock, Plus, Route, CloudSun, Loader2 } from 'lucide-react';
+import { LogOut, Globe, Lock, Unlock, Plus, Route, CloudSun, Loader2, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { differenceInDays, parseISO } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
@@ -158,6 +158,19 @@ const TimelineHeader = ({ trip, tripId, timezone, onToggleTimezone, timezoneLabe
               className="h-8 w-8"
             >
               <Plus className="h-4 w-4" />
+            </Button>
+          )}
+
+          {/* Trip settings (organizer only) */}
+          {isOrganizer && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate(`/trip/${tripId}/settings`)}
+              className="h-8 w-8"
+              title="Trip settings"
+            >
+              <Settings className="h-4 w-4 text-muted-foreground" />
             </Button>
           )}
 
