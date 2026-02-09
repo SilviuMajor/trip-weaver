@@ -1,73 +1,120 @@
 
 
-# Bug Fix + Feature Improvements
+# Apply "Colourful & Playful" Style Across the App
 
-## 1. Fix Login Crash (Dashboard.tsx)
+## Overview
 
-**The bug:** On Dashboard line 120, `parseISO(trip.start_date)` is called for every trip, but `start_date` can be `null` when a trip was created with "dates unknown". `parseISO(null)` throws `Cannot read properties of null (reading 'split')`.
+Transform the app's visual identity from the current neutral/warm-journal aesthetic to the bold, emoji-rich, rounded, warm-palette "Colourful & Playful" style shown in Style B on the showcase page.
 
-**Fix:** Guard the date display -- if `start_date` or `end_date` is null, show the `duration_days` value instead (e.g. "3-day trip" or "Dates TBD").
+## What Changes
 
-**File:** `src/pages/Dashboard.tsx` (line 120)
+### 1. Global Theme (CSS Variables) -- `src/index.css`
 
----
+Update the CSS custom properties to use the warm, saturated palette:
 
-## 2. Wire Up Entry Edit and Delete
+| Token | Current | New (Colourful & Playful) |
+|-------|---------|--------------------------|
+| `--background` | Warm grey `40 33% 96%` | Warm cream `40 40% 97%` |
+| `--card` | Near-white `40 30% 98%` | Light amber `38 60% 97%` |
+| `--primary` | Orange `24 80% 50%` | Bold orange `24 90% 52%` |
+| `--secondary` | Cool blue `200 60% 94%` | Warm peach `30 70% 92%` |
+| `--muted` | Grey `35 20% 91%` | Warm sand `35 40% 90%` |
+| `--border` | Grey `35 20% 87%` | Amber tint `35 45% 85%` |
+| `--radius` | `0.75rem` | `1rem` (more rounded) |
 
-The edit/delete UI exists in `EntryOverlay.tsx` and `EntryForm.tsx` already supports edit mode, but `Timeline.tsx` doesn't pass the `onEdit` or `onDeleted` callbacks to the overlay.
+Also update dark mode equivalents with warmer tones.
 
-**Changes to `src/pages/Timeline.tsx`:**
-- Add state for `editEntry` and `editOption`
-- Create an `handleEdit` function that sets these and opens the EntryForm in edit mode
-- Pass `onEdit={handleEdit}` and `onDeleted={fetchData}` to `EntryOverlay`
-- Pass `editEntry` and `editOption` props to `EntryForm`
+### 2. Entry Cards -- `src/components/timeline/EntryCard.tsx`
 
-This connects the existing edit/delete UI to the existing edit-mode logic -- no new components needed.
+The biggest visual change. Transform from gradient-overlay cards to the playful style:
 
----
+- Replace the full-bleed time-of-day gradient background with a **light category-tinted background** and a **bold left border** in the category colour
+- Show the category **emoji large** (text-xl) next to the entry title
+- Make cards `rounded-2xl` with `shadow-md`
+- Time text uses the category colour instead of white
+- Keep the image overlay style when a photo exists, but add more rounding
+- Keep vote button but style it with rounder pills and warmer colours
 
-## 3. Add Trip Destination Field
+### 3. Travel Segments -- `src/components/timeline/TravelSegmentCard.tsx`
 
-Add a `destination` text column to the `trips` table so the organizer can set a city/destination.
+Replace the dashed vertical border with the playful dashed-line-with-emoji style:
 
-**Database migration:**
-- `ALTER TABLE trips ADD COLUMN destination text;`
+- Show a mode emoji (walking person, bus, etc.) on the left
+- A dashed amber line stretching across
+- Duration in a rounded amber pill on the right
+- Remove the muted/subtle look, make it warmer
 
-**Changes to `src/pages/TripWizard.tsx`:**
-- Add a destination input field in the Name step (or as a sub-field below the trip name)
-- Save `destination` when inserting the trip
+### 4. Timeline Day Headers -- `src/components/timeline/TimelineDay.tsx`
 
-**Changes to `src/components/wizard/NameStep.tsx`:**
-- Add a "Destination" input field below the trip name
+- Add a weather/sun emoji next to the day name (decorative, using the weather data if available)
+- Show "X activities planned" subtitle below the date
+- Warmer background tint for the sticky header
+- Bolder typography with amber-900 for the day name
 
-**Changes to `src/pages/TripSettings.tsx`:**
-- Add an editable destination field alongside the trip name
+### 5. Timeline Header -- `src/components/timeline/TimelineHeader.tsx`
 
-**Changes to `src/pages/Dashboard.tsx`:**
-- Show destination below the trip name on trip cards (e.g. "Amsterdam Trip -- Amsterdam, NL")
+- Warm amber-tinted header background instead of neutral
+- Round the action buttons more (`rounded-xl`)
+- Use warmer icon colours (amber shades instead of grey muted)
 
----
+### 6. Dashboard -- `src/pages/Dashboard.tsx`
 
-## 4. Add Members After Creation (Trip Settings)
+- Trip cards: add a playful left border with a random warm colour, larger rounded corners (`rounded-2xl`)
+- Show destination with a pin emoji
+- Empty state: larger emoji, warmer colours
+- Header: warm amber tint
 
-The TripSettings page currently shows existing members but has no way to add new ones.
+### 7. Auth Page -- `src/pages/Auth.tsx`
 
-**Changes to `src/pages/TripSettings.tsx`:**
-- Add an "Add Member" section at the bottom of the members list
-- Include a name input and role selector (defaulting to "viewer")
-- On submit, insert a new row into `trip_users` for the current trip
-- Refresh the members list after adding
+- Warm cream background
+- The MapPin icon wrapper uses a bolder amber background
+- Form inputs get rounder corners and warmer borders
+- Primary button stays bold orange with more rounding
+
+### 8. User Select -- `src/pages/UserSelect.tsx`
+
+- User avatars: colourful category-style backgrounds (rotating warm colours per user) instead of subtle primary/10
+- Warmer card borders and hover states
+- More rounded cards (`rounded-2xl`)
+
+### 9. Entry Overlay -- `src/components/timeline/EntryOverlay.tsx`
+
+- Category badge: larger, bolder, with emoji
+- Warmer background for the sheet
+- Rounder corners on all elements
+
+### 10. Vote Button -- `src/components/timeline/VoteButton.tsx`
+
+- Warmer colour palette: amber-200 background when not voted, bold primary when voted
+- More rounded (`rounded-full` already, keep it)
+
+### 11. Weather Badge -- `src/components/timeline/WeatherBadge.tsx`
+
+- Warm amber-tinted background instead of neutral
+- Slightly larger with bolder text
 
 ---
 
 ## Files Summary
 
-| File | Action | What Changes |
-|------|--------|-------------|
-| Database migration | Create | Add `destination` column to `trips` |
-| `src/pages/Dashboard.tsx` | Edit | Fix null date crash, show destination |
-| `src/pages/Timeline.tsx` | Edit | Wire onEdit/onDeleted to EntryOverlay and EntryForm |
-| `src/pages/TripSettings.tsx` | Edit | Add destination editing, add member form |
-| `src/pages/TripWizard.tsx` | Edit | Save destination field |
-| `src/components/wizard/NameStep.tsx` | Edit | Add destination input |
+| File | Changes |
+|------|---------|
+| `src/index.css` | Update CSS variables for warmer palette, increase border-radius |
+| `src/components/timeline/EntryCard.tsx` | Playful card style with category tint, emoji, bold left border |
+| `src/components/timeline/TravelSegmentCard.tsx` | Emoji + dashed amber line + duration pill |
+| `src/components/timeline/TimelineDay.tsx` | Warmer day header, activity count subtitle |
+| `src/components/timeline/TimelineHeader.tsx` | Warm amber-tinted header styling |
+| `src/components/timeline/EntryOverlay.tsx` | Warmer tones, rounder elements |
+| `src/components/timeline/VoteButton.tsx` | Amber-tinted inactive state |
+| `src/components/timeline/WeatherBadge.tsx` | Warm amber badge background |
+| `src/pages/Dashboard.tsx` | Playful trip cards with coloured borders |
+| `src/pages/Auth.tsx` | Warm cream styling |
+| `src/pages/UserSelect.tsx` | Colourful user avatar backgrounds |
+
+## What Stays the Same
+
+- All functionality, database logic, and routing remain unchanged
+- The DM Sans body font and Playfair Display heading font stay (they fit the playful style well)
+- The time-of-day gradient logic is kept but only used when no category colour is available
+- Dark mode gets equivalent warm-dark adjustments
 
