@@ -100,20 +100,9 @@ const CalendarDay = ({
     (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
   );
 
-  // Calculate dynamic time range from entries
-  let startHour = 6;
-  let endHour = 24;
-
-  if (sortedEntries.length > 0) {
-    const hours = sortedEntries.flatMap(e => {
-      const s = getHourInTimezone(e.start_time, tripTimezone);
-      let en = getHourInTimezone(e.end_time, tripTimezone);
-      if (en < s) en = 24;
-      return [s, en];
-    });
-    startHour = Math.max(0, Math.floor(Math.min(...hours)) - 1);
-    endHour = Math.min(24, Math.ceil(Math.max(...hours)) + 1);
-  }
+  // Show full 24-hour day
+  const startHour = 0;
+  const endHour = 24;
 
   const totalHours = endHour - startHour;
   const containerHeight = totalHours * PIXELS_PER_HOUR;
@@ -539,13 +528,13 @@ const CalendarDay = ({
               return (
                 <div
                   className="absolute top-0 bottom-0 rounded-full z-[4]"
-                  style={{ left: -52, width: 5, background: gradient }}
+                  style={{ left: -6, width: 5, background: gradient }}
                 />
               );
             })()}
 
             {/* Weather column on the far left */}
-            <div className="absolute top-0 bottom-0 z-[5]" style={{ left: -48, width: 44 }}>
+            <div className="absolute top-0 bottom-0 z-[5]" style={{ left: dayFlights.length > 0 ? -80 : -56, width: 44 }}>
               {Array.from({ length: endHour - startHour }, (_, i) => startHour + i).map(hour => {
                 const dateStr = format(dayDate, 'yyyy-MM-dd');
                 const w = weatherData.find(wd => wd.date === dateStr && wd.hour === hour);

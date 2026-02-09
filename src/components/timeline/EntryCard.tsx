@@ -145,9 +145,9 @@ const EntryCard = ({
               className="shrink-0 p-0.5 rounded hover:bg-muted/50 transition-colors"
             >
               {isLocked ? (
-                <Lock className="h-2.5 w-2.5 text-muted-foreground/80" />
+              <Lock className="h-3.5 w-3.5 text-muted-foreground/80" />
               ) : (
-                <LockOpen className="h-2.5 w-2.5 text-muted-foreground/30" />
+                <LockOpen className="h-3.5 w-3.5 text-muted-foreground/30" />
               )}
             </button>
           )}
@@ -302,7 +302,7 @@ const EntryCard = ({
           <button
             onClick={handleLockClick}
             className={cn(
-              'absolute bottom-1.5 right-1.5 rounded-md p-1 transition-colors z-20',
+              'absolute top-1.5 right-1.5 rounded-md p-1 transition-colors z-20',
               firstImage ? 'hover:bg-white/20' : 'hover:bg-muted/50'
             )}
           >
