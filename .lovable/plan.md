@@ -1,74 +1,56 @@
 
 
-# Weather Emojis, Left-side Weather, Add Idea Button, and Flight Card Alignment
+# Fix: Gap, Gutter Z-Index, Click Issues, Category Badges, and Sunrise/Sunset Line
 
-## 1. Weather Badges: Emojis Instead of Lucide Icons
+## 1. Gap Above Date Header
 
-Replace the current circular Lucide icon badges with inline emoji + temperature text. No circle background needed.
+The day header has `py-3` (12px top+bottom padding) and the content below also has `py-3`. Combined with the "Trip Begins" banner on the first day, this creates noticeable whitespace.
 
-### Emoji mapping
+**Fix**: Reduce header padding from `py-3` to `py-1.5` and content padding from `py-3` to `py-2`. This tightens the layout without removing structure.
 
-| Condition | Day Emoji | Night Emoji |
-|-----------|-----------|-------------|
-| Clear/sunny | ☀️ | 🌙 |
-| Partly cloudy | ⛅ | ☁️ |
-| Cloudy/overcast | ☁️ | ☁️ |
-| Rain/shower | 🌧️ | 🌧️ |
-| Drizzle | 🌦️ | 🌧️ |
-| Thunder | ⛈️ | ⛈️ |
-| Snow | 🌨️ | 🌨️ |
-| Fog | 🌫️ | 🌫️ |
-| Default | ☀️ | 🌙 |
+**File**: `CalendarDay.tsx` line 226 (`py-2` to `py-1.5`) and line 288 (`py-3` to `py-2`).
 
-### Visual output
-Each hour shows: `☀️ 18°` as a compact inline element. The emoji provides the color naturally.
+## 2. Timezone Gutter Behind Cards
 
-### Changes
-- **`WeatherBadge.tsx`**: Remove all Lucide icon imports. Replace with a `getWeatherEmoji(condition, isNight)` function returning an emoji string. Remove the circular div wrapper, render as a simple `span` with emoji + temp. Remove the `getWeatherColor` function entirely since emojis provide their own visual identity.
+The time labels (05:00, 06:00, etc.) are positioned at `left: 0` inside `TimeSlotGrid`, which sits inside a container with `ml-14` / `ml-20`. This means the labels start at the left edge of the card area -- they are not to the left of cards, they overlap them.
 
-## 2. Move Weather Column to Far Left
+The labels need to be positioned with a negative `left` value so they appear in the margin space, outside the card container.
 
-Currently the weather column sits at `right: -44` (right side of the timeline). Move it to the far left, before the time labels.
+**Fix**: In `TimeSlotGrid.tsx`, change the time label positioning from `left-0` to a negative left value (e.g., `left: -56px` for single-TZ, `left: -80px` for dual-TZ) so labels sit in the `ml-14`/`ml-20` margin space. Pass a prop for the margin width so labels know where to go.
 
-### Layout change
+Alternatively, simpler approach: Move the time labels out of `TimeSlotGrid` and into `CalendarDay` positioned absolutely with negative left, ensuring they are outside the card container entirely.
 
-```text
-Current:  [time labels] --- [cards] --- [weather]
-New:      [weather] [time labels] --- [cards]
-```
+**File**: `TimeSlotGrid.tsx` lines 269-294 -- change `left-0` positioning to negative left values.
+**File**: `CalendarDay.tsx` -- pass `gutterWidth` prop to `TimeSlotGrid`.
 
-### Changes
-- **`CalendarDay.tsx`** (lines 517-529): Move the weather column from `right: -44` to `left: -48` (or similar), positioning it to the left of the entry container. Since the container already has `ml-14` / `ml-20`, we have space to the left. The weather elements will be positioned absolutely at negative left offset.
-- Adjust `marginRight: 48` on the container (line 311) since we no longer need right-side space for weather. Set it to a smaller value (e.g. 8px).
+## 3. Card Click Requires Multiple Clicks
 
-## 3. Add Idea Button in Ideas Panel
+The drag system in `useDragResize.ts` sets `wasDraggedRef.current = true` in `startDrag()` (line 63), which is called on every mousedown for draggable cards. The click handler on the card checks `if (!wasDraggedRef.current)` before opening the overlay (CalendarDay line 452). Since `wasDragged` is true immediately on mousedown, the first click after any interaction is blocked. It only resets after a 150ms timeout.
 
-Add a button at the top of the Ideas sidebar that opens the entry form pre-configured as an unscheduled/idea entry.
+**Fix**: Don't set `wasDraggedRef.current = true` immediately in `startDrag`. Instead, only set it to true once actual movement occurs (i.e., in `handlePointerMove` when delta exceeds a small threshold like 5px). This way, a simple click (mousedown + mouseup without movement) will not flag as "dragged" and the overlay will open immediately.
 
-### Changes
-- **`IdeasPanel.tsx`**: Add a `+ Add Idea` button in the sticky header bar (line 66-81), next to the "Ideas" title. Wire it to a new `onAddIdea` callback prop.
-- **`Timeline.tsx`**: Pass an `onAddIdea` handler to `IdeasPanel` that opens the `EntryForm` with `is_scheduled: false` pre-set. This means setting `prefillStartTime` to undefined and opening the form.
-- **`EntryForm.tsx`**: May need a new prop like `prefillUnscheduled?: boolean` so the form knows to create the entry as an idea (not scheduled). Need to check if the form already supports this.
+**File**: `useDragResize.ts` -- remove `wasDraggedRef.current = true` from `startDrag` (line 63). Add it to `handlePointerMove` when actual movement is detected.
 
-## 4. Flight Card Positioning Fix
+## 4. Category Indicators: Uniform Size
 
-### The problem
-Flight cards are positioned on the timeline using `tripTimezone` for both start and end times. For a flight departing at 08:15 GMT arriving 10:46 CET:
-- The card starts at 08:15 on the GMT timeline (correct)
-- The card ends at 09:46 GMT (= 10:46 CET), so the card is ~1.5 hours tall (correct duration)
-- But the dual-TZ gutter shows "10:46" in the destination column at the 10:46 position, which is BELOW the card's bottom edge
-- This makes it look like the flight card doesn't reach its arrival time
+Currently, regular categories use `px-2.5 py-1 text-xs` while processing entries (Check-in/Checkout) use `text-[10px] px-2 py-0.5`. The user prefers the Check-in size for all.
 
-### Proposed fix
-The card position is actually correct (it represents real elapsed time). The confusion comes from the gutter showing destination times that don't visually align with the card edge. Two improvements:
+**Fix**: Make all category badges use the smaller Check-in styling: `text-[10px] px-2 py-0.5` with slightly smaller emoji.
 
-1. **Add a small arrival time annotation at the bottom of the flight card**: Show a subtle label like "Arrives 10:46 CET" pinned to the bottom-right of the flight card, making it clear where the flight ends relative to the card.
+**File**: `EntryCard.tsx` lines 201-213 -- remove the conditional sizing and apply the compact style universally.
 
-2. **Adjust the `flightEndHour` in the TZ overlap calculation**: Currently `flightEndHour` uses `getHour(f.end_time, opt.arrival_tz!)` which gives 10:46. But the card actually ends at `getHour(f.end_time, tripTimezone)` = 09:46 GMT. The overlap zone should use the trip-timezone-based end hour so the dual-TZ gutter transition aligns with the card edge.
+## 5. Sunrise/Sunset Gradient Line
 
-### Changes
-- **`Timeline.tsx`** (lines 236-249): Change `flightEndHour` calculation to use `tripTimezone` (or `originTz`) instead of `arrival_tz` so the overlap zone aligns with the card's visual position.
-- **`EntryCard.tsx`**: No changes needed -- the card already shows "LHR T5 08:15 GMT -> AMS 10:46 CET" which is clear.
+Replace the orange background effect with a 5px-wide vertical gradient line that runs alongside the time gutter. The gradient should transition through:
+- Dark blue (night) at the top/bottom
+- Warm sunrise colors (orange/amber) around sunrise hour
+- Light blue (day) through midday
+- Warm sunset colors around sunset hour
+- Back to dark blue (night)
+
+This uses the existing `sunCalc.ts` to determine sunrise/sunset hours for the day, then renders a thin absolute-positioned div with a CSS gradient.
+
+**File**: `CalendarDay.tsx` -- add a new 5px-wide `div` positioned at the left edge of the time gutter (next to or just inside the weather column). The gradient stops are computed from `calculateSunTimes()` mapped to the day's hour range.
 
 ---
 
@@ -76,9 +58,37 @@ The card position is actually correct (it represents real elapsed time). The con
 
 | File | Changes |
 |------|---------|
-| `WeatherBadge.tsx` | Replace Lucide icons with emoji strings. Remove circular badge wrapper. Render as inline `emoji temp` text. |
-| `CalendarDay.tsx` | Move weather column from right to far left. Reduce right margin. |
-| `IdeasPanel.tsx` | Add `onAddIdea` prop and render "+ Add Idea" button in header. |
-| `Timeline.tsx` | Pass `onAddIdea` handler to IdeasPanel. Fix `flightEndHour` to use `tripTimezone` instead of `arrival_tz`. |
-| `EntryForm.tsx` | Check if it supports creating unscheduled entries; add `prefillUnscheduled` prop if needed. |
+| `CalendarDay.tsx` | Reduce header/content padding. Add 5px sunrise/sunset gradient line. |
+| `TimeSlotGrid.tsx` | Move time labels to negative left positioning so they sit in the margin, not overlapping cards. |
+| `useDragResize.ts` | Only set `wasDraggedRef` to true on actual pointer movement, not on mousedown. Fixes single-click overlay opening. |
+| `EntryCard.tsx` | Normalize all category badges to the compact Check-in size (`text-[10px] px-2 py-0.5`). |
 
+### Sunrise/Sunset Gradient Implementation
+
+```text
+Gradient line (5px wide, full height of day):
+  - Position: absolute, left of time labels
+  - Colors computed from sunCalc:
+    top (early hours) -> hsl(220, 50%, 20%) dark blue
+    sunrise hour     -> hsl(30, 80%, 55%) warm orange  
+    mid-morning      -> hsl(200, 60%, 70%) light blue
+    midday           -> hsl(200, 70%, 75%) bright sky
+    afternoon        -> hsl(200, 60%, 70%) light blue
+    sunset hour      -> hsl(25, 80%, 50%) deep orange
+    evening          -> hsl(220, 50%, 20%) dark blue
+```
+
+### Click Fix Logic
+
+```text
+Current flow:
+  mousedown -> startDrag() -> wasDragged = true
+  mouseup   -> commitDrag() -> setTimeout(150ms, wasDragged = false)
+  click     -> if (!wasDragged) openOverlay  // BLOCKED because wasDragged is true
+
+Fixed flow:
+  mousedown -> startDrag() -> wasDragged = false (unchanged)
+  mousemove -> if delta > 5px: wasDragged = true
+  mouseup   -> commitDrag()
+  click     -> if (!wasDragged) openOverlay  // WORKS for simple clicks
+```
