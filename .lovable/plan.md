@@ -1,134 +1,89 @@
 
 
-# Transfers, Drag-to-Resize, Lat/Lng Removal, and "+" Button Improvements
+# Airport Dropdown, Terminal Display, and Timezone Fix
 
 ## Overview
 
-Five changes: remove lat/lng fields from entry creation, rename Travel to Transfer with FROM/TO fields, implement Google Calendar-style drag-to-resize/move on the timeline, add "+" buttons before entries, and handle Transfer override of auto-calculated travel segments.
+Three interconnected changes: (1) replace free-text airport inputs with a searchable dropdown that auto-sets timezones, (2) add a terminal field to flights, and (3) fix the fundamental timezone handling so all times are stored as proper UTC, eliminating the 1-hour drag-and-drop shift.
 
 ---
 
-## 1. Remove Latitude/Longitude from Entry Creation
+## The Timezone Bug (Root Cause)
 
-Remove the manual latitude and longitude input fields from both `EntryForm.tsx` and `OptionForm.tsx`. The lat/lng columns remain in the database for future use (e.g. Google Places autocomplete), but users won't manually type coordinates.
+The drag-and-drop places entries 1 hour ahead because of a mismatch:
 
-### Files changed:
-- **`src/components/timeline/EntryForm.tsx`**: Remove the `latitude`/`longitude` state variables and their `<Input>` fields (lines 65-66, 558-567). Set `latitude: null` and `longitude: null` in the save payload.
-- **`src/components/timeline/OptionForm.tsx`**: Remove the latitude/longitude inputs (lines 175-198) and their state variables.
+1. `getHourInTimezone()` reads an entry's UTC time and displays it as LOCAL time in the trip timezone (e.g. 10:00 CET)
+2. When dragging completes, `handleDragCommit` takes that local hour (10) and saves it as `10:00+00:00` (UTC)
+3. Next render, `getHourInTimezone` converts `10:00 UTC` to `11:00 CET` -- shifted by 1 hour
 
----
+The same bug exists in `EntryForm.tsx` for non-flight entries (line 338): local times are stored with `+00:00` offset, treating them as UTC.
 
-## 2. Rename "Travel" to "Transfer" with FROM/TO Fields
-
-### Category rename:
-- **`src/lib/categories.ts`**: Change `id: 'travel'` to `id: 'transfer'`, name to "Transfer", emoji to "🚐"
-
-### Transfer-specific form fields:
-- **`src/components/timeline/EntryForm.tsx`**: When category is `transfer`:
-  - Show "From" and "To" text inputs (like flight departure/arrival)
-  - Show travel mode selector (Walk, Transit, Cycle, Drive)
-  - Auto-calculate duration via the `google-directions` edge function using FROM/TO text (or use manual override)
-  - Add a "Calculate" button next to duration that triggers the API call
-  - Allow manual duration override (input field, pre-filled from API or default)
-  - Store FROM in `departure_location` and TO in `arrival_location` columns (reusing existing flight columns)
-
-### Transfer overrides auto-segments:
-- **`src/components/timeline/CalendarDay.tsx`**: When rendering travel segments between entries, skip rendering `TravelSegmentCard` if there's already a Transfer entry between those two entries (check by matching time ranges or by checking if a transfer entry exists with start_time >= entry A end_time and end_time <= entry B start_time)
-
-### Files changed:
-- `src/lib/categories.ts` -- rename travel to transfer
-- `src/components/timeline/EntryForm.tsx` -- add FROM/TO fields and auto-calc for transfer category
-- `src/components/timeline/OptionForm.tsx` -- update `isTravel` check to `isTransfer`
-- `src/components/timeline/CalendarDay.tsx` -- skip auto travel segments when manual Transfer exists
-- `src/components/timeline/EntryCard.tsx` -- display FROM/TO on Transfer cards (similar to flight display)
+**Fix**: Convert local times to proper UTC before saving, and always use timezone-aware conversion in both directions.
 
 ---
 
-## 3. Drag-to-Resize and Drag-to-Move on Timeline (Google Calendar Style)
+## 1. Airport Data and Searchable Dropdown
 
-This is the largest change. Entry cards on the `CalendarDay` grid become draggable and resizable.
+### New file: `src/lib/airports.ts`
+- Contains a comprehensive dataset of ~3000+ commercial airports with IATA codes
+- Each entry: `{ iata: string, name: string, city: string, country: string, timezone: string }`
+- Example: `{ iata: 'LHR', name: 'Heathrow', city: 'London', country: 'GB', timezone: 'Europe/London' }`
+- Data sourced from a well-known open airport dataset, trimmed to commercial airports with IATA codes
+- Export a search function: `searchAirports(query: string): Airport[]` that filters by IATA code, name, or city (case-insensitive, returns top 20 matches)
 
-### Interaction model:
-- **Drag top edge**: Resize start time (move top of card up/down)
-- **Drag bottom edge**: Resize end time (move bottom of card up/down)
-- **Drag middle of card**: Move entire card (maintains duration, shifts start/end times)
-- Snaps to 15-minute increments
-- On release, updates the entry's `start_time` and `end_time` in the database
-- Works on both mouse and touch (touch requires a short hold ~200ms before drag activates, to distinguish from scroll)
+### New component: `src/components/timeline/AirportPicker.tsx`
+- A searchable dropdown using the existing `cmdk` (Command) library already installed
+- Shows a text input that opens a popover with filtered airport results
+- Each result shows: IATA code (bold), airport name, city/country
+- On selection: sets the airport name (e.g. "LHR - Heathrow") and auto-sets the timezone
+- Props: `value: string`, `onChange: (airport: Airport) => void`, `placeholder: string`
 
-### Implementation approach:
-
-**New hook: `src/hooks/useDragResize.ts`**
-- Manages drag state: `isDragging`, `dragType` (move | resize-top | resize-bottom), `dragEntryId`
-- Tracks pointer position and calculates new time values based on pixel offset and `PIXELS_PER_HOUR`
-- Handles mousedown/touchstart on drag handles and card body
-- On release: calls Supabase to update `start_time`/`end_time`, then triggers `onDataRefresh`
-- Snaps to nearest 15-minute interval
-
-**Changes to `src/components/timeline/CalendarDay.tsx`:**
-- Import and use the drag hook
-- Add resize handles: thin transparent divs at the top and bottom edges of each entry card (6px tall, `cursor-ns-resize`)
-- During drag, render a "ghost" preview showing the new position/size with reduced opacity
-- Pass `onEntryTimeChange` callback prop for persisting changes
-- Add touch event handling with hold-to-drag delay
-
-**Changes to `src/components/timeline/EntryCard.tsx`:**
-- Accept optional `onDragStart` prop for the card body (middle drag)
-- Add `cursor-grab` / `cursor-grabbing` styles when hovering/dragging
-- Prevent click handler from firing when a drag just completed
-
-**Changes to `src/pages/Timeline.tsx`:**
-- Add `handleEntryTimeChange(entryId, newStart, newEnd)` that updates the database and calls `fetchData()`
-- Pass it to `CalendarDay`
-
-### New prop on CalendarDay:
-```typescript
-onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
-```
+### Changes to `src/components/timeline/EntryForm.tsx`
+- Replace the two free-text "From (airport/city)" and "To (airport/city)" inputs with `AirportPicker` components
+- When an airport is selected: auto-populate `departureLocation` / `arrivalLocation` with "IATA - Name" AND auto-set `departureTz` / `arrivalTz` from the airport's timezone
+- Remove the manual timezone dropdown selects entirely (they become auto-set, but show the detected timezone as a read-only label so users can see it)
+- Add a "Terminal" free-text input field below each airport picker (departure terminal, arrival terminal)
 
 ---
 
-## 4. "+" Button Before First Entry
+## 2. Terminal Field
 
-Currently the "+" button only appears AFTER each entry. We need one BEFORE the first entry too.
+### Database migration
+- Add `departure_terminal` (text, nullable) and `arrival_terminal` (text, nullable) columns to `entry_options` table
 
-### Changes to `src/components/timeline/CalendarDay.tsx`:**
-- Before the first entry in the positioned entries loop, render an additional "+" button
-- Position it at the first entry's top minus a small offset (in the time label gutter area, left side)
-- Pre-fill time: first entry start time minus 1 hour
-- Use the same `onAddBetween` callback with the calculated pre-fill time
+### Changes to `src/components/timeline/EntryForm.tsx`
+- Add `departureTerminal` and `arrivalTerminal` state variables
+- Add free-text inputs below each airport picker: "Departure terminal" and "Arrival terminal"
+- Include in the save payload: `departure_terminal`, `arrival_terminal`
+- Pre-fill when editing
 
----
+### Changes to `src/types/trip.ts`
+- Add `departure_terminal` and `arrival_terminal` to `EntryOption` interface
 
-## 5. Google Directions Edge Function Update
-
-The existing `google-directions` edge function works with lat/lng coordinates. For Transfer entries with text-based FROM/TO, we need to support address-based lookups.
-
-### Changes to `supabase/functions/google-directions/index.ts`:
-- Accept an optional `fromAddress`/`toAddress` parameter (in addition to existing lat/lng flow)
-- When addresses are provided, use them directly in the Google Directions API (it supports text addresses as origin/destination)
-- Return duration, distance, and mode
+### Changes to `src/components/timeline/EntryCard.tsx`
+- Display terminal info on flight cards after the airport name
+- Format: "LHR T5 08:00 GMT -> AMS T1 10:30 CET"
 
 ---
 
-## Technical Details
+## 3. Fix All Timezone Handling (Store as UTC)
 
-### Drag-to-resize pixel-to-time conversion:
-```
-deltaMinutes = (deltaPixels / PIXELS_PER_HOUR) * 60
-snappedMinutes = Math.round(deltaMinutes / 15) * 15
-newTime = originalTime + snappedMinutes
-```
+### New utility: `src/lib/timezoneUtils.ts`
+- `localToUTC(dateStr: string, timeStr: string, timezone: string): string` -- converts a local date+time in a given timezone to a UTC ISO string. This already exists as `localToUTC` in EntryForm but needs to be extracted and shared.
+- `utcToLocal(isoString: string, timezone: string): { date: string, time: string }` -- converts UTC ISO to local date and time string in a given timezone
+- `getTimezoneOffsetMs(dateStr: string, timeStr: string, timezone: string): number` -- calculates the offset for a specific moment
 
-### Touch handling for drag:
-- `onTouchStart`: Start a 200ms timer
-- If finger moves > 10px before timer fires: cancel (it's a scroll)
-- If timer fires: activate drag mode, prevent scrolling via `e.preventDefault()`
-- `onTouchMove`: Update drag position
-- `onTouchEnd`: Commit changes
+### Changes to `src/components/timeline/EntryForm.tsx` (non-flight save)
+- Line 338: Change from `${entryDate}T${startTime}:00+00:00` to use `localToUTC(entryDate, startTime, tripTimezone)`
+- Line 339: Same for end time
+- This ensures all entries are stored as proper UTC timestamps
 
-### Transfer override logic:
-When rendering `CalendarDay`, for each pair of consecutive entries, check if any entry between them has `category === 'transfer'`. If so, skip the auto `TravelSegmentCard`.
+### Changes to `src/components/timeline/CalendarDay.tsx` (drag commit)
+- `handleDragCommit`: Instead of saving hours with `+00:00`, convert local hours in `tripTimezone` back to UTC
+- Use the new `localToUTC` utility: build the local time string from the dragged hours, then convert to UTC using `tripTimezone`
+
+### Changes to `src/pages/Timeline.tsx`
+- `getEntriesForDay`: Currently compares using `format(new Date(entry.start_time), 'yyyy-MM-dd')` which uses the browser's local timezone. Fix to compare using the trip timezone instead, so entries appear on the correct day.
 
 ---
 
@@ -136,12 +91,13 @@ When rendering `CalendarDay`, for each pair of consecutive entries, check if any
 
 | File | Action | What Changes |
 |------|--------|-------------|
-| `src/lib/categories.ts` | Edit | Rename travel -> transfer |
-| `src/components/timeline/EntryForm.tsx` | Edit | Remove lat/lng, add Transfer FROM/TO + auto-calc, pre-fill before logic |
-| `src/components/timeline/OptionForm.tsx` | Edit | Remove lat/lng fields, update isTravel -> isTransfer |
-| `src/components/timeline/CalendarDay.tsx` | Edit | Drag handles, resize/move logic, "+" before first entry, Transfer override of travel segments |
-| `src/components/timeline/EntryCard.tsx` | Edit | Drag cursor styles, Transfer display, prevent click during drag |
-| `src/pages/Timeline.tsx` | Edit | Add handleEntryTimeChange, pass to CalendarDay |
-| `src/hooks/useDragResize.ts` | Create | Drag-to-resize/move hook with mouse + touch support |
-| `supabase/functions/google-directions/index.ts` | Edit | Support text addresses for Transfer entries |
+| `src/lib/airports.ts` | Create | Airport dataset (~3000 entries) with search function |
+| `src/lib/timezoneUtils.ts` | Create | Shared UTC conversion utilities |
+| `src/components/timeline/AirportPicker.tsx` | Create | Searchable airport dropdown component |
+| `src/components/timeline/EntryForm.tsx` | Edit | Airport pickers, terminal fields, UTC-correct time storage |
+| `src/components/timeline/EntryCard.tsx` | Edit | Display terminal info on flight cards |
+| `src/components/timeline/CalendarDay.tsx` | Edit | Fix drag commit to convert local hours to UTC |
+| `src/pages/Timeline.tsx` | Edit | Fix day filtering to use trip timezone |
+| `src/types/trip.ts` | Edit | Add terminal fields to EntryOption |
+| Database migration | Add | `departure_terminal` and `arrival_terminal` columns on `entry_options` |
 
