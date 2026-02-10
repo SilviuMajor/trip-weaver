@@ -17,13 +17,14 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import AIRPORTS from '@/lib/airports';
-import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, Lightbulb, Plane } from 'lucide-react';
+import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, Lightbulb, Plane, AlertTriangle } from 'lucide-react';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import PhotoStripPicker from './PhotoStripPicker';
 import ImageGallery from './ImageGallery';
 import ImageUploader from './ImageUploader';
 import MapPreview from './MapPreview';
 import VoteButton from './VoteButton';
+import RouteMapPreview from './RouteMapPreview';
 import { cn } from '@/lib/utils';
 
 const REFERENCE_DATE = '2099-01-01';
@@ -116,6 +117,7 @@ interface TransportResult {
   mode: string;
   duration_min: number;
   distance_km: number;
+  polyline?: string | null;
 }
 
 interface EntrySheetProps {
@@ -143,7 +145,8 @@ interface EntrySheetProps {
   prefillStartTime?: string;
   prefillEndTime?: string;
   prefillCategory?: string;
-  transportContext?: { fromAddress: string; toAddress: string } | null;
+  transportContext?: { fromAddress: string; toAddress: string; gapMinutes?: number; fromEntryId?: string; toEntryId?: string } | null;
+  onTransportConflict?: (blockDuration: number, gapMinutes: number) => void;
 }
 
 type Step = 'category' | 'details';
@@ -153,6 +156,7 @@ const EntrySheet = ({
   entry, option, formatTime: formatTimeProp, userLat, userLng,
   votingLocked, userVotes = [], onVoteChange, onMoveToIdeas,
   editEntry, editOption, prefillStartTime, prefillEndTime, prefillCategory, transportContext,
+  onTransportConflict,
 }: EntrySheetProps) => {
   const { currentUser, isEditor } = useCurrentUser();
 
@@ -165,6 +169,7 @@ const EntrySheet = ({
   const [saving, setSaving] = useState(false);
   const [transportResults, setTransportResults] = useState<TransportResult[]>([]);
   const [transportLoading, setTransportLoading] = useState(false);
+  const [selectedPolyline, setSelectedPolyline] = useState<string | null>(null);
   const transportFetchedRef = useRef(false);
   const [flightParseLoading, setFlightParseLoading] = useState(false);
   const [parsedFlights, setParsedFlights] = useState<any[]>([]);
@@ -360,6 +365,7 @@ const EntrySheet = ({
     setAutoPhotos([]);
     setTransportResults([]);
     setTransportLoading(false);
+    setSelectedPolyline(null);
     transportFetchedRef.current = false;
     setParsedFlights([]);
     setFlightParseLoading(false);
@@ -378,9 +384,12 @@ const EntrySheet = ({
         setTransportResults(data.results);
         const fastest = data.results.reduce((a: TransportResult, b: TransportResult) => a.duration_min < b.duration_min ? a : b);
         setTransferMode(fastest.mode);
+        setSelectedPolyline(fastest.polyline ?? null);
+        // Use block duration (rounded up to 5 min) for the calendar
+        const blockDur = Math.ceil(fastest.duration_min / 5) * 5;
         setDurationMin(fastest.duration_min);
         const [h, m] = startTime.split(':').map(Number);
-        const endTotalMin = h * 60 + m + fastest.duration_min;
+        const endTotalMin = h * 60 + m + blockDur;
         const endH = Math.floor(endTotalMin / 60) % 24;
         const endM = endTotalMin % 60;
         setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
@@ -408,8 +417,11 @@ const EntrySheet = ({
   const handleSelectTransportMode = (result: TransportResult) => {
     setTransferMode(result.mode);
     setDurationMin(result.duration_min);
+    setSelectedPolyline(result.polyline ?? null);
+    // Use block duration (rounded up to 5 min) for the calendar
+    const blockDur = Math.ceil(result.duration_min / 5) * 5;
     const [h, m] = startTime.split(':').map(Number);
-    const endTotalMin = h * 60 + m + result.duration_min;
+    const endTotalMin = h * 60 + m + blockDur;
     const endH = Math.floor(endTotalMin / 60) % 24;
     const endM = endTotalMin % 60;
     setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
@@ -620,7 +632,14 @@ const EntrySheet = ({
   };
 
   const handleSave = async () => {
-    const entryDate = isUndated ? format(addDays(parseISO(REFERENCE_DATE), Number(selectedDay)), 'yyyy-MM-dd') : date;
+    // When transport context exists, derive date from prefillStartTime
+    let entryDate: string;
+    if (transportContext && prefillStartTime) {
+      const { date: d } = utcToLocal(prefillStartTime, tripTimezone);
+      entryDate = d;
+    } else {
+      entryDate = isUndated ? format(addDays(parseISO(REFERENCE_DATE), Number(selectedDay)), 'yyyy-MM-dd') : date;
+    }
     if (!entryDate) { toast({ title: 'Please select a date', variant: 'destructive' }); return; }
 
     setSaving(true);
@@ -632,6 +651,12 @@ const EntrySheet = ({
         if (new Date(endIso) <= new Date(startIso)) {
           endIso = localToUTC(format(addDays(parseISO(entryDate), 1), 'yyyy-MM-dd'), endTime, arrivalTz);
         }
+      } else if (isTransfer && transportContext) {
+        // For transport with context, use block duration (rounded up to 5 min)
+        const blockDur = Math.ceil(durationMin / 5) * 5;
+        startIso = localToUTC(entryDate, startTime, tripTimezone);
+        const startDt = new Date(startIso);
+        endIso = new Date(startDt.getTime() + blockDur * 60000).toISOString();
       } else {
         startIso = localToUTC(entryDate, startTime, tripTimezone);
         endIso = localToUTC(entryDate, endTime, tripTimezone);
@@ -650,7 +675,7 @@ const EntrySheet = ({
 
       const cat = allCategories.find(c => c.id === categoryId);
       const optionPayload: any = {
-        entry_id: entryId, name: name.trim(), website: website.trim() || null,
+        entry_id: entryId, name: name.trim(), website: isTransfer ? null : (website.trim() || null),
         category: cat ? cat.id : null, category_color: cat?.color ?? null,
         location_name: locationName.trim() || null, latitude, longitude,
         departure_location: isFlight ? (departureLocation.trim() || null) : isTransfer ? (transferFrom.trim() || null) : null,
@@ -660,6 +685,7 @@ const EntrySheet = ({
         arrival_terminal: isFlight ? (arrivalTerminal.trim() || null) : null,
         airport_checkin_hours: isFlight ? checkinHours : null,
         airport_checkout_min: isFlight ? checkoutMin : null,
+        route_polyline: isTransfer ? (selectedPolyline || null) : null,
       };
 
       let optionId: string | null = null;
@@ -906,6 +932,47 @@ const EntrySheet = ({
                   </div>
                 )}
               </div>
+            ) : option.category === 'transfer' ? (
+              <>
+                {/* Transfer FROM → TO */}
+                {(option.departure_location || option.arrival_location) && (
+                  <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="font-medium">{option.departure_location || '—'}</span>
+                      <span className="text-muted-foreground">→</span>
+                      <span className="font-medium">{option.arrival_location || '—'}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>{formatTimeProp?.(entry.start_time) ?? ''} — {formatTimeProp?.(entry.end_time) ?? ''}</span>
+                      {(() => {
+                        const totalMin = Math.round((new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 60000);
+                        const h = Math.floor(totalMin / 60);
+                        const m = totalMin % 60;
+                        const label = h > 0 ? `${h}h ${m > 0 ? `${m}m` : ''}` : `${m}m`;
+                        return <span className="font-semibold ml-1">{label}</span>;
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {/* Route map for transfer view */}
+                {(option as any).route_polyline && (
+                  <RouteMapPreview
+                    polyline={(option as any).route_polyline}
+                    fromAddress={option.departure_location || ''}
+                    toAddress={option.arrival_location || ''}
+                    travelMode={transferMode || 'transit'}
+                    size="full"
+                  />
+                )}
+
+                {isLocked && (
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Lock className="h-3 w-3" /> Locked
+                  </div>
+                )}
+              </>
             ) : (
               <>
                 {/* Generic time (inline-editable) */}
@@ -1207,10 +1274,59 @@ const EntrySheet = ({
                 </>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="opt-website">Website</Label>
-                <Input id="opt-website" type="url" placeholder="https://..." value={website} onChange={(e) => setWebsite(e.target.value)} />
-              </div>
+              {/* Route map preview in creation dialog */}
+              {isTransfer && selectedPolyline && transportContext && (
+                <RouteMapPreview
+                  polyline={selectedPolyline}
+                  fromAddress={transferFrom}
+                  toAddress={transferTo}
+                  travelMode={transferMode}
+                  size="full"
+                />
+              )}
+
+              {/* Gap overflow warning */}
+              {isTransfer && transportContext?.gapMinutes != null && durationMin > 0 && (() => {
+                const blockDur = Math.ceil(durationMin / 5) * 5;
+                const gap = transportContext.gapMinutes!;
+                const overflow = blockDur - gap;
+                const contingency = blockDur - durationMin;
+                if (overflow > 0) {
+                  return (
+                    <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                        <div>
+                          <p className="text-sm font-medium">
+                            Transport takes <span className="font-bold">{blockDur}m</span> but gap is only <span className="font-bold">{gap}m</span>
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {overflow}m overflow — the conflict resolver will help adjust the schedule
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                if (contingency > 0) {
+                  return (
+                    <div className="rounded-lg border border-border/50 bg-muted/30 p-2">
+                      <p className="text-xs text-muted-foreground">
+                        ⏱ {durationMin}m travel + {contingency}m contingency = <span className="font-semibold">{blockDur}m block</span>
+                        {gap > blockDur && <span> · {gap - blockDur}m gap remaining</span>}
+                      </p>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
+              {!isTransfer && (
+                <div className="space-y-2">
+                  <Label htmlFor="opt-website">Website</Label>
+                  <Input id="opt-website" type="url" placeholder="https://..." value={website} onChange={(e) => setWebsite(e.target.value)} />
+                </div>
+              )}
 
               {!isFlight && !isTransfer && (
                 <div className="space-y-2">
@@ -1223,6 +1339,8 @@ const EntrySheet = ({
                 <Label className="text-sm font-semibold text-muted-foreground">When</Label>
               </div>
 
+              {/* Hide date/day selector when transport context provides timing */}
+              {!transportContext && (
               <div className="space-y-2">
                 {isUndated ? (
                   <>
@@ -1249,6 +1367,7 @@ const EntrySheet = ({
                   </>
                 )}
               </div>
+              )}
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">

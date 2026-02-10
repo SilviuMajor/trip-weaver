@@ -374,7 +374,7 @@ const Timeline = () => {
   };
 
   // Transport context for gap button
-  const [transportContext, setTransportContext] = useState<{ fromAddress: string; toAddress: string } | null>(null);
+  const [transportContext, setTransportContext] = useState<{ fromAddress: string; toAddress: string; gapMinutes?: number; fromEntryId?: string; toEntryId?: string } | null>(null);
 
   const handleAddBetween = (prefillTime: string) => {
     setPrefillStartTime(prefillTime);
@@ -396,7 +396,14 @@ const Timeline = () => {
     const fromAddr = fromOpt?.location_name || fromOpt?.arrival_location || '';
     const toAddr = toOpt?.location_name || toOpt?.departure_location || '';
 
-    setTransportContext({ fromAddress: fromAddr, toAddress: toAddr });
+    // Calculate gap in minutes
+    let gapMinutes: number | undefined;
+    if (fromEntry && toEntry) {
+      const gapMs = new Date(toEntry.start_time).getTime() - new Date(fromEntry.end_time).getTime();
+      gapMinutes = Math.round(gapMs / 60000);
+    }
+
+    setTransportContext({ fromAddress: fromAddr, toAddress: toAddr, gapMinutes, fromEntryId, toEntryId });
     setPrefillStartTime(prefillTime);
     setPrefillEndTime(undefined);
     setPrefillCategory('transfer');
@@ -1029,6 +1036,32 @@ const Timeline = () => {
             prefillEndTime={prefillEndTime}
             prefillCategory={prefillCategory}
             transportContext={transportContext}
+            onTransportConflict={(blockDuration, gapMinutes) => {
+              const overflow = blockDuration - gapMinutes;
+              if (overflow > 0) {
+                const conflict: ConflictInfo = {
+                  entryId: 'transport-pending',
+                  entryName: 'Transport',
+                  discrepancyMin: overflow,
+                  prevTravelMin: null,
+                  nextTravelMin: null,
+                  prevGapMin: gapMinutes,
+                  nextGapMin: 0,
+                };
+                // Find adjacent entries for recommendations
+                const fromEntry = transportContext?.fromEntryId ? entries.find(e => e.id === transportContext.fromEntryId) : null;
+                const toEntry = transportContext?.toEntryId ? entries.find(e => e.id === transportContext.toEntryId) : null;
+                const dayEntries = fromEntry ? entries.filter(e => {
+                  const d1 = new Date(e.start_time).toDateString();
+                  const d2 = new Date(fromEntry.start_time).toDateString();
+                  return d1 === d2 && e.is_scheduled !== false;
+                }) : [];
+                const recs = generateRecommendations(conflict, dayEntries, 'transport-pending');
+                setCurrentConflict(conflict);
+                setCurrentRecommendations(recs);
+                setConflictOpen(true);
+              }
+            }}
           />
 
           <ConflictResolver

@@ -100,6 +100,7 @@ export type Database = {
           location_name: string | null
           longitude: number | null
           name: string
+          route_polyline: string | null
           updated_at: string
           website: string | null
         }
@@ -121,6 +122,7 @@ export type Database = {
           location_name?: string | null
           longitude?: number | null
           name: string
+          route_polyline?: string | null
           updated_at?: string
           website?: string | null
         }
@@ -142,6 +144,7 @@ export type Database = {
           location_name?: string | null
           longitude?: number | null
           name?: string
+          route_polyline?: string | null
           updated_at?: string
           website?: string | null
         }

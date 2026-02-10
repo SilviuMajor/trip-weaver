@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
 
         const promises = body.modes.map((mode: string) =>
           fetchSingleMode(GOOGLE_MAPS_API_KEY, fromAddress, toAddress, mode, departureTime)
-            .then(result => result ? { mode, duration_min: result.duration_min, distance_km: result.distance_km } : null)
+            .then(result => result ? { mode, duration_min: result.duration_min, distance_km: result.distance_km, polyline: result.polyline } : null)
             .catch(() => null)
         );
 
