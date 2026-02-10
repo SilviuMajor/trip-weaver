@@ -144,7 +144,7 @@ const CategorySidebar = ({
 
   const filterTabs: { key: FilterTab; label: string; count: number }[] = [
     { key: 'all', label: 'All', count: totalCount },
-    { key: 'ideas', label: 'Ideas', count: ideasCount },
+    { key: 'ideas', label: 'Not Used', count: ideasCount },
     { key: 'scheduled', label: 'Scheduled', count: scheduledCount },
   ];
 
@@ -157,7 +157,7 @@ const CategorySidebar = ({
         </Button>
         <div className="flex flex-1 items-center gap-2 font-display text-base font-semibold">
           <LayoutList className="h-4 w-4 text-primary" />
-          Entries Bank
+          Trip Events
         </div>
       </div>
 
@@ -269,7 +269,7 @@ const CategorySidebar = ({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent side="right" className="w-full sm:w-[380px] overflow-y-auto p-0">
           <SheetHeader className="sr-only">
-            <SheetTitle>Entries Bank</SheetTitle>
+            <SheetTitle>Trip Events</SheetTitle>
           </SheetHeader>
           {panelContent}
         </SheetContent>
