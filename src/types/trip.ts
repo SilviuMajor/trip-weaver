@@ -2,6 +2,7 @@ export interface TripUser {
   id: string;
   name: string;
   role: 'organizer' | 'editor' | 'viewer';
+  pin_hash?: string | null;
   created_at: string;
 }
 

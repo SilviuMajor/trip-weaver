@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
-import { Users } from 'lucide-react';
+import { Users, Lock } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import type { TripUser } from '@/types/trip';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
@@ -16,6 +19,11 @@ const UserSelect = () => {
   const { adminUser, loading: authLoading } = useAdminAuth();
   const navigate = useNavigate();
   const [ownerBypassAttempted, setOwnerBypassAttempted] = useState(false);
+
+  // PIN dialog state
+  const [pinUser, setPinUser] = useState<TripUser | null>(null);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState(false);
 
   // If already logged in as a trip member, go straight to timeline
   useEffect(() => {
@@ -34,7 +42,6 @@ const UserSelect = () => {
     }
 
     const autoEnter = async () => {
-      // Check if this user is the trip owner
       const { data: trip } = await supabase
         .from('trips')
         .select('owner_id, name')
@@ -46,7 +53,6 @@ const UserSelect = () => {
         return;
       }
 
-      // Check if trip_user already exists for this owner
       const { data: existing } = await supabase
         .from('trip_users')
         .select('*')
@@ -61,7 +67,6 @@ const UserSelect = () => {
         return;
       }
 
-      // Auto-create organizer entry
       const { data: profile } = await supabase
         .from('profiles')
         .select('display_name')
@@ -105,8 +110,25 @@ const UserSelect = () => {
   }, [tripId]);
 
   const handleSelectUser = (user: TripUser) => {
-    login(user);
-    navigate(`/trip/${tripId}/timeline`);
+    if (user.pin_hash) {
+      setPinUser(user);
+      setPinInput('');
+      setPinError(false);
+    } else {
+      login(user);
+      navigate(`/trip/${tripId}/timeline`);
+    }
+  };
+
+  const handlePinSubmit = () => {
+    if (!pinUser) return;
+    if (pinInput === pinUser.pin_hash) {
+      login(pinUser);
+      navigate(`/trip/${tripId}/timeline`);
+      setPinUser(null);
+    } else {
+      setPinError(true);
+    }
   };
 
   if (authLoading || (!ownerBypassAttempted && adminUser)) {
@@ -169,11 +191,35 @@ const UserSelect = () => {
                   <p className="font-medium text-foreground">{user.name}</p>
                   <p className="text-xs capitalize text-muted-foreground">{user.role}</p>
                 </div>
+                {user.pin_hash && <Lock className="h-4 w-4 text-muted-foreground" />}
               </motion.button>
             ))}
           </div>
         )}
       </motion.div>
+
+      {/* PIN Dialog */}
+      <Dialog open={!!pinUser} onOpenChange={(open) => { if (!open) setPinUser(null); }}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Enter PIN for {pinUser?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              type="password"
+              maxLength={6}
+              placeholder="Enter PIN"
+              value={pinInput}
+              onChange={e => { setPinInput(e.target.value); setPinError(false); }}
+              onKeyDown={e => { if (e.key === 'Enter') handlePinSubmit(); }}
+              autoFocus
+              className={pinError ? 'border-destructive' : ''}
+            />
+            {pinError && <p className="text-sm text-destructive">Incorrect PIN</p>}
+            <Button onClick={handlePinSubmit} className="w-full">Enter</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

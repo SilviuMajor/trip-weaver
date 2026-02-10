@@ -303,6 +303,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          pin_hash: string | null
           role: string
           trip_id: string | null
         }
@@ -310,6 +311,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          pin_hash?: string | null
           role?: string
           trip_id?: string | null
         }
@@ -317,6 +319,7 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          pin_hash?: string | null
           role?: string
           trip_id?: string | null
         }
