@@ -17,7 +17,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import AIRPORTS from '@/lib/airports';
-import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, Lightbulb, Plane, AlertTriangle } from 'lucide-react';
+import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, Lightbulb, Plane, AlertTriangle, RefreshCw } from 'lucide-react';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import PhotoStripPicker from './PhotoStripPicker';
 import ImageGallery from './ImageGallery';
@@ -163,6 +163,10 @@ const EntrySheet = ({
   // ─── View mode state ───
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [viewRefreshing, setViewRefreshing] = useState(false);
+  const [viewResults, setViewResults] = useState<TransportResult[]>([]);
+  const [viewSelectedMode, setViewSelectedMode] = useState<string | null>(null);
+  const [viewApplying, setViewApplying] = useState(false);
 
   // ─── Create mode state ───
   const [step, setStep] = useState<Step>('category');
@@ -1018,6 +1022,75 @@ const EntrySheet = ({
                           <Lock className="h-3 w-3" /> Locked
                         </div>
                       )}
+
+                      {/* Mode switcher / refresh in view */}
+                      {isEditor && option.departure_location && option.arrival_location && (
+                        <div className="space-y-2 pt-2 border-t border-border/50">
+                          <Button variant="outline" size="sm" className="w-full text-xs" onClick={async () => {
+                            setViewRefreshing(true);
+                            try {
+                              const { data: rData, error: rError } = await supabase.functions.invoke('google-directions', {
+                                body: {
+                                  fromAddress: option.departure_location,
+                                  toAddress: option.arrival_location,
+                                  modes: ['walk', 'transit', 'drive', 'bicycle'],
+                                  departureTime: entry.start_time,
+                                },
+                              });
+                              if (rError) throw rError;
+                              setViewResults(rData?.results ?? []);
+                              const currentLower = option.name.toLowerCase();
+                              let cm = 'transit';
+                              if (currentLower.startsWith('walk')) cm = 'walk';
+                              else if (currentLower.startsWith('drive')) cm = 'drive';
+                              else if (currentLower.startsWith('cycle')) cm = 'bicycle';
+                              setViewSelectedMode(cm);
+                            } catch (err) {
+                              console.error('View refresh failed:', err);
+                            } finally {
+                              setViewRefreshing(false);
+                            }
+                          }} disabled={viewRefreshing}>
+                            {viewRefreshing ? <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> Refreshing…</> : <><RefreshCw className="mr-1.5 h-3 w-3" /> Refresh routes</>}
+                          </Button>
+                          {viewResults.length > 0 && (
+                            <div className="space-y-1.5">
+                              {viewResults.map(r => {
+                                const fmtDur = (min: number) => { const hh = Math.floor(min / 60); const mm = min % 60; if (hh === 0) return `${mm}m`; if (mm === 0) return `${hh}h`; return `${hh}h ${mm}m`; };
+                                const modeEmojiMap: Record<string, string> = { walk: '🚶', transit: '🚌', drive: '🚗', bicycle: '🚲' };
+                                const modeLabelMap: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', bicycle: 'Cycle' };
+                                return (
+                                  <button key={r.mode} onClick={async () => {
+                                    setViewSelectedMode(r.mode);
+                                    setViewApplying(true);
+                                    try {
+                                      const blockDur = Math.ceil(r.duration_min / 5) * 5;
+                                      const newEnd = new Date(new Date(entry.start_time).getTime() + blockDur * 60000).toISOString();
+                                      const toShort = (option.arrival_location || '').split(',')[0].trim();
+                                      const newName = `${modeLabelMap[r.mode] || r.mode} to ${toShort}`;
+                                      await supabase.from('entries').update({ end_time: newEnd }).eq('id', entry.id);
+                                      await supabase.from('entry_options').update({ distance_km: r.distance_km, route_polyline: r.polyline ?? null, name: newName } as any).eq('id', option.id);
+                                      setViewResults([]);
+                                      onSaved();
+                                    } catch (err) { console.error('Apply mode failed:', err); } finally { setViewApplying(false); }
+                                  }}
+                                    className={cn(
+                                      'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors',
+                                      viewSelectedMode === r.mode ? 'bg-orange-100 dark:bg-orange-900/30 font-medium' : 'hover:bg-muted'
+                                    )}
+                                    disabled={viewApplying}
+                                  >
+                                    <span className="text-base">{modeEmojiMap[r.mode] ?? '🚌'}</span>
+                                    <span className="flex-1 text-left">{modeLabelMap[r.mode] ?? r.mode}</span>
+                                    <span className="text-xs text-muted-foreground">{fmtDur(r.duration_min)} · {r.distance_km < 1 ? `${Math.round(r.distance_km * 1000)}m` : `${r.distance_km.toFixed(1)}km`}</span>
+                                    {viewSelectedMode === r.mode && <Check className="h-3.5 w-3.5 text-orange-500" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -1062,8 +1135,8 @@ const EntrySheet = ({
               <MapPreview latitude={option.latitude} longitude={option.longitude} locationName={option.location_name} />
             )}
 
-            {/* Vote */}
-            {currentUser && (
+            {/* Vote (hidden for transport & flights) */}
+            {currentUser && option.category !== 'transfer' && option.category !== 'flight' && (
               <div className="flex items-center gap-3">
                 <VoteButton
                   optionId={option.id}
@@ -1324,14 +1397,24 @@ const EntrySheet = ({
               )}
 
               {/* Route map preview in creation dialog */}
-              {isTransfer && selectedPolyline && transportContext && (
-                <RouteMapPreview
-                  polyline={selectedPolyline}
-                  fromAddress={transferFrom}
-                  toAddress={transferTo}
-                  travelMode={transferMode}
-                  size="full"
-                />
+              {isTransfer && transportContext && (
+                selectedPolyline ? (
+                  <RouteMapPreview
+                    polyline={selectedPolyline}
+                    fromAddress={transferFrom}
+                    toAddress={transferTo}
+                    travelMode={transferMode}
+                    size="full"
+                  />
+                ) : transferFrom && transferTo && !transportLoading && transportResults.length > 0 ? (
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" className="flex-1 text-xs" asChild>
+                      <a href={`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(transferFrom)}&destination=${encodeURIComponent(transferTo)}&travelmode=${transferMode === 'bicycle' ? 'bicycling' : transferMode === 'drive' ? 'driving' : transferMode}`} target="_blank" rel="noopener noreferrer">
+                        View Route on Google Maps
+                      </a>
+                    </Button>
+                  </div>
+                ) : null
               )}
 
               {/* Gap overflow warning */}
