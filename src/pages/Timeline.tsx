@@ -406,13 +406,25 @@ const Timeline = () => {
     const entry = entries.find(e => e.id === entryId);
     if (!entry) return;
 
+    const isFlight = entry.options[0]?.category === 'flight';
+
+    // Block flights that are already scheduled
+    if (isFlight && entry.is_scheduled !== false) {
+      toast({ title: 'Flight already scheduled', description: 'Flights can only be placed once.', variant: 'destructive' });
+      return;
+    }
+
     const dateStr = format(dayDate, 'yyyy-MM-dd');
+
+    // Compute original duration to preserve it
+    const originalDurationMs = new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime();
+    const durationMin = Math.max(Math.round(originalDurationMs / 60000), 30); // at least 30m
+
     const startMinutes = Math.round(hourOffset * 60);
     const sH = Math.floor(startMinutes / 60);
     const sM = startMinutes % 60;
 
-    // Default 1h duration
-    const endMinutes = startMinutes + 60;
+    const endMinutes = startMinutes + durationMin;
     const eH = Math.floor(endMinutes / 60);
     const eM = endMinutes % 60;
 
@@ -420,19 +432,83 @@ const Timeline = () => {
     const startIso = localToUTC(dateStr, `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`, tripTimezone);
     const endIso = localToUTC(dateStr, `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`, tripTimezone);
 
-    // Update entry to scheduled
-    const { error } = await supabase
-      .from('entries')
-      .update({
-        is_scheduled: true,
-        start_time: startIso,
-        end_time: endIso,
-      } as any)
-      .eq('id', entryId);
+    // If already scheduled somewhere, create a copy instead of moving
+    const alreadyScheduled = entry.is_scheduled !== false;
 
-    if (error) {
-      toast({ title: 'Failed to place entry', description: error.message, variant: 'destructive' });
-      return;
+    let placedEntryId = entryId;
+
+    if (alreadyScheduled && !isFlight) {
+      // Create a copy
+      try {
+        const { data: newEntry, error: entryErr } = await supabase
+          .from('entries')
+          .insert({
+            trip_id: entry.trip_id,
+            start_time: startIso,
+            end_time: endIso,
+            is_scheduled: true,
+            scheduled_day: entry.scheduled_day,
+          } as any)
+          .select('id')
+          .single();
+        if (entryErr || !newEntry) throw entryErr;
+
+        placedEntryId = newEntry.id;
+
+        for (const opt of entry.options) {
+          const { data: newOpt, error: optErr } = await supabase
+            .from('entry_options')
+            .insert({
+              entry_id: newEntry.id,
+              name: opt.name,
+              website: opt.website,
+              category: opt.category,
+              category_color: opt.category_color,
+              location_name: opt.location_name,
+              latitude: opt.latitude,
+              longitude: opt.longitude,
+              departure_location: opt.departure_location,
+              arrival_location: opt.arrival_location,
+              departure_tz: opt.departure_tz,
+              arrival_tz: opt.arrival_tz,
+              departure_terminal: opt.departure_terminal,
+              arrival_terminal: opt.arrival_terminal,
+              airport_checkin_hours: opt.airport_checkin_hours,
+              airport_checkout_min: opt.airport_checkout_min,
+            } as any)
+            .select('id')
+            .single();
+          if (optErr || !newOpt) throw optErr;
+
+          if (opt.images && opt.images.length > 0) {
+            await supabase.from('option_images').insert(
+              opt.images.map(img => ({
+                option_id: newOpt.id,
+                image_url: img.image_url,
+                sort_order: img.sort_order,
+              }))
+            );
+          }
+        }
+      } catch (err: any) {
+        toast({ title: 'Failed to place copy', description: err?.message, variant: 'destructive' });
+        return;
+      }
+    } else {
+      // First placement: move the original
+      const { error } = await supabase
+        .from('entries')
+        .update({
+          is_scheduled: true,
+          start_time: startIso,
+          end_time: endIso,
+        } as any)
+        .eq('id', entryId);
+
+      if (error) {
+        toast({ title: 'Failed to place entry', description: error.message, variant: 'destructive' });
+        return;
+      }
     }
 
     await fetchData();
@@ -443,7 +519,7 @@ const Timeline = () => {
     const sortedDay = [...dayEntries, updatedEntry].sort(
       (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
     );
-    const placedIdx = sortedDay.findIndex(e => e.id === entryId);
+    const placedIdx = sortedDay.findIndex(e => e.id === placedEntryId);
     const prevEntry = placedIdx > 0 ? sortedDay[placedIdx - 1] : null;
     const nextEntry = placedIdx < sortedDay.length - 1 ? sortedDay[placedIdx + 1] : null;
 
@@ -459,7 +535,7 @@ const Timeline = () => {
       );
 
       if (conflict.discrepancyMin > 0) {
-        const recs = generateRecommendations(conflict, sortedDay, entryId);
+        const recs = generateRecommendations(conflict, sortedDay, placedEntryId);
         setCurrentConflict(conflict);
         setCurrentRecommendations(recs);
         setPendingPlacement(updatedEntry);

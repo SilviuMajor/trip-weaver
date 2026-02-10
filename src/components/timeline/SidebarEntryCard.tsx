@@ -1,4 +1,4 @@
-import { Copy, GripVertical, ArrowRightToLine } from 'lucide-react';
+import { Copy, GripVertical, ArrowRightToLine, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { findCategory } from '@/lib/categories';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +10,8 @@ interface SidebarEntryCardProps {
   onClick?: () => void;
   onDuplicate?: (entry: EntryWithOptions) => void;
   onInsert?: (entry: EntryWithOptions) => void;
+  usageCount?: number;
+  isFlight?: boolean;
 }
 
 const formatDuration = (startIso: string, endIso: string): string => {
@@ -22,7 +24,7 @@ const formatDuration = (startIso: string, endIso: string): string => {
   return `${h}h ${m}m`;
 };
 
-const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert }: SidebarEntryCardProps) => {
+const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, usageCount, isFlight }: SidebarEntryCardProps) => {
   const option = entry.options[0];
   if (!option) return null;
 
@@ -38,18 +40,42 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert }
 
   const duration = formatDuration(entry.start_time, entry.end_time);
 
+  // Flights that are scheduled cannot be dragged
+  const isDraggable = !(isFlight && isScheduled);
+
   return (
     <div
-      draggable
-      onDragStart={(e) => onDragStart?.(e, entry)}
+      draggable={isDraggable}
+      onDragStart={(e) => isDraggable && onDragStart?.(e, entry)}
       onClick={onClick}
       className={cn(
-        'group relative flex flex-col rounded-xl border border-border overflow-hidden transition-all cursor-grab active:cursor-grabbing hover:shadow-lg',
+        'group relative flex flex-col rounded-xl border border-border overflow-hidden transition-all',
+        isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
         firstImage ? 'h-[144px]' : 'min-h-[100px]',
-        isScheduled && 'opacity-50',
+        'hover:shadow-lg',
       )}
-      style={!firstImage ? { borderLeftWidth: 3, borderLeftColor: color } : undefined}
+      style={{
+        opacity: isScheduled ? 0.7 : 1,
+        ...((!firstImage) ? { borderLeftWidth: 3, borderLeftColor: color } : {}),
+      }}
     >
+      {/* Usage count badge */}
+      {usageCount != null && usageCount > 1 && (
+        <div className="absolute top-1.5 right-1.5 z-20">
+          <Badge
+            variant="secondary"
+            className={cn(
+              'text-[9px] px-1.5 py-0 h-4 font-bold',
+              firstImage
+                ? 'bg-white/25 text-white border-white/20'
+                : 'bg-primary/15 text-primary border-primary/20'
+            )}
+          >
+            x{usageCount}
+          </Badge>
+        </div>
+      )}
+
       {/* Image background */}
       {firstImage && (
         <div className="absolute inset-0">
@@ -64,10 +90,17 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert }
         firstImage ? 'text-white' : 'text-foreground',
       )}>
         <div className="flex items-start gap-2">
-          <GripVertical className={cn(
-            'h-3.5 w-3.5 shrink-0 mt-0.5',
-            firstImage ? 'text-white/40' : 'text-muted-foreground/30'
-          )} />
+          {isDraggable ? (
+            <GripVertical className={cn(
+              'h-3.5 w-3.5 shrink-0 mt-0.5',
+              firstImage ? 'text-white/40' : 'text-muted-foreground/30'
+            )} />
+          ) : (
+            <Check className={cn(
+              'h-3.5 w-3.5 shrink-0 mt-0.5',
+              firstImage ? 'text-white/50' : 'text-muted-foreground/40'
+            )} />
+          )}
 
           {!firstImage && (
             <span
@@ -122,7 +155,7 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert }
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {onInsert && (
+            {onInsert && isDraggable && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -139,7 +172,7 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert }
                 <ArrowRightToLine className="h-3 w-3" />
               </button>
             )}
-            {onDuplicate && (
+            {onDuplicate && isDraggable && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();

@@ -1,12 +1,14 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { ArrowLeft, LayoutList, Plus, X } from 'lucide-react';
+import { ArrowLeft, LayoutList, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { PREDEFINED_CATEGORIES, type CategoryDef } from '@/lib/categories';
 import type { EntryWithOptions, Trip, CategoryPreset } from '@/types/trip';
 import SidebarEntryCard from './SidebarEntryCard';
 import { cn } from '@/lib/utils';
+
+type FilterTab = 'all' | 'ideas' | 'scheduled';
 
 interface CategorySidebarProps {
   open: boolean;
@@ -18,6 +20,12 @@ interface CategorySidebarProps {
   onAddEntry?: (categoryId: string) => void;
   onDuplicate?: (entry: EntryWithOptions) => void;
   onInsert?: (entry: EntryWithOptions) => void;
+}
+
+interface DeduplicatedEntry {
+  original: EntryWithOptions;
+  usageCount: number;
+  isFlight: boolean;
 }
 
 const CategorySidebar = ({
@@ -32,8 +40,9 @@ const CategorySidebar = ({
   onInsert,
 }: CategorySidebarProps) => {
   const isMobile = useIsMobile();
+  const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
 
-  // Build full category list: predefined (minus airport_processing) + custom
+  // Build full category list
   const allCategories = useMemo(() => {
     const cats: CategoryDef[] = PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing' && c.id !== 'transport');
     const custom = (trip?.category_presets as CategoryPreset[] | null) ?? [];
@@ -51,38 +60,93 @@ const CategorySidebar = ({
     return cats;
   }, [trip?.category_presets]);
 
-  // Group entries by category
+  // Filter entries by tab
+  const filteredEntries = useMemo(() => {
+    if (activeFilter === 'ideas') return entries.filter(e => e.is_scheduled === false);
+    if (activeFilter === 'scheduled') return entries.filter(e => e.is_scheduled !== false);
+    return entries;
+  }, [entries, activeFilter]);
+
+  // Deduplicate: group by name+category, keep original (earliest), count usage
+  const deduplicatedMap = useMemo(() => {
+    const groups = new Map<string, EntryWithOptions[]>();
+    for (const entry of entries) {
+      const opt = entry.options[0];
+      if (!opt) continue;
+      const key = `${opt.name}::${opt.category ?? ''}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(entry);
+    }
+    // Map entry id -> DeduplicatedEntry for the original
+    const result = new Map<string, DeduplicatedEntry>();
+    for (const [, group] of groups) {
+      const sorted = [...group].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      const original = sorted[0];
+      const isFlight = original.options[0]?.category === 'flight';
+      result.set(original.id, {
+        original,
+        usageCount: group.length,
+        isFlight,
+      });
+    }
+    return result;
+  }, [entries]);
+
+  // Get deduplicated entries that pass the current filter
+  const getFilteredOriginals = (catEntries: EntryWithOptions[]): DeduplicatedEntry[] => {
+    const seen = new Set<string>();
+    const results: DeduplicatedEntry[] = [];
+    for (const entry of catEntries) {
+      const opt = entry.options[0];
+      if (!opt) continue;
+      const key = `${opt.name}::${opt.category ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // Find the original from dedup map
+      const dedup = [...deduplicatedMap.values()].find(d => {
+        const dOpt = d.original.options[0];
+        return dOpt && `${dOpt.name}::${dOpt.category ?? ''}` === key;
+      });
+      if (dedup) results.push(dedup);
+    }
+    return results;
+  };
+
+  // Group filtered entries by category
   const grouped = useMemo(() => {
     const map = new Map<string, EntryWithOptions[]>();
-    // Init all categories
-    for (const cat of allCategories) {
-      map.set(cat.id, []);
-    }
+    for (const cat of allCategories) map.set(cat.id, []);
     map.set('other', []);
 
-    for (const entry of entries) {
+    for (const entry of filteredEntries) {
       const catId = entry.options[0]?.category;
-      // Skip airport_processing and transport entries
       if (catId === 'airport_processing' || catId === 'transport') continue;
-
       if (catId && map.has(catId)) {
         map.get(catId)!.push(entry);
       } else if (catId) {
-        // Check if it's a custom category by name match
         const customMatch = allCategories.find(c => c.id === catId || c.name.toLowerCase() === catId.toLowerCase());
-        if (customMatch) {
-          map.get(customMatch.id)!.push(entry);
-        } else {
-          map.get('other')!.push(entry);
-        }
+        if (customMatch) map.get(customMatch.id)!.push(entry);
+        else map.get('other')!.push(entry);
       } else {
         map.get('other')!.push(entry);
       }
     }
     return map;
-  }, [entries, allCategories]);
+  }, [filteredEntries, allCategories]);
 
-  const unscheduledCount = entries.filter(e => e.is_scheduled === false).length;
+  // Counts for tabs
+  const ideasCount = entries.filter(e => e.is_scheduled === false).length;
+  const scheduledCount = entries.filter(e => e.is_scheduled !== false).length;
+  const totalCount = entries.filter(e => {
+    const catId = e.options[0]?.category;
+    return catId !== 'airport_processing' && catId !== 'transport';
+  }).length;
+
+  const filterTabs: { key: FilterTab; label: string; count: number }[] = [
+    { key: 'all', label: 'All', count: totalCount },
+    { key: 'ideas', label: 'Ideas', count: ideasCount },
+    { key: 'scheduled', label: 'Scheduled', count: scheduledCount },
+  ];
 
   const panelContent = (
     <div className="flex h-full flex-col">
@@ -93,33 +157,46 @@ const CategorySidebar = ({
         </Button>
         <div className="flex flex-1 items-center gap-2 font-display text-base font-semibold">
           <LayoutList className="h-4 w-4 text-primary" />
-          All Entries
-          {unscheduledCount > 0 && (
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-              {unscheduledCount} ideas
-            </span>
-          )}
+          Entries Bank
         </div>
+      </div>
+
+      {/* Filter tabs */}
+      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border">
+        {filterTabs.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveFilter(tab.key)}
+            className={cn(
+              'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+              activeFilter === tab.key
+                ? 'bg-primary/10 text-primary border border-primary/20'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+            )}
+          >
+            {tab.label} ({tab.count})
+          </button>
+        ))}
       </div>
 
       {/* Category sections */}
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {allCategories.map(cat => {
           const catEntries = grouped.get(cat.id) ?? [];
+          const dedupedEntries = getFilteredOriginals(catEntries);
+          if (dedupedEntries.length === 0) return null;
+
           return (
             <div key={cat.id}>
-              {/* Category header */}
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm">{cat.emoji}</span>
                   <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     {cat.name}
                   </span>
-                  {catEntries.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground/60">
-                      ({catEntries.length})
-                    </span>
-                  )}
+                  <span className="text-[10px] text-muted-foreground/60">
+                    ({dedupedEntries.length})
+                  </span>
                 </div>
                 {onAddEntry && (
                   <Button
@@ -132,62 +209,67 @@ const CategorySidebar = ({
                   </Button>
                 )}
               </div>
-              {/* Entry cards */}
-              {catEntries.length > 0 ? (
-                <div className="space-y-1.5">
-                  {catEntries.map(entry => (
-                    <SidebarEntryCard
-                      key={entry.id}
-                      entry={entry}
-                      onDragStart={onDragStart}
-                      onClick={() => onCardTap?.(entry)}
-                      onDuplicate={onDuplicate}
-                      onInsert={onInsert}
-                    />
-                  ))}
-                </div>
-              ) : null}
+              <div className="space-y-1.5">
+                {dedupedEntries.map(({ original, usageCount, isFlight }) => (
+                  <SidebarEntryCard
+                    key={original.id}
+                    entry={original}
+                    onDragStart={onDragStart}
+                    onClick={() => onCardTap?.(original)}
+                    onDuplicate={isFlight ? undefined : onDuplicate}
+                    onInsert={isFlight ? undefined : onInsert}
+                    usageCount={usageCount}
+                    isFlight={isFlight}
+                  />
+                ))}
+              </div>
             </div>
           );
         })}
 
         {/* Other / uncategorized */}
-        {(grouped.get('other')?.length ?? 0) > 0 && (
-          <div>
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="text-sm">📌</span>
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Other
-              </span>
-              <span className="text-[10px] text-muted-foreground/60">
-                ({grouped.get('other')!.length})
-              </span>
+        {(() => {
+          const otherEntries = grouped.get('other') ?? [];
+          const dedupedOther = getFilteredOriginals(otherEntries);
+          if (dedupedOther.length === 0) return null;
+          return (
+            <div>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="text-sm">📌</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Other
+                </span>
+                <span className="text-[10px] text-muted-foreground/60">
+                  ({dedupedOther.length})
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {dedupedOther.map(({ original, usageCount, isFlight }) => (
+                  <SidebarEntryCard
+                    key={original.id}
+                    entry={original}
+                    onDragStart={onDragStart}
+                    onClick={() => onCardTap?.(original)}
+                    onDuplicate={isFlight ? undefined : onDuplicate}
+                    onInsert={isFlight ? undefined : onInsert}
+                    usageCount={usageCount}
+                    isFlight={isFlight}
+                  />
+                ))}
+              </div>
             </div>
-            <div className="space-y-1.5">
-              {grouped.get('other')!.map(entry => (
-                <SidebarEntryCard
-                  key={entry.id}
-                  entry={entry}
-                  onDragStart={onDragStart}
-                  onClick={() => onCardTap?.(entry)}
-                  onDuplicate={onDuplicate}
-                  onInsert={onInsert}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
 
-  // Mobile: Sheet overlay
   if (isMobile) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent side="right" className="w-full sm:w-[380px] overflow-y-auto p-0">
           <SheetHeader className="sr-only">
-            <SheetTitle>All Entries</SheetTitle>
+            <SheetTitle>Entries Bank</SheetTitle>
           </SheetHeader>
           {panelContent}
         </SheetContent>
@@ -195,7 +277,6 @@ const CategorySidebar = ({
     );
   }
 
-  // Desktop: persistent sidebar
   if (!open) return null;
 
   return (
