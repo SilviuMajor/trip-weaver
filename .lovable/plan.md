@@ -1,141 +1,209 @@
 
 
-# Transport Card Redesign + "When" Section Removal + View Mode Fix
+# Transport Card Visual Refresh + Distance Display + Live Refresh
 
-## Issues Found
+## Overview
 
-### 1. "When" section still shows for transport entries
-In `EntrySheet.tsx` (create mode), the entire "When" section (lines 1338-1416) -- including the "When" label, time inputs, and duration field -- still renders for transport entries. When transport context exists, the timing is derived from the gap, so these fields are redundant and should be hidden.
+Three changes to the transport timeline card and its supporting infrastructure:
 
-### 2. Transport cards look the same as regular entries on the timeline
-Currently, transport entries render using the same `EntryCard` component as everything else. They appear as a full card with category badge, title, time row, etc. The user wants transport to look visually distinct -- more like a connector/segment showing mode, time, and distance rather than a full event card.
-
-### 3. Transport view mode doesn't match the new card design
-When clicking a transport card, the view mode in `EntrySheet.tsx` shows a generic entry layout (lines 935-975) with From/To, clock/time, route map, and then the standard website/map/vote/image section below. It should match the distinct transport visual and show relevant transport-specific info cleanly.
+1. **Visual redesign**: Orange-tinted background, large centered emoji on the left, distance shown on card, playful styling
+2. **Distance display**: Show distance (km/m) on all transport card sizes
+3. **Refresh button**: Re-fetch all travel modes for the scheduled departure time, auto-resize the block if duration changes, trigger Conflict Resolver on overflow
 
 ---
 
-## Changes
+## 1. Visual Redesign (EntryCard.tsx -- transport variants)
 
-### A. Remove "When" section for transport with context (`EntrySheet.tsx`)
+All four transport card layouts get an orange-tinted warm background instead of the subtle category-tinted one.
 
-Hide the entire "When" block (the divider, date selector, time inputs, and duration field) when `isTransfer && transportContext` is present. The start/end times are already computed from the selected route mode and the gap position.
+### Full layout (largest)
 
-**Lines affected**: 1338-1416 -- wrap in a condition `{!(isTransfer && transportContext) && (...)}`
-
-### B. Redesign transport timeline card (`EntryCard.tsx`)
-
-For transport entries (`isTransfer === true`), render a completely different layout instead of the standard card. The new transport card will be a horizontal connector-style element:
-
-```
-[Mode emoji]  Walk to Restaurant Y    12m · 0.8km
-              ─────────────────────
-              [mini route map if available]
+```text
++--------------------------------------------------+
+|  [large emoji]  |  Walk to Restaurant Y           |
+|   centered      |  12m (transit) . 0.8km           |
+|   vertically    |  +2m buffer                      |
+|                 |  09:30 -- 09:42         [refresh] |
+|                 |  [mini route map]                 |
++--------------------------------------------------+
 ```
 
-Design:
-- No category badge (it's visually obvious from the design)
-- Horizontal layout: mode emoji on left, name + details on right
-- Duration and distance shown inline, prominently
-- Dashed left border in the category color (same as current)
-- Subtler/slimmer than regular cards
-- Contingency buffer shown as small muted text if applicable
-- Mini route map preserved below if polyline exists and card is large enough
+- Background: warm orange tint (`bg-orange-50` / `hsl(30, 100%, 97%)` in light mode)
+- Left section: large emoji (text-3xl) centered vertically in a subtle circle/pill
+- Right section: name, duration + distance, contingency, time row, mini map
+- Dashed left border stays but in orange
+- Refresh icon button (small, top-right corner)
 
-This applies to all 4 layout variants (compact, medium, condensed, full).
+### Condensed layout (80-160px)
 
-### C. Redesign transport view overlay (`EntrySheet.tsx` view mode)
-
-When viewing a transport entry (lines 935-975), redesign the layout to match the card's connector feel:
-
-```
-+--------------------------------------------+
-| [Mode emoji large]   Transit               |
-|                                             |
-| From:  Heathrow Airport                     |
-| To:    Hotel Krasnapolsky                   |
-|                                             |
-| 12m · 1.2km                                |
-| +2m contingency buffer                      |
-|                                             |
-| [====== Route Map ======]                   |
-| [Open in Google Maps] [Open in Apple Maps]  |
-|                                             |
-| 09:30 -- 09:42                              |
-|                                             |
-| ------------------------------------------- |
-| [Lock] [Move to Ideas] [Delete]             |
-+--------------------------------------------+
+```text
++-------------------------------------------+
+| [emoji lg]  Walk to Restaurant . 12m 0.8km |
+|             09:30 -- 09:42        [refresh] |
++-------------------------------------------+
 ```
 
-Key differences from current:
-- No website field for transport view
-- Mode emoji + mode label as the header instead of category badge
-- From/To displayed prominently
-- Duration + distance shown as the primary metric
-- Contingency buffer shown if block time differs from real duration
-- Route map with "Open in Maps" buttons
-- Time shown but de-emphasized
+### Medium layout (40-80px)
+
+```text
++-------------------------------------------+
+| [emoji]  Walk to Restaurant Y  12m . 0.8km |
++-------------------------------------------+
+```
+
+### Compact layout (< 40px)
+
+```text
++-------------------------------+
+| [emoji]  12m . 0.8km          |
++-------------------------------+
+```
+
+All variants use `bg-orange-50 dark:bg-orange-950/20` as the background tint.
+
+---
+
+## 2. Distance Display
+
+Currently the transport card does NOT show distance -- only duration. The distance is available from the `google-directions` response and is stored alongside the transport entry.
+
+### Where distance comes from
+
+When a transport entry is saved, the selected route's `distance_km` should be stored in the `entry_options` table. Currently `distance_km` is NOT a column on `entry_options` -- it exists on `travel_segments`. We need to either:
+
+**Option A (simpler)**: Store `distance_km` alongside `route_polyline` in entry_options (new column)
+**Option B**: Read from travel_segments at display time
+
+We'll go with **Option A** -- add a `distance_km` column to `entry_options`. This is already consistent with how `route_polyline` was added.
+
+### Display format
+
+- Under 1km: show in meters (e.g., "800m")
+- 1km+: show with one decimal (e.g., "1.2km")
+
+---
+
+## 3. Refresh Button -- Live Travel Time Update
+
+A small refresh/sync icon button on transport cards. When tapped:
+
+1. Calls `google-directions` with **all modes** (`walk`, `transit`, `drive`, `bicycle`) using the entry's scheduled start time as `departureTime`
+2. Shows a quick inline picker if the user wants to switch modes (or keeps current)
+3. Auto-resizes the transport block:
+   - New `blockDuration = Math.ceil(newDurationMin / 5) * 5`
+   - Updates `end_time` on the entry
+   - Updates `distance_km` and `route_polyline` on the option
+   - If the new block overflows into the next entry, triggers the Conflict Resolver
+
+### Refresh flow
+
+```text
+User taps refresh icon
+    |
+    v
+Spinner on icon, fetch all modes with departureTime = entry.start_time
+    |
+    v
+Show mini modal/popover with updated mode options:
+  Walk:    15m  1.2km  [selected if current]
+  Transit: 12m  1.0km
+  Drive:    8m  3.4km
+  Cycle:   10m  1.1km
+    |
+    v
+User picks mode (or keeps current)
+    |
+    v
+Auto-update entry end_time (rounded up to 5m), distance, polyline
+    |
+    v
+If new block > gap to next entry -> trigger Conflict Resolver
+```
 
 ---
 
 ## File Summary
 
-| File | Changes |
-|------|---------|
-| `src/components/timeline/EntrySheet.tsx` | Hide "When" section when `isTransfer && transportContext`. Redesign transport view mode layout with mode-centric header, From/To, duration/distance, contingency, and map links. Remove website from transport view. |
-| `src/components/timeline/EntryCard.tsx` | Add a distinct transport card layout for all 4 size variants (compact, medium, condensed, full) showing mode emoji, name, duration, distance as a slim connector-style card instead of the standard event card. |
+| File | Action | Changes |
+|------|--------|---------|
+| `src/components/timeline/EntryCard.tsx` | Edit | Orange tint background, larger centered emoji, distance display on all sizes, refresh button with popover |
+| `src/components/timeline/EntrySheet.tsx` | Edit | Store `distance_km` when saving transport entries |
+| Database migration | Create | Add `distance_km NUMERIC` column to `entry_options` |
 
-No database changes. No edge function changes. No new files.
+No edge function changes (existing `google-directions` already supports multi-mode with `departureTime`).
 
 ---
 
 ## Technical Details
 
-### EntryCard transport layouts
+### Database Migration
 
-**Full layout** (height >= 160px):
-- Slim horizontal bar with mode emoji, entry name, duration pill, distance
-- Category color left border (3px)
-- Mini route map below if polyline exists
-- Lighter background tint than regular cards
+```sql
+ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS distance_km NUMERIC;
+```
 
-**Condensed layout** (80-160px):
-- Mode emoji + name on one line, duration + distance on second line
-- No route map (not enough space)
+### EntryCard transport styling
 
-**Medium layout** (40-80px):
-- Single line: emoji + truncated name + duration
+Replace current transport background:
+```text
+-- Before: style={{ background: `${catColor}0a` }}
+-- After:  className="bg-orange-50 dark:bg-orange-950/20"
+```
 
-**Compact layout** (< 40px):
-- Single line: emoji + duration only
-
-### EntrySheet "When" section hiding
-
-Current code (line 1338):
-```tsx
-<div className="border-t border-border/50 pt-4 mt-2">
-  <Label className="text-sm font-semibold text-muted-foreground">When</Label>
+Left emoji section:
+```text
+<div className="flex items-center justify-center w-14 shrink-0">
+  <span className="text-3xl">{mode.emoji}</span>
 </div>
 ```
 
-Wrap lines 1338-1416 in: `{!(isTransfer && transportContext) && ( ... )}`
+### Distance formatting helper
 
-### Transport view mode redesign
-
-Replace the current transfer view block (lines 935-975) with a mode-centric layout. Extract travel mode from the entry name or store it. Use a `getModeEmoji` helper (already exists in TravelSegmentCard.tsx) to determine the mode icon. Calculate contingency from block duration vs real duration (block = entry end - start, real = nearest lower non-5-multiple or stored value).
-
-### Mode detection for view
-
-Since we don't store the travel mode separately, extract it from the entry name pattern (e.g., "Walk to ...", "Transit to ...", "Drive to ...") or from the category. Add a simple helper:
 ```typescript
-function detectTransportMode(name: string): { mode: string; emoji: string; label: string } {
-  const lower = name.toLowerCase();
-  if (lower.startsWith('walk')) return { mode: 'walk', emoji: '🚶', label: 'Walking' };
-  if (lower.startsWith('transit')) return { mode: 'transit', emoji: '🚌', label: 'Transit' };
-  if (lower.startsWith('drive')) return { mode: 'drive', emoji: '🚗', label: 'Driving' };
-  if (lower.startsWith('cycle')) return { mode: 'bicycle', emoji: '🚲', label: 'Cycling' };
-  return { mode: 'transit', emoji: '🚆', label: 'Transport' };
-}
+const formatDistance = (km: number | null | undefined): string => {
+  if (km == null) return '';
+  if (km < 1) return `${Math.round(km * 1000)}m`;
+  return `${km.toFixed(1)}km`;
+};
+```
+
+### Refresh handler (inside EntryCard)
+
+```typescript
+const handleRefresh = async (e: React.MouseEvent) => {
+  e.stopPropagation();
+  setRefreshing(true);
+
+  const { data } = await supabase.functions.invoke('google-directions', {
+    body: {
+      fromAddress: option.departure_location,
+      toAddress: option.arrival_location,
+      modes: ['walk', 'transit', 'drive', 'bicycle'],
+      departureTime: startTime,   // scheduled ISO time
+    },
+  });
+
+  setRefreshResults(data?.results ?? []);
+  setShowRefreshPopover(true);
+  setRefreshing(false);
+};
+```
+
+### Mode selection after refresh
+
+When user picks a mode from the refresh popover:
+1. Compute `blockDuration = Math.ceil(selectedResult.duration_min / 5) * 5`
+2. Compute new `endTime = startTime + blockDuration minutes`
+3. Update the entry: `supabase.from('entries').update({ end_time: newEndIso }).eq('id', entryId)`
+4. Update the option: `supabase.from('entry_options').update({ distance_km, route_polyline, name: 'ModeName to ...' }).eq('id', option.id)`
+5. Call `onVoteChange()` to trigger data refresh
+6. If new endTime overlaps with the next entry on the timeline, the parent Timeline component detects this via its existing conflict detection and triggers the Conflict Resolver
+
+### Saving distance_km on transport creation (EntrySheet.tsx)
+
+In the save handler, when creating a transfer entry with a selected route, include `distance_km` in the option insert:
+```text
+distance_km: selectedRoute?.distance_km ?? null,
+route_polyline: selectedRoute?.polyline ?? null,
 ```
 
