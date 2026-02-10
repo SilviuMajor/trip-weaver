@@ -357,27 +357,6 @@ const CalendarDay = ({
               flights={dayFlights}
             />
 
-            {/* "+" before first entry */}
-            {onAddBetween && sortedEntries.length > 0 && (() => {
-              const firstEntry = sortedEntries[0];
-              const firstStartHour = getHourInTimezone(firstEntry.start_time, tripTimezone);
-              const firstTop = Math.max(0, (firstStartHour - startHour) * PIXELS_PER_HOUR);
-              const prefillDate = addMinutes(new Date(firstEntry.start_time), -60);
-              return (
-                <div
-                  className="absolute z-[15] flex w-10 items-center justify-center"
-                  style={{ top: Math.max(0, firstTop - 14), left: dayFlights.length > 0 ? -20 : -14 }}
-                >
-                  <button
-                    onClick={() => onAddBetween(prefillDate.toISOString())}
-                    className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                  >
-                    <Plus className="h-3 w-3" />
-                  </button>
-                </div>
-              );
-            })()}
-
             {/* Flight group computation */}
             {(() => {
               // Build flight groups
@@ -497,7 +476,7 @@ const CalendarDay = ({
                   <div key={entry.id}>
                     <div
                       className={cn(
-                        'absolute z-10 pr-1',
+                        'absolute z-10 pr-1 group',
                         isDragged && 'opacity-80 z-30'
                       )}
                       style={{
@@ -608,80 +587,37 @@ const CalendarDay = ({
                             onTouchEnd={onTouchEnd}
                           />
                         )}
+
+                        {/* + button: top-left corner (insert before) */}
+                        {onAddBetween && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const prefillDate = addMinutes(new Date(entry.start_time), -60);
+                              onAddBetween(prefillDate.toISOString());
+                            }}
+                            className="absolute z-20 flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 opacity-0 transition-all group-hover:opacity-100 hover:border-primary hover:bg-primary/10 hover:text-primary"
+                            style={{ top: -10, left: -10 }}
+                          >
+                            <Plus className="h-3 w-3" />
+                          </button>
+                        )}
+
+                        {/* + button: bottom-left corner (insert after) */}
+                        {onAddBetween && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onAddBetween(entry.end_time);
+                            }}
+                            className="absolute z-20 flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 opacity-0 transition-all group-hover:opacity-100 hover:border-primary hover:bg-primary/10 hover:text-primary"
+                            style={{ bottom: -10, left: -10 }}
+                          >
+                            <Plus className="h-3 w-3" />
+                          </button>
+                        )}
                       </div>
                     </div>
-
-                    {/* + button between/after entries */}
-                    {onAddBetween && (() => {
-                      // Find next non-linked entry
-                      const remainingEntries = sortedEntries.slice(index + 1).filter(e => !linkedEntryIds.has(e.id));
-                      const nextVisibleEntry = remainingEntries[0];
-                      const isLastVisible = !nextVisibleEntry;
-
-                      if (isLastVisible) {
-                        // After last entry
-                        return (
-                          <div
-                            className="absolute z-[15] flex w-10 items-center justify-center"
-                            style={{ top: top + height + 8, left: dayFlights.length > 0 ? -20 : -14 }}
-                          >
-                            <button
-                              onClick={() => onAddBetween(entry.end_time)}
-                              className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                            >
-                              <Plus className="h-3 w-3" />
-                            </button>
-                          </div>
-                        );
-                      }
-
-                      // Gap between this entry and next
-                      const thisEndHour = entryEndHour;
-                      const nextResolvedTz = (() => {
-                        let tz = activeTz || tripTimezone;
-                        if (dayFlights.length > 0 && dayFlights[0].flightEndUtc) {
-                          const nUtc = new Date(nextVisibleEntry.start_time).getTime();
-                          const fEnd = new Date(dayFlights[0].flightEndUtc).getTime();
-                          tz = nUtc >= fEnd ? dayFlights[0].destinationTz : dayFlights[0].originTz;
-                        }
-                        return tz;
-                      })();
-                      const nextStartHour = getHourInTimezone(nextVisibleEntry.start_time, nextResolvedTz);
-                      const gapHours = nextStartHour - thisEndHour;
-
-                      if (gapHours > 0.25) {
-                        // Visible gap — place + in middle
-                        const midTop = top + height + (gapHours * PIXELS_PER_HOUR / 2) - 10;
-                        return (
-                          <div
-                            className="absolute z-[15] flex w-10 items-center justify-center"
-                            style={{ top: midTop, left: dayFlights.length > 0 ? -20 : -14 }}
-                          >
-                            <button
-                              onClick={() => onAddBetween(entry.end_time)}
-                              className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                            >
-                              <Plus className="h-3 w-3" />
-                            </button>
-                          </div>
-                        );
-                      } else {
-                        // Back-to-back — thin plus line
-                        return (
-                          <div
-                            className="absolute z-[15] flex w-10 items-center justify-center"
-                            style={{ top: top + height - 2, left: dayFlights.length > 0 ? -20 : -14 }}
-                          >
-                            <button
-                              onClick={() => onAddBetween(entry.end_time)}
-                              className="flex h-4 w-4 items-center justify-center rounded-full border border-dashed border-muted-foreground/20 bg-background text-muted-foreground/40 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                            >
-                              <Plus className="h-2.5 w-2.5" />
-                            </button>
-                          </div>
-                        );
-                      }
-                    })()}
 
                     {/* Travel segment connector */}
                     {showTravelSeg && (
