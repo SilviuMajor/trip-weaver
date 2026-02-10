@@ -20,6 +20,7 @@ interface FlightGroupCardProps {
   onTouchDragStart?: (e: React.TouchEvent) => void;
   onTouchDragMove?: (e: React.TouchEvent) => void;
   onTouchDragEnd?: () => void;
+  isShaking?: boolean;
 }
 
 const formatTimeOnly = (isoString: string, tz: string | null): string => {
@@ -59,6 +60,7 @@ const FlightGroupCard = ({
   onTouchDragStart,
   onTouchDragMove,
   onTouchDragEnd,
+  isShaking,
 }: FlightGroupCardProps) => {
   const catInfo = findCategory('flight');
   const catColor = catInfo?.color ?? 'hsl(260, 50%, 55%)';
@@ -83,6 +85,7 @@ const FlightGroupCard = ({
         isPast && 'opacity-50 grayscale-[30%]',
         isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
         isLocked && 'border-dashed border-2 border-muted-foreground/40',
+        isShaking && 'animate-shake',
       )}
       style={{ borderColor: isLocked ? undefined : catColor, borderLeftWidth: isLocked ? undefined : 4 }}
     >

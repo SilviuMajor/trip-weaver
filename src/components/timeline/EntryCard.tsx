@@ -51,6 +51,7 @@ interface EntryCardProps {
   onTouchDragStart?: (e: React.TouchEvent) => void;
   onTouchDragMove?: (e: React.TouchEvent) => void;
   onTouchDragEnd?: () => void;
+  isShaking?: boolean;
 }
 
 const getCategoryColor = (catId: string | null, customColor: string | null): string => {
@@ -116,6 +117,7 @@ const EntryCard = ({
   onTouchDragStart,
   onTouchDragMove,
   onTouchDragEnd,
+  isShaking,
 }: EntryCardProps) => {
   const firstImage = option.images?.[0]?.image_url;
   const catColor = getCategoryColor(option.category, option.category_color);
@@ -326,6 +328,7 @@ const EntryCard = ({
             'group relative flex items-center gap-1.5 overflow-hidden rounded-lg border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
             isEntryPast && 'opacity-50 grayscale-[30%]',
             isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            isShaking && 'animate-shake',
             cardSizeClass
           )}
           style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
@@ -350,6 +353,7 @@ const EntryCard = ({
             'group relative flex items-center overflow-hidden rounded-lg border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
             isEntryPast && 'opacity-50 grayscale-[30%]',
             isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            isShaking && 'animate-shake',
             cardSizeClass
           )}
           style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
@@ -375,6 +379,7 @@ const EntryCard = ({
             'group relative overflow-hidden rounded-xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
             isEntryPast && 'opacity-50 grayscale-[30%]',
             isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            isShaking && 'animate-shake',
             cardSizeClass
           )}
           style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
@@ -407,13 +412,14 @@ const EntryCard = ({
         onClick={onClick}
         onMouseDown={onDragStart}
         onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
-        className={cn(
-          'group relative overflow-hidden rounded-2xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
-          isEntryPast && 'opacity-50 grayscale-[30%]',
-          isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-          isLocked && 'border-r border-t border-b border-dashed border-muted-foreground/40',
-          cardSizeClass
-        )}
+          className={cn(
+            'group relative overflow-hidden rounded-2xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
+            isEntryPast && 'opacity-50 grayscale-[30%]',
+            isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            isLocked && 'border-r border-t border-b border-dashed border-muted-foreground/40',
+            isShaking && 'animate-shake',
+            cardSizeClass
+          )}
         style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
       >
         <div className="relative z-10 flex h-full">
@@ -477,6 +483,7 @@ const EntryCard = ({
           isEntryPast && 'opacity-50 grayscale-[30%]',
           isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
           isLocked && 'border-dashed border-2 border-muted-foreground/40',
+          isShaking && 'animate-shake',
           cardSizeClass
         )}
         style={{
@@ -541,6 +548,7 @@ const EntryCard = ({
           isEntryPast && 'opacity-50 grayscale-[30%]',
           isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
           isLocked && 'border-dashed border-2 border-muted-foreground/40',
+          isShaking && 'animate-shake',
           cardSizeClass
         )}
         style={{
@@ -594,6 +602,7 @@ const EntryCard = ({
           isEntryPast && 'opacity-50 grayscale-[30%]',
           isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
           isLocked && 'border-dashed border-2 border-muted-foreground/40',
+          isShaking && 'animate-shake',
           cardSizeClass
         )}
         style={{
@@ -681,14 +690,15 @@ const EntryCard = ({
       onTouchStart={onTouchDragStart}
       onTouchMove={onTouchDragMove}
       onTouchEnd={onTouchDragEnd}
-      className={cn(
-        'group relative overflow-hidden rounded-2xl border shadow-md transition-all hover:shadow-lg',
-        isEntryPast && 'opacity-50 grayscale-[30%]',
-        isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-        isLocked && 'border-dashed border-2 border-muted-foreground/40',
-        isProcessing && 'opacity-80',
-        cardSizeClass
-      )}
+        className={cn(
+          'group relative overflow-hidden rounded-2xl border shadow-md transition-all hover:shadow-lg',
+          isEntryPast && 'opacity-50 grayscale-[30%]',
+          isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+          isLocked && 'border-dashed border-2 border-muted-foreground/40',
+          isProcessing && 'opacity-80',
+          isShaking && 'animate-shake',
+          cardSizeClass
+        )}
       style={!firstImage ? {
         borderColor: isLocked ? undefined : catColor,
         borderLeftWidth: isLocked ? undefined : 4,
