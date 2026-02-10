@@ -213,8 +213,18 @@ const CalendarDay = ({
   // Compute overlap layout
   const layoutEntries = sortedEntries.map(e => {
     const { startTz, endTz } = resolveEntryTz(e, dayFlights, activeTz, tripTimezone);
-    const s = (getHourInTimezone(e.start_time, startTz) - startHour) * 60;
-    let en = (getHourInTimezone(e.end_time, endTz) - startHour) * 60;
+    const opt = e.options[0];
+    const isFlight = opt?.category === 'flight' && opt.departure_tz && opt.arrival_tz;
+    const sHour = getHourInTimezone(e.start_time, startTz);
+    let eHour: number;
+    if (isFlight) {
+      const utcDurH = (new Date(e.end_time).getTime() - new Date(e.start_time).getTime()) / 3600000;
+      eHour = sHour + utcDurH;
+    } else {
+      eHour = getHourInTimezone(e.end_time, endTz);
+    }
+    const s = (sHour - startHour) * 60;
+    let en = (eHour - startHour) * 60;
     if (en <= s) en = s + 120;
     return { id: e.id, startMinutes: s, endMinutes: en };
   });
@@ -230,7 +240,16 @@ const CalendarDay = ({
       const b = sortedEntries[i + 1];
       const aTzs = resolveEntryTz(a, dayFlights, activeTz, tripTimezone);
       const bTzs = resolveEntryTz(b, dayFlights, activeTz, tripTimezone);
-      const aEnd = getHourInTimezone(a.end_time, aTzs.endTz);
+      const aOpt = a.options[0];
+      const aIsFlight = aOpt?.category === 'flight' && aOpt.departure_tz && aOpt.arrival_tz;
+      let aEnd: number;
+      if (aIsFlight) {
+        const aStart = getHourInTimezone(a.start_time, aTzs.startTz);
+        const aUtcDur = (new Date(a.end_time).getTime() - new Date(a.start_time).getTime()) / 3600000;
+        aEnd = aStart + aUtcDur;
+      } else {
+        aEnd = getHourInTimezone(a.end_time, aTzs.endTz);
+      }
       const bStart = getHourInTimezone(b.start_time, bTzs.startTz);
       if (aEnd > bStart) {
         const overlapMin = Math.round((aEnd - bStart) * 60);
@@ -424,9 +443,23 @@ const CalendarDay = ({
 
                 // Use flight group bounds for gap endpoints
                 const aGroup = flightGroupMap.get(entry.id);
-                const aEffectiveEndTime = aGroup?.checkout?.end_time ?? entry.end_time;
-                const aEffectiveEndTz = aGroup?.checkout ? (entry.options[0]?.arrival_tz || aTzs.endTz) : aTzs.endTz;
-                const aEndHour = getHourInTimezone(aEffectiveEndTime, aEffectiveEndTz);
+                const aOpt = entry.options[0];
+                const aIsFlight = aOpt?.category === 'flight' && aOpt.departure_tz && aOpt.arrival_tz;
+                let aEndHour: number;
+                if (aGroup?.checkout) {
+                  // Checkout end: flight visual end + checkout UTC duration
+                  const flightStartH = getHourInTimezone(entry.start_time, aOpt?.departure_tz || aTzs.startTz);
+                  const flightUtcDur = (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 3600000;
+                  const flightEndH = flightStartH + flightUtcDur;
+                  const coDur = (new Date(aGroup.checkout.end_time).getTime() - new Date(aGroup.checkout.start_time).getTime()) / 3600000;
+                  aEndHour = flightEndH + coDur;
+                } else if (aIsFlight) {
+                  const flightStartH = getHourInTimezone(entry.start_time, aOpt.departure_tz!);
+                  const flightUtcDur = (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 3600000;
+                  aEndHour = flightStartH + flightUtcDur;
+                } else {
+                  aEndHour = getHourInTimezone(entry.end_time, aTzs.endTz);
+                }
 
                 const bGroup = flightGroupMap.get(nextEntry.id);
                 const bEffectiveStartTime = bGroup?.checkin?.start_time ?? nextEntry.start_time;
@@ -524,7 +557,8 @@ const CalendarDay = ({
                   const isFlight = primaryOption.category === 'flight' && primaryOption.departure_tz && primaryOption.arrival_tz;
                   if (isFlight) {
                     entryStartHour = getHourInTimezone(entry.start_time, primaryOption.departure_tz!);
-                    entryEndHour = getHourInTimezone(entry.end_time, primaryOption.arrival_tz!);
+                    const utcDurationHours = (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 3600000;
+                    entryEndHour = entryStartHour + utcDurationHours;
                   } else {
                     // Per-entry TZ: check if entry is before or after flight
                     if (dayFlights.length > 0 && dayFlights[0].flightEndUtc) {
@@ -545,10 +579,14 @@ const CalendarDay = ({
 
                 if (flightGroup) {
                   if (flightGroup.checkin) {
-                    groupStartHour = getHourInTimezone(flightGroup.checkin.start_time, primaryOption.departure_tz || tripTimezone);
+                    // Checkin duration via UTC, positioned to end at flight start
+                    const ciDurationH = (new Date(flightGroup.checkin.end_time).getTime() - new Date(flightGroup.checkin.start_time).getTime()) / 3600000;
+                    groupStartHour = entryStartHour - ciDurationH;
                   }
                   if (flightGroup.checkout) {
-                    groupEndHour = getHourInTimezone(flightGroup.checkout.end_time, primaryOption.arrival_tz || tripTimezone);
+                    // Checkout duration via UTC, starts where flight ends visually
+                    const coDurationH = (new Date(flightGroup.checkout.end_time).getTime() - new Date(flightGroup.checkout.start_time).getTime()) / 3600000;
+                    groupEndHour = entryEndHour + coDurationH;
                   }
                   if (groupEndHour < groupStartHour) groupEndHour = 24;
                 }
@@ -581,9 +619,13 @@ const CalendarDay = ({
                   ? (primaryOption.departure_tz || resolvedTz)
                   : resolvedTz;
                 const origStartHour = getHourInTimezone(entry.start_time, dragTz);
-                let origEndHour = primaryOption.category === 'flight'
-                  ? getHourInTimezone(entry.end_time, primaryOption.arrival_tz || dragTz)
-                  : getHourInTimezone(entry.end_time, dragTz);
+                let origEndHour: number;
+                if (primaryOption.category === 'flight' && primaryOption.departure_tz) {
+                  const utcDur = (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 3600000;
+                  origEndHour = origStartHour + utcDur;
+                } else {
+                  origEndHour = getHourInTimezone(entry.end_time, dragTz);
+                }
                 if (origEndHour < origStartHour) origEndHour = 24;
 
                 const canDrag = onEntryTimeChange && !isLocked;
@@ -634,15 +676,13 @@ const CalendarDay = ({
 
                         {flightGroup ? (() => {
                           // Compute proportional fractions for each section
-                          const depTz = primaryOption.departure_tz || tripTimezone;
-                          const arrTz = primaryOption.arrival_tz || tripTimezone;
                           const totalDuration = groupEndHour - groupStartHour;
                           const checkinDuration = flightGroup.checkin
-                            ? getHourInTimezone(flightGroup.checkin.end_time, depTz) - getHourInTimezone(flightGroup.checkin.start_time, depTz)
+                            ? (new Date(flightGroup.checkin.end_time).getTime() - new Date(flightGroup.checkin.start_time).getTime()) / 3600000
                             : 0;
                           const flightDuration = entryEndHour - entryStartHour;
                           const checkoutDuration = flightGroup.checkout
-                            ? getHourInTimezone(flightGroup.checkout.end_time, arrTz) - getHourInTimezone(flightGroup.checkout.start_time, arrTz)
+                            ? (new Date(flightGroup.checkout.end_time).getTime() - new Date(flightGroup.checkout.start_time).getTime()) / 3600000
                             : 0;
                           const ciFrac = totalDuration > 0 ? checkinDuration / totalDuration : 0.25;
                           const flFrac = totalDuration > 0 ? flightDuration / totalDuration : 0.5;
