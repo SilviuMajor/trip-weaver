@@ -1,4 +1,4 @@
-import { useState, forwardRef } from 'react';
+import { useState } from 'react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Button } from '@/components/ui/button';
 import { LogOut, Lock, Unlock, Plus, Route, CloudSun, Loader2, Settings, Home, Lightbulb } from 'lucide-react';
@@ -19,7 +19,7 @@ interface TimelineHeaderProps {
   scheduledEntries?: EntryWithOptions[];
 }
 
-const TimelineHeader = forwardRef<HTMLElement, TimelineHeaderProps>(({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas, ideasCount = 0, scheduledEntries = [] }, ref) => {
+const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas, ideasCount = 0, scheduledEntries = [] }: TimelineHeaderProps) => {
   const { currentUser, logout, isOrganizer, isEditor } = useCurrentUser();
   const navigate = useNavigate();
   const [travelLoading, setTravelLoading] = useState(false);
@@ -127,7 +127,7 @@ const TimelineHeader = forwardRef<HTMLElement, TimelineHeaderProps>(({ trip, tri
   };
 
   return (
-    <header ref={ref} className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-lg">
+    <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-lg">
       <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <Button
@@ -202,8 +202,6 @@ const TimelineHeader = forwardRef<HTMLElement, TimelineHeaderProps>(({ trip, tri
       </div>
     </header>
   );
-});
-
-TimelineHeader.displayName = 'TimelineHeader';
+};
 
 export default TimelineHeader;

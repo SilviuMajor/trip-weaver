@@ -75,21 +75,6 @@ const Timeline = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { zoom, changeZoom, spacingClass, cardSizeClass, zoomLabel } = useTimelineZoom(scrollRef);
 
-  // Dynamic header height
-  const headerRef = useRef<HTMLElement>(null);
-  const [headerHeight, setHeaderHeight] = useState(53);
-
-  useEffect(() => {
-    if (!headerRef.current) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const h = entry.borderBoxSize?.[0]?.blockSize
-        ?? headerRef.current?.getBoundingClientRect().height
-        ?? 53;
-      setHeaderHeight(h);
-    });
-    ro.observe(headerRef.current);
-    return () => ro.disconnect();
-  }, []);
 
   // Redirect if no user
   useEffect(() => {
@@ -534,7 +519,6 @@ const Timeline = () => {
   return (
     <div className="flex min-h-screen flex-col bg-background" ref={scrollRef}>
       <TimelineHeader
-        ref={headerRef}
         trip={trip}
         tripId={tripId ?? ''}
         onAddEntry={() => {
@@ -600,7 +584,6 @@ const Timeline = () => {
                     dayFlights={tzInfo?.flights}
                     isEditor={isEditor}
                     onToggleLock={handleToggleLock}
-                    headerHeight={headerHeight}
                   />
                 );
               })}
