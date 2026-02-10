@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
@@ -14,9 +14,11 @@ import type { Trip, EntryWithOptions, EntryOption, CategoryPreset } from '@/type
 import { localToUTC } from '@/lib/timezoneUtils';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
-import { Loader2 } from 'lucide-react';
+import AIRPORTS from '@/lib/airports';
+import { Loader2, Upload, Check } from 'lucide-react';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import PhotoStripPicker from './PhotoStripPicker';
+import { cn } from '@/lib/utils';
 
 const REFERENCE_DATE = '2099-01-01';
 
@@ -27,6 +29,12 @@ interface ReturnFlightData {
   arrivalTz: string;
   departureTerminal: string;
   arrivalTerminal: string;
+}
+
+interface TransportResult {
+  mode: string;
+  duration_min: number;
+  distance_km: number;
 }
 
 interface EntryFormProps {
@@ -40,13 +48,24 @@ interface EntryFormProps {
   prefillStartTime?: string;
   prefillEndTime?: string;
   prefillCategory?: string;
+  transportContext?: { fromAddress: string; toAddress: string } | null;
 }
 
 type Step = 'category' | 'details';
 
-const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, editOption, prefillStartTime, prefillEndTime, prefillCategory }: EntryFormProps) => {
+const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, editOption, prefillStartTime, prefillEndTime, prefillCategory, transportContext }: EntryFormProps) => {
   const [step, setStep] = useState<Step>('category');
   const [saving, setSaving] = useState(false);
+
+  // Transport route results (for gap-button flow)
+  const [transportResults, setTransportResults] = useState<TransportResult[]>([]);
+  const [transportLoading, setTransportLoading] = useState(false);
+  const transportFetchedRef = useRef(false);
+
+  // Flight booking upload
+  const [flightParseLoading, setFlightParseLoading] = useState(false);
+  const [parsedFlights, setParsedFlights] = useState<any[]>([]);
+  const flightFileRef = useRef<HTMLInputElement>(null);
 
   // Step 1: Category
   const [categoryId, setCategoryId] = useState('');
@@ -247,6 +266,146 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setLatitude(null);
     setLongitude(null);
     setAutoPhotos([]);
+    setTransportResults([]);
+    setTransportLoading(false);
+    transportFetchedRef.current = false;
+    setParsedFlights([]);
+    setFlightParseLoading(false);
+  };
+
+  // --- Transport gap-button: auto-fill from/to and fetch all routes ---
+  const fetchAllRoutes = useCallback(async (from: string, to: string) => {
+    setTransportLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('google-directions', {
+        body: { fromAddress: from, toAddress: to, modes: ['walk', 'transit', 'drive', 'bicycle'] },
+      });
+      if (!error && data?.results) {
+        setTransportResults(data.results);
+        // Auto-select fastest
+        const fastest = data.results.reduce((a: TransportResult, b: TransportResult) =>
+          a.duration_min < b.duration_min ? a : b
+        );
+        setTransferMode(fastest.mode);
+        setDurationMin(fastest.duration_min);
+        // Update end time
+        const [h, m] = startTime.split(':').map(Number);
+        const endTotalMin = h * 60 + m + fastest.duration_min;
+        const endH = Math.floor(endTotalMin / 60) % 24;
+        const endM = endTotalMin % 60;
+        setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
+        // Auto-generate name
+        const modeLabels: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', bicycle: 'Cycle' };
+        const toShort = to.split(',')[0].trim();
+        setName(`${modeLabels[fastest.mode] || fastest.mode} to ${toShort}`);
+      }
+    } catch (err) {
+      console.error('Transport route fetch failed:', err);
+    } finally {
+      setTransportLoading(false);
+    }
+  }, [startTime]);
+
+  useEffect(() => {
+    if (transportContext && open && !transportFetchedRef.current && categoryId === 'transfer') {
+      transportFetchedRef.current = true;
+      setTransferFrom(transportContext.fromAddress);
+      setTransferTo(transportContext.toAddress);
+      fetchAllRoutes(transportContext.fromAddress, transportContext.toAddress);
+    }
+  }, [transportContext, open, categoryId, fetchAllRoutes]);
+
+  // When user selects a different transport mode from inline results
+  const handleSelectTransportMode = (result: TransportResult) => {
+    setTransferMode(result.mode);
+    setDurationMin(result.duration_min);
+    const [h, m] = startTime.split(':').map(Number);
+    const endTotalMin = h * 60 + m + result.duration_min;
+    const endH = Math.floor(endTotalMin / 60) % 24;
+    const endM = endTotalMin % 60;
+    setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
+    const modeLabels: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', bicycle: 'Cycle' };
+    const toShort = transferTo.split(',')[0].trim();
+    setName(`${modeLabels[result.mode] || result.mode} to ${toShort}`);
+  };
+
+  // --- Flight booking upload ---
+  const handleFlightFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFlightParseLoading(true);
+    try {
+      const reader = new FileReader();
+      const base64 = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(',')[1]); // strip data: prefix
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const { data, error } = await supabase.functions.invoke('parse-flight-booking', {
+        body: { fileBase64: base64, mimeType: file.type },
+      });
+      if (error) throw error;
+
+      if (data?.flights?.length > 0) {
+        if (data.flights.length === 1) {
+          applyParsedFlight(data.flights[0]);
+          toast({ title: 'Extracted flight details — please review ✈️' });
+        } else {
+          setParsedFlights(data.flights);
+          toast({ title: `Found ${data.flights.length} flights — select one` });
+        }
+      } else {
+        toast({ title: 'No flight details found in document', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Failed to parse booking', description: err.message, variant: 'destructive' });
+    } finally {
+      setFlightParseLoading(false);
+      if (flightFileRef.current) flightFileRef.current.value = '';
+    }
+  };
+
+  const applyParsedFlight = (flight: any) => {
+    if (flight.flight_number) setName(flight.flight_number);
+    if (flight.departure_terminal) setDepartureTerminal(flight.departure_terminal);
+    if (flight.arrival_terminal) setArrivalTerminal(flight.arrival_terminal);
+    if (flight.departure_time) setStartTime(flight.departure_time);
+    if (flight.arrival_time) setEndTime(flight.arrival_time);
+
+    // Look up airports by IATA code
+    if (flight.departure_airport) {
+      const apt = AIRPORTS.find(a => a.iata === flight.departure_airport.toUpperCase());
+      if (apt) {
+        setDepartureLocation(`${apt.iata} - ${apt.name}`);
+        setDepartureTz(apt.timezone);
+      } else {
+        setDepartureLocation(flight.departure_airport);
+      }
+    }
+    if (flight.arrival_airport) {
+      const apt = AIRPORTS.find(a => a.iata === flight.arrival_airport.toUpperCase());
+      if (apt) {
+        setArrivalLocation(`${apt.iata} - ${apt.name}`);
+        setArrivalTz(apt.timezone);
+      } else {
+        setArrivalLocation(flight.arrival_airport);
+      }
+    }
+    if (flight.date) setDate(flight.date);
+
+    // Recalc duration
+    if (flight.departure_time && flight.arrival_time) {
+      const entryDate = flight.date || '2099-01-01';
+      const dTz = flight.departure_airport ? (AIRPORTS.find(a => a.iata === flight.departure_airport.toUpperCase())?.timezone || departureTz) : departureTz;
+      const aTz = flight.arrival_airport ? (AIRPORTS.find(a => a.iata === flight.arrival_airport.toUpperCase())?.timezone || arrivalTz) : arrivalTz;
+      calcFlightDuration(flight.departure_time, flight.arrival_time, dTz, aTz, entryDate);
+    }
+
+    setParsedFlights([]);
   };
 
   const handleClose = (open: boolean) => {
@@ -749,6 +908,51 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
 
               {isFlight && (
                 <>
+                  {/* Upload booking button */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={flightFileRef}
+                      type="file"
+                      accept=".pdf,image/*"
+                      className="hidden"
+                      onChange={handleFlightFileUpload}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => flightFileRef.current?.click()}
+                      disabled={flightParseLoading}
+                      className="text-xs"
+                    >
+                      {flightParseLoading ? (
+                        <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> Parsing...</>
+                      ) : (
+                        <><Upload className="mr-1.5 h-3 w-3" /> Upload booking</>
+                      )}
+                    </Button>
+                    <span className="text-[10px] text-muted-foreground">PDF or image</span>
+                  </div>
+
+                  {/* Multiple flights selector */}
+                  {parsedFlights.length > 1 && (
+                    <div className="space-y-1.5 rounded-lg border border-border/50 bg-muted/30 p-2">
+                      <p className="text-xs font-medium text-muted-foreground">Select flight</p>
+                      {parsedFlights.map((f, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => applyParsedFlight(f)}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted transition-colors text-left"
+                        >
+                          <span className="font-medium">{f.flight_number || `Flight ${i + 1}`}</span>
+                          <span className="text-muted-foreground">{f.departure_airport} → {f.arrival_airport}</span>
+                          {f.date && <span className="ml-auto text-muted-foreground">{f.date}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="space-y-3">
                     <div className="space-y-2">
                       <Label>Departure Airport</Label>
@@ -851,26 +1055,78 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                       />
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Travel mode</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {TRAVEL_MODES.map((mode) => (
-                        <button
-                          key={mode.id}
-                          type="button"
-                          onClick={() => setTransferMode(mode.id)}
-                          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-all ${
-                            transferMode === mode.id
-                              ? 'border-primary bg-primary/10 text-primary font-medium'
-                              : 'border-border bg-background text-muted-foreground hover:border-primary/40'
-                          }`}
-                        >
-                          <span className="text-base">{mode.emoji}</span>
-                          <span>{mode.label}</span>
-                        </button>
-                      ))}
+
+                  {/* Inline route comparison (when auto-fetched from transport gap) */}
+                  {transportContext && (transportLoading || transportResults.length > 0) ? (
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-muted-foreground">Routes</Label>
+                      {transportLoading ? (
+                        <div className="flex items-center justify-center py-4">
+                          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                          <span className="ml-2 text-xs text-muted-foreground">Fetching routes…</span>
+                        </div>
+                      ) : transportResults.length === 0 ? (
+                        <p className="text-xs text-muted-foreground py-2">No routes found</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {transportResults.map(r => {
+                            const modeEmoji: Record<string, string> = { walk: '🚶', transit: '🚌', drive: '🚗', bicycle: '🚲' };
+                            const modeLabel: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', bicycle: 'Cycle' };
+                            const formatDur = (min: number) => {
+                              const h = Math.floor(min / 60);
+                              const m = min % 60;
+                              if (h === 0) return `${m}m`;
+                              if (m === 0) return `${h}h`;
+                              return `${h}h ${m}m`;
+                            };
+                            return (
+                              <button
+                                key={r.mode}
+                                type="button"
+                                onClick={() => handleSelectTransportMode(r)}
+                                className={cn(
+                                  'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors',
+                                  transferMode === r.mode
+                                    ? 'bg-primary/10 text-primary font-medium'
+                                    : 'hover:bg-muted text-foreground'
+                                )}
+                              >
+                                <span className="text-base">{modeEmoji[r.mode] ?? '🚌'}</span>
+                                <span className="flex-1 text-left capitalize">{modeLabel[r.mode] ?? r.mode}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {formatDur(r.duration_min)} · {r.distance_km < 1 ? `${Math.round(r.distance_km * 1000)}m` : `${r.distance_km.toFixed(1)}km`}
+                                </span>
+                                {transferMode === r.mode && <Check className="h-3.5 w-3.5 text-primary" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  ) : (
+                    /* Manual mode picker (when not from transport gap) */
+                    <div className="space-y-2">
+                      <Label>Travel mode</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {TRAVEL_MODES.map((mode) => (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            onClick={() => setTransferMode(mode.id)}
+                            className={cn(
+                              'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-all',
+                              transferMode === mode.id
+                                ? 'border-primary bg-primary/10 text-primary font-medium'
+                                : 'border-border bg-background text-muted-foreground hover:border-primary/40'
+                            )}
+                          >
+                            <span className="text-base">{mode.emoji}</span>
+                            <span>{mode.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 
