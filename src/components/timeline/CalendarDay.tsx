@@ -305,7 +305,7 @@ const CalendarDay = ({
       {/* Calendar grid */}
       <div className="mx-auto max-w-2xl px-4 py-2">
         {sortedEntries.length === 0 ? (
-          <div className="relative">
+          <div className="relative min-h-[200px]">
             <div className={cn(
               'py-6 text-center text-xs',
               dayPast ? 'text-muted-foreground/40' : 'text-muted-foreground/60'
@@ -325,7 +325,7 @@ const CalendarDay = ({
           </div>
         ) : (
           <div
-            className={cn("relative", dayFlights.length > 0 ? "ml-20" : "ml-14")}
+            className="relative ml-20"
             style={{ height: containerHeight, minHeight: 200, marginRight: 8 }}
             onDragOver={(e) => {
               if (onDropFromPanel) {
@@ -430,7 +430,8 @@ const CalendarDay = ({
 
                 const top = Math.max(0, (groupStartHour - startHour) * PIXELS_PER_HOUR);
                 const height = (groupEndHour - groupStartHour) * PIXELS_PER_HOUR;
-                const isCompact = height < 50 && !flightGroup;
+                const isCompact = height < 40 && !flightGroup;
+                const isMedium = height >= 40 && height < 80 && !flightGroup;
 
                 const layoutInfo = layoutMap.get(entry.id);
                 const column = layoutInfo?.column ?? 0;
@@ -544,6 +545,7 @@ const CalendarDay = ({
                         })() : (
                           <EntryCard
                             isCompact={isCompact}
+                            isMedium={isMedium}
                             option={primaryOption}
                             startTime={entry.start_time}
                             endTime={entry.end_time}
@@ -668,7 +670,7 @@ const CalendarDay = ({
             })()}
 
             {/* Weather column — directly under time labels */}
-            <div className="absolute top-0 bottom-0 z-[5]" style={{ left: dayFlights.length > 0 ? -68 : -46, width: dayFlights.length > 0 ? 52 : 30 }}>
+            <div className="absolute top-0 bottom-0 z-[5]" style={{ left: -68, width: 52 }}>
               {Array.from({ length: endHour - startHour }, (_, i) => startHour + i).map(hour => {
                 const dateStr = format(dayDate, 'yyyy-MM-dd');
                 const w = weatherData.find(wd => wd.date === dateStr && wd.hour === hour);

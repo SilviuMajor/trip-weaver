@@ -28,6 +28,7 @@ interface EntryCardProps {
   isProcessing?: boolean;
   linkedType?: string | null;
   isCompact?: boolean;
+  isMedium?: boolean;
   canEdit?: boolean;
   onToggleLock?: () => void;
   onDragStart?: (e: React.MouseEvent) => void;
@@ -89,6 +90,7 @@ const EntryCard = ({
   isProcessing,
   linkedType,
   isCompact,
+  isMedium,
   canEdit,
   onToggleLock,
   onDragStart,
@@ -149,6 +151,70 @@ const EntryCard = ({
     onToggleLock?.();
   };
 
+  // Medium layout for sub-hour entries (40-80px)
+  if (isMedium) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        onClick={onClick}
+        onMouseDown={onDragStart}
+        onTouchStart={onTouchDragStart}
+        onTouchMove={onTouchDragMove}
+        onTouchEnd={onTouchDragEnd}
+        className={cn(
+          'group relative overflow-hidden rounded-xl border shadow-sm transition-all hover:shadow-md',
+          isEntryPast && 'opacity-50 grayscale-[30%]',
+          isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+          isLocked && 'border-dashed border-2 border-muted-foreground/40',
+          cardSizeClass
+        )}
+        style={{
+          borderColor: isLocked ? undefined : catColor,
+          borderLeftWidth: isLocked ? undefined : 3,
+          background: tintBg,
+        }}
+      >
+        <div className="relative z-10 flex h-full flex-col justify-center gap-0.5 px-2.5 py-1">
+          {isEditingName ? (
+            <input
+              ref={nameInputRef}
+              value={editedName}
+              onChange={(e) => setEditedName(e.target.value)}
+              onBlur={handleNameSave}
+              onKeyDown={handleNameKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              className="truncate text-xs font-semibold leading-tight bg-transparent border-b border-primary outline-none min-w-0"
+            />
+          ) : (
+            <span
+              className="truncate text-xs font-semibold leading-tight cursor-text"
+              onClick={handleNameClick}
+            >
+              {catEmoji} {option.name}
+            </span>
+          )}
+          <span className="text-[10px] text-muted-foreground">
+            {formatTime(startTime)} — {formatTime(endTime)}
+          </span>
+        </div>
+        {canEdit && onToggleLock && (
+          <button
+            onClick={handleLockClick}
+            className="absolute top-1 right-1 rounded-md p-0.5 transition-colors z-20 hover:bg-muted/50"
+          >
+            {isLocked ? (
+              <Lock className="h-3 w-3 text-muted-foreground/80" />
+            ) : (
+              <LockOpen className="h-3 w-3 text-muted-foreground/30" />
+            )}
+          </button>
+        )}
+      </motion.div>
+    );
+  }
+
   // Compact single-line layout for very short entries
   if (isCompact) {
     return (
@@ -188,13 +254,13 @@ const EntryCard = ({
             />
           ) : (
             <span
-              className="truncate text-[11px] font-semibold leading-tight cursor-text"
+              className="truncate text-[11px] font-semibold leading-tight cursor-text flex-1 min-w-0"
               onClick={handleNameClick}
             >
               {option.name}
             </span>
           )}
-          <span className="shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">
+          <span className="shrink-0 text-[9px] text-muted-foreground whitespace-nowrap">
             {formatTime(startTime)}–{formatTime(endTime)}
           </span>
           <span className="flex-1" />
