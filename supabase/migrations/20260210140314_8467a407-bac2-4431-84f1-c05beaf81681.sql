@@ -1,0 +1,1 @@
+ALTER TABLE public.trip_users ADD COLUMN pin_hash text;

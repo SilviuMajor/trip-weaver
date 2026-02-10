@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { addDays, format, parseISO } from 'date-fns';
+import { utcToLocal } from '@/lib/timezoneUtils';
 import { PREDEFINED_CATEGORIES, TRAVEL_MODES, type CategoryDef } from '@/lib/categories';
 import type { Trip, EntryWithOptions, EntryOption, CategoryPreset } from '@/types/trip';
 import { localToUTC } from '@/lib/timezoneUtils';
@@ -108,10 +109,11 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   useEffect(() => {
     if (editEntry && open) {
       const startDt = parseISO(editEntry.start_time);
-      const endDt = parseISO(editEntry.end_time);
-      setDate(format(startDt, 'yyyy-MM-dd'));
-      setStartTime(format(startDt, 'HH:mm'));
-      setEndTime(format(endDt, 'HH:mm'));
+      const { date: sDate, time: sTime } = utcToLocal(editEntry.start_time, tripTimezone);
+      const { time: eTime } = utcToLocal(editEntry.end_time, tripTimezone);
+      setDate(sDate);
+      setStartTime(sTime);
+      setEndTime(eTime);
 
       if (isUndated) {
         const refDate = parseISO(REFERENCE_DATE);
@@ -143,35 +145,35 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   // Pre-fill start time from prop
   useEffect(() => {
     if (prefillStartTime && open && !editEntry) {
-      const dt = new Date(prefillStartTime);
-      setStartTime(format(dt, 'HH:mm'));
+      const { date: d, time: t } = utcToLocal(prefillStartTime, tripTimezone);
+      setStartTime(t);
       if (!isUndated) {
-        setDate(format(dt, 'yyyy-MM-dd'));
+        setDate(d);
       }
     }
-  }, [prefillStartTime, open, editEntry, isUndated]);
+  }, [prefillStartTime, open, editEntry, isUndated, tripTimezone]);
 
   // Pre-fill end time from prop (drag-to-create)
   useEffect(() => {
     if (prefillEndTime && open && !editEntry) {
-      const dt = new Date(prefillEndTime);
-      setEndTime(format(dt, 'HH:mm'));
+      const { time: eT } = utcToLocal(prefillEndTime, tripTimezone);
+      setEndTime(eT);
       // Calculate duration from prefilled times
       if (prefillStartTime) {
         const startDt = new Date(prefillStartTime);
-        const diffMin = Math.round((dt.getTime() - startDt.getTime()) / 60000);
+        const endDt = new Date(prefillEndTime);
+        const diffMin = Math.round((endDt.getTime() - startDt.getTime()) / 60000);
         if (diffMin > 0) setDurationMin(diffMin);
       }
     }
-  }, [prefillEndTime, prefillStartTime, open, editEntry]);
+  }, [prefillEndTime, prefillStartTime, open, editEntry, tripTimezone]);
 
   const applySmartDefaults = useCallback((cat: CategoryDef) => {
     const h = cat.defaultStartHour;
     const m = cat.defaultStartMin;
     if (prefillStartTime && !isEditing) {
-      const dt = new Date(prefillStartTime);
-      const pH = dt.getHours();
-      const pM = dt.getMinutes();
+      const { time: pTime } = utcToLocal(prefillStartTime, tripTimezone);
+      const [pH, pM] = pTime.split(':').map(Number);
       setStartTime(`${String(pH).padStart(2, '0')}:${String(pM).padStart(2, '0')}`);
       setDurationMin(cat.defaultDurationMin);
       const endTotalMin = pH * 60 + pM + cat.defaultDurationMin;
@@ -186,7 +188,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
       const endM = endTotalMin % 60;
       setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
     }
-  }, [prefillStartTime, isEditing]);
+  }, [prefillStartTime, isEditing, tripTimezone]);
 
   const reset = () => {
     setStep('category');

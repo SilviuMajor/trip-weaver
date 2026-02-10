@@ -5,13 +5,39 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { ArrowLeft, Save, Copy, X, Check, Plus, Trash2, CalendarIcon, Upload, ImageIcon } from 'lucide-react';
+import { ArrowLeft, Save, Copy, X, Check, Plus, Trash2, CalendarIcon, Upload, ImageIcon, Lock, LockOpen } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { toast } from '@/hooks/use-toast';
 import { addDays, format, parseISO } from 'date-fns';
-import type { Trip, TripUser } from '@/types/trip';
+import type { Trip, TripUser, CategoryPreset } from '@/types/trip';
 import { cn } from '@/lib/utils';
+import { PREDEFINED_CATEGORIES } from '@/lib/categories';
+
+const PRESET_COLORS = [
+  'hsl(200, 70%, 50%)', 'hsl(24, 85%, 55%)', 'hsl(160, 50%, 45%)',
+  'hsl(260, 50%, 55%)', 'hsl(340, 65%, 50%)', 'hsl(45, 80%, 50%)',
+];
+
+const CustomCategoryAdder = ({ onAdd, count }: { onAdd: (cat: CategoryPreset) => void; count: number }) => {
+  const [name, setName] = useState('');
+  const [emoji, setEmoji] = useState('📌');
+  const add = () => {
+    if (!name.trim()) return;
+    const color = PRESET_COLORS[count % PRESET_COLORS.length];
+    onAdd({ name: name.trim(), color, emoji });
+    setName('');
+    setEmoji('📌');
+  };
+  return (
+    <div className="flex gap-2">
+      <Input value={emoji} onChange={e => setEmoji(e.target.value)} className="h-9 w-14 text-center text-lg" maxLength={2} />
+      <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Spa, Museum" className="h-9 flex-1"
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+      <Button variant="outline" size="sm" className="h-9" onClick={add}><Plus className="mr-1 h-3.5 w-3.5" />Add</Button>
+    </div>
+  );
+};
 
 const TripSettings = () => {
   const { tripId } = useParams<{ tripId: string }>();
@@ -400,21 +426,58 @@ const TripSettings = () => {
           </Label>
           <div className="space-y-2">
             {members.map((m) => (
-              <div key={m.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{m.name}</p>
+              <div key={m.id} className="space-y-2 rounded-lg border border-border bg-card p-3">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">
+                      {m.pin_hash && <Lock className="mr-1 inline h-3.5 w-3.5 text-primary" />}
+                      {m.name}
+                    </p>
+                  </div>
+                  <Select value={m.role} onValueChange={(v) => handleRoleChange(m.id, v)}>
+                    <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="organizer">Organizer</SelectItem>
+                      <SelectItem value="editor">Editor</SelectItem>
+                      <SelectItem value="viewer">Viewer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <button onClick={() => handleRemoveMember(m.id)} className="text-muted-foreground hover:text-destructive">
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-                <Select value={m.role} onValueChange={(v) => handleRoleChange(m.id, v)}>
-                  <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="organizer">Organizer</SelectItem>
-                    <SelectItem value="editor">Editor</SelectItem>
-                    <SelectItem value="viewer">Viewer</SelectItem>
-                  </SelectContent>
-                </Select>
-                <button onClick={() => handleRemoveMember(m.id)} className="text-muted-foreground hover:text-destructive">
-                  <X className="h-4 w-4" />
-                </button>
+                {/* PIN management */}
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="password"
+                    maxLength={6}
+                    placeholder={m.pin_hash ? '••••' : 'Set PIN'}
+                    className="h-8 w-24 text-xs"
+                    onBlur={async (e) => {
+                      const val = e.target.value.trim();
+                      if (!val) return;
+                      await supabase.from('trip_users').update({ pin_hash: val } as any).eq('id', m.id);
+                      setMembers(prev => prev.map(x => x.id === m.id ? { ...x, pin_hash: val } : x));
+                      e.target.value = '';
+                      toast({ title: `PIN set for ${m.name}` });
+                    }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                  />
+                  {m.pin_hash && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      onClick={async () => {
+                        await supabase.from('trip_users').update({ pin_hash: null } as any).eq('id', m.id);
+                        setMembers(prev => prev.map(x => x.id === m.id ? { ...x, pin_hash: null } : x));
+                        toast({ title: `PIN removed for ${m.name}` });
+                      }}
+                    >
+                      <LockOpen className="mr-1 h-3 w-3" />Clear
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
             {members.length === 0 && (
@@ -441,6 +504,56 @@ const TripSettings = () => {
             <Button size="sm" className="h-9" disabled={!newMemberName.trim() || addingMember} onClick={handleAddMember}>
               <Plus className="mr-1 h-3.5 w-3.5" />Add
             </Button>
+          </div>
+        </section>
+
+        {/* Custom Categories */}
+        <section className="space-y-3">
+          <Label className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Custom Categories
+          </Label>
+          <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+            {/* Predefined (read-only) */}
+            <div className="flex flex-wrap gap-1.5">
+              {PREDEFINED_CATEGORIES.map(cat => (
+                <span key={cat.id} className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium text-white" style={{ backgroundColor: cat.color }}>
+                  {cat.emoji} {cat.name}
+                </span>
+              ))}
+            </div>
+
+            {/* Custom categories */}
+            {((trip?.category_presets as CategoryPreset[] | null) ?? []).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {((trip?.category_presets as CategoryPreset[] | null) ?? []).map((cat, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-sm font-medium text-white" style={{ backgroundColor: cat.color }}>
+                    {cat.emoji} {cat.name}
+                    <button
+                      onClick={async () => {
+                        const updated = ((trip?.category_presets as CategoryPreset[] | null) ?? []).filter((_, idx) => idx !== i);
+                        await supabase.from('trips').update({ category_presets: updated } as any).eq('id', tripId!);
+                        setTrip(prev => prev ? { ...prev, category_presets: updated } : prev);
+                      }}
+                      className="ml-0.5 hover:opacity-70"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Add custom */}
+            <CustomCategoryAdder
+              onAdd={async (cat) => {
+                const existing = (trip?.category_presets as CategoryPreset[] | null) ?? [];
+                const updated = [...existing, cat];
+                await supabase.from('trips').update({ category_presets: updated } as any).eq('id', tripId!);
+                setTrip(prev => prev ? { ...prev, category_presets: updated } : prev);
+                toast({ title: `Category "${cat.name}" added` });
+              }}
+              count={((trip?.category_presets as CategoryPreset[] | null) ?? []).length}
+            />
           </div>
         </section>
 
