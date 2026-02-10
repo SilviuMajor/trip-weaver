@@ -1,129 +1,174 @@
 
 
-# Entries Bank Rework + Opacity & Filtering
+# Timeline UI Polish: Gaps, Compact Cards, Lock Icons, Sidebar Rework
 
 ## Overview
 
-Rework the "All Entries" sidebar into an **Entries Bank** -- showing only original entries (one per unique event), with usage count badges, flight restrictions, 70% opacity for scheduled items, and filter tabs.
+Six targeted changes to improve the timeline's usability and visual clarity:
+
+1. **Gap buttons always visible** with vertical dashed line between events
+2. **"+ Add something" button** for gaps over 2 hours, positioned near event edges; transport button for gaps under 2 hours (mutually exclusive)
+3. **Compact cards** for events under 2 hours -- tighter layout with all info
+4. **Lock icon outside card** -- always visible, positioned top-right outside the card boundary
+5. **Rename "Ideas" filter to "Not Used" and sidebar title to "Trip Events"**
+6. **Independent sidebar scroll** with sticky headers for both sidebar and calendar
 
 ---
 
-## 1. Bank Behavior: Show Only Originals with Count Badge
+## 1. Gap Buttons: Always Visible + Vertical Dashed Line
 
-### Concept
+### Current
+- Buttons are `opacity-0 hover:opacity-100` (invisible until hover)
+- No visual connector between events
 
-- The bank shows each **unique entry** once (the original)
-- When an entry has been placed on the timeline (or duplicated onto it), a **count badge** appears on the card (e.g., "x2" if used twice)
-- Dragging from the bank always **creates a new copy** on the timeline
-- Flights are the exception: they cannot be duplicated (see section 2)
+### Changes
 
-### How to detect duplicates
+**File: `src/components/timeline/CalendarDay.tsx`** (lines ~382-430)
 
-Entries are currently independent rows. To group "originals" and "copies", match entries by their first option's `name` + `category` combination within the same trip. This avoids needing a new DB column.
+- Remove `opacity-0 hover:opacity-100` from gap buttons -- make them always visible with subtle styling
+- Add a vertical dashed line spanning the full gap between each pair of consecutive events:
+  - Positioned at `left: 50%`, from top card's bottom edge to bottom card's top edge
+  - Style: `border-left: 2px dashed` with `border-primary/20` color
+  - The button sits centered on this line at the midpoint
 
-### Implementation
-
-**File: `src/components/timeline/CategorySidebar.tsx`**
-
-- Add deduplication logic in the `grouped` useMemo:
-  - For each category group, deduplicate entries by `option.name + option.category`
-  - Keep the first (oldest by `created_at`) as the "original"
-  - Count how many entries share the same name+category = usage count
-  - Track how many of those are `is_scheduled === true` = scheduled count
-- Pass `usageCount` and `scheduledCount` to each `SidebarEntryCard`
-
-**File: `src/components/timeline/SidebarEntryCard.tsx`**
-
-- Accept new props: `usageCount?: number`, `scheduledCount?: number`
-- When `usageCount > 1`, show a small badge (e.g., "x2") in the top-right corner of the card
-
----
-
-## 2. Flight Restriction
-
-### Behavior
-
-- Flight entries **always appear** in the bank
-- Once scheduled, their card shows at 70% opacity (like other scheduled entries)
-- They are **NOT draggable** and the duplicate/insert buttons are hidden
-- Tapping a flight card opens the entry overlay (existing `onCardTap` behavior) so users can view/edit details
-- The drag handle icon is hidden for flights
-
-### Implementation
-
-**File: `src/components/timeline/SidebarEntryCard.tsx`**
-
-- Accept new prop: `isFlight?: boolean`
-- When `isFlight && isScheduled`:
-  - Set `draggable={false}`, hide `GripVertical`, hide duplicate/insert buttons
-  - Show a small "Scheduled" label or checkmark instead of action buttons
-  - Card is still clickable (opens overlay)
-
-**File: `src/components/timeline/CategorySidebar.tsx`**
-
-- When rendering flight entries, pass `isFlight={true}` to `SidebarEntryCard`
-- Do NOT pass `onDuplicate` or `onInsert` for flight entries
+### Visual
+```text
+[Event A card]
+      |
+      |  (dashed vertical line)
+      |
+   [Transport]   <-- always visible button
+      |
+      |
+[Event B card]
+```
 
 ---
 
-## 3. Opacity Change: 50% to 70%
+## 2. "Transport" vs "+ Add something" (Mutually Exclusive)
 
-### Implementation
+### Logic
 
-**File: `src/components/timeline/SidebarEntryCard.tsx`**
+- **Gap < 120 minutes (2 hours)**: Show "Transport" button only. Clicking it instantly begins creating a transport entry between the two events (triggers TransportPicker or transport creation flow).
+- **Gap >= 120 minutes**: Show "+ Add something" button only. Clicking opens the standard entry creation form, but the form includes a "Transport" category option that, if selected, triggers transport creation between the two places.
 
-- Change `isScheduled && 'opacity-50'` to `isScheduled && 'opacity-70'`
-- Since Tailwind doesn't have `opacity-70` by default, use inline style: `style={{ opacity: isScheduled ? 0.7 : 1 }}`
+### Positioning
 
----
+- **Transport button**: Centered vertically in the gap (current position on the dashed line)
+- **"+ Add something" button**: Positioned approximately 24px below the first event's bottom edge and 24px above the next event's top edge (two buttons, one near each event). If the gap is large enough for both, show both. If tight, show just one centered.
 
-## 4. Filter Tabs
+Actually, per user answer -- mutually exclusive, so:
+- Gap < 2h: one "Transport" button centered
+- Gap >= 2h: one "+ Add something" button centered
 
-### Behavior
+### Changes
 
-Three tabs at the top of the bank, below the header:
-- **All** -- shows every entry (default)
-- **Ideas** -- shows only unscheduled entries (`is_scheduled === false`)
-- **Scheduled** -- shows only scheduled entries
+**File: `src/components/timeline/CalendarDay.tsx`**
 
-The active tab is highlighted. Category sections that have no entries in the current filter are hidden entirely (no empty sections).
-
-### Implementation
-
-**File: `src/components/timeline/CategorySidebar.tsx`**
-
-- Add state: `activeFilter: 'all' | 'ideas' | 'scheduled'` (default: `'all'`)
-- Render 3 tab buttons below the header
-- Apply filter before grouping by category:
-  - `'all'`: show all entries
-  - `'ideas'`: filter to `is_scheduled === false`
-  - `'scheduled'`: filter to `is_scheduled !== false`
-- Hide category sections with 0 entries after filtering
-
----
-
-## 5. Drag from Bank Creates Copy (not move)
-
-### Current behavior
-
-Currently dragging from sidebar sets the entry ID in dataTransfer, and `handleDropOnTimeline` updates that entry's `is_scheduled` to `true`. This **moves** the entry.
-
-### New behavior
-
-Dragging from the bank should **create a copy** (like the existing `handleDuplicate` + schedule logic), not move the original. The original stays in the bank.
-
-Exception: if the entry is currently unscheduled and has never been used, the first drag should move it (schedule it). Subsequent drags create copies.
-
-For flights: dragging is disabled entirely, so this doesn't apply.
-
-### Implementation
+- Change threshold from `90` to `120` minutes for the transport vs add decision
+- Rename "Event" label to "+ Add something"
+- Wire transport button click to trigger transport creation flow directly (call `onAddTransport` callback instead of `onAddBetween`)
+- Wire "+ Add something" click to `onAddBetween` (existing entry form, which already has category selection including transport)
 
 **File: `src/pages/Timeline.tsx`**
 
-- Modify `handleDropOnTimeline`:
-  - Check if entry is a flight -- if so, block the drop
-  - Check `usageCount` -- if the entry is already scheduled somewhere, create a copy instead of moving
-  - If it's an unscheduled entry being placed for the first time, move it (current behavior)
+- Add `onAddTransport` prop/handler to CalendarDay that receives both entry IDs and triggers transport creation between them
+
+---
+
+## 3. Compact Cards for Events Under 2 Hours
+
+### Current thresholds
+- `isCompact`: card height < 40px (single line)
+- `isMedium`: card height 40-80px (two lines, no badge)
+- Full card: > 80px
+
+At 80px/hour, a 2-hour event = 160px. Events under 2 hours (< 160px) should use a tighter layout.
+
+### Changes
+
+**File: `src/components/timeline/EntryCard.tsx`**
+
+- For the "medium" layout (40-80px): already tight, keep as is
+- For "full" cards that are under ~160px tall (events < 2h): create a new "condensed" variant:
+  - Reduce padding from `p-4` to `p-2.5`
+  - Reduce title font from `text-lg` to `text-sm`
+  - Reduce category badge to smaller size
+  - Keep all info (emoji, name, time range, duration) but with `text-xs` throughout
+  - Remove the top margin on category badge (`mb-3` to `mb-1`)
+  - Tighten vertical spacing between elements
+
+**File: `src/components/timeline/CalendarDay.tsx`**
+
+- Pass a new `isCondensed` prop to EntryCard when the card height is between 80px and 160px (i.e., events between 1 and 2 hours)
+
+---
+
+## 4. Lock Icon Outside the Card
+
+### Current
+Lock icon is `absolute top-1.5 right-1.5` inside the card, rendering over the card content.
+
+### Changes
+
+**File: `src/components/timeline/EntryCard.tsx`**
+
+- Remove the lock button from inside the card (all three layouts: compact, medium, full)
+- The lock icon will be rendered by the PARENT component (CalendarDay) outside the card boundary
+
+**File: `src/components/timeline/CalendarDay.tsx`**
+
+- Wrap each EntryCard in a container `div` with `position: relative`
+- Add the lock icon as a sibling element positioned `absolute -top-2 -right-2` (outside the card, overlapping the corner)
+- Style: small circle background (`bg-background border border-border rounded-full p-0.5 shadow-sm`)
+- Always visible (not hover-dependent)
+- Locked: `Lock` icon with `text-amber-500` (prominent)
+- Unlocked: `LockOpen` icon with `text-muted-foreground/50` (subtle but visible)
+
+### Visual
+```text
+                    [lock icon]
++---------------------------+
+| Event card content        |
+|                           |
++---------------------------+
+```
+
+---
+
+## 5. Rename "Ideas" to "Not Used" and "Entries Bank" to "Trip Events"
+
+### Changes
+
+**File: `src/components/timeline/CategorySidebar.tsx`**
+
+- Line 147: Change `label: 'Ideas'` to `label: 'Not Used'`
+- Line 160: Change `Entries Bank` text to `Trip Events`
+
+---
+
+## 6. Independent Sidebar Scroll with Sticky Headers
+
+### Current
+The whole page scrolls together. The sidebar and calendar are inside `flex flex-1 overflow-hidden`, with `main` having `overflow-y-auto`.
+
+### Changes
+
+**File: `src/pages/Timeline.tsx`**
+
+The layout already has `main` with `overflow-y-auto`. The sidebar (CategorySidebar) needs its own independent scroll.
+
+**File: `src/components/timeline/CategorySidebar.tsx`**
+
+- The sidebar header (with "Trip Events" title) and filter tabs should be `sticky top-0` within the sidebar's scroll container
+- The sidebar's panel content `div` already has `flex h-full flex-col` with `overflow-y-auto` on the category sections -- this is correct
+- Ensure the header and filter tabs are outside the `overflow-y-auto` container, using `sticky` positioning so they stay pinned as the category list scrolls
+
+**File: `src/components/timeline/CalendarDay.tsx`**
+
+- Day headers already have `sticky` with `top: 0` and `z-20` -- this should work correctly within the `main` overflow container
+- Verify that the `TimelineHeader` (global header) is `sticky top-0 z-30` (it is, line 132 of TimelineHeader) and the day headers sit below it
+- Update day header sticky `top` to account for the TimelineHeader height (~52px): `style={{ top: '52px' }}` so day headers stick just below the global header instead of overlapping it
 
 ---
 
@@ -131,59 +176,64 @@ For flights: dragging is disabled entirely, so this doesn't apply.
 
 | File | Action | Changes |
 |------|--------|---------|
-| `src/components/timeline/CategorySidebar.tsx` | Edit | Deduplication logic, filter tabs, flight handling, hide empty sections |
-| `src/components/timeline/SidebarEntryCard.tsx` | Edit | Usage count badge, flight restrictions, opacity 70%, isFlight prop |
-| `src/pages/Timeline.tsx` | Edit | Drop handler: copy vs move logic, flight block |
+| `src/components/timeline/CalendarDay.tsx` | Edit | Always-visible gap buttons, vertical dashed line, 2h threshold, transport click handler, condensed prop, lock icon outside card, sticky day header offset |
+| `src/components/timeline/EntryCard.tsx` | Edit | Remove lock icon from inside card, add condensed layout variant |
+| `src/components/timeline/CategorySidebar.tsx` | Edit | Rename "Ideas" to "Not Used", rename "Entries Bank" to "Trip Events", ensure sticky scroll headers |
+| `src/pages/Timeline.tsx` | Edit | Add transport creation handler prop, verify scroll layout |
 
-No new files needed. No database changes.
+No new files. No database changes.
 
 ---
 
 ## Technical Details
 
-### Deduplication logic (CategorySidebar)
+### Vertical dashed line between entries
 
 ```text
-For each category group:
-  1. Group entries by (option.name + option.category)
-  2. For each group:
-     - Pick the entry with earliest created_at as "original"
-     - Count total entries in group = usageCount
-     - Count entries where is_scheduled = true = scheduledCount
-  3. Render only the "original" card with usageCount badge
+// For each gap between consecutive entries:
+const gapTopPx = (aEndHour - startHour) * PIXELS_PER_HOUR;
+const gapBottomPx = (bStartHour - startHour) * PIXELS_PER_HOUR;
+
+<div
+  className="absolute left-1/2 border-l-2 border-dashed border-primary/20 pointer-events-none"
+  style={{ top: gapTopPx, height: gapBottomPx - gapTopPx }}
+/>
 ```
 
-### Filter tabs markup
+### Condensed card threshold
 
 ```text
-[All (15)] [Ideas (4)] [Scheduled (11)]
-
-Rendered as small rounded buttons/tabs in a row below the header.
-Active tab: bg-primary/10 text-primary border-primary/20
-Inactive tab: text-muted-foreground
+// In CalendarDay.tsx, when computing card rendering:
+const heightPx = (endHour - startHour) * PIXELS_PER_HOUR;
+const isCompact = heightPx < 40;
+const isMedium = heightPx >= 40 && heightPx < 80;
+const isCondensed = heightPx >= 80 && heightPx < 160; // 1-2 hour events
+// Full layout for heightPx >= 160
 ```
 
-### Drop handler change (Timeline.tsx)
+### Lock icon outside card (in CalendarDay)
 
 ```text
-handleDropOnTimeline(entryId, day, hourOffset):
-  1. Find the entry
-  2. If entry.options[0].category === 'flight' -> toast error, return
-  3. If entry.is_scheduled === true (already on timeline):
-     -> Create a COPY (clone entry + options + images, set new times, is_scheduled: true)
-  4. If entry.is_scheduled === false (first placement):
-     -> MOVE it (update existing entry, set is_scheduled: true)
-  5. Run travel calculation + conflict detection as before
+<div className="relative">
+  <EntryCard ... />
+  {canEdit && (
+    <button
+      onClick={() => onToggleLock(entry.id, entry.is_locked)}
+      className="absolute -top-2 -right-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+    >
+      {entry.is_locked
+        ? <Lock className="h-3 w-3 text-amber-500" />
+        : <LockOpen className="h-3 w-3 text-muted-foreground/50" />
+      }
+    </button>
+  )}
+</div>
 ```
 
-### Flight card in bank (visual)
+### Day header sticky offset
 
+The global TimelineHeader is ~52px tall and sticky at top:0. Day headers need `top: 52px` to stack below it:
 ```text
-+---------------------------+
-| [check icon] BA 1234      |  <- no grip handle
-| LHR -> AMS                |
-| Day 2         2h 30m      |  <- "Day 2" badge, no action buttons
-+---------------------------+
-  opacity: 0.7, cursor: default (not grab)
+style={{ top: 52 }}
 ```
 
