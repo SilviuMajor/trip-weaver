@@ -38,11 +38,12 @@ interface EntryFormProps {
   editOption?: EntryOption | null;
   prefillStartTime?: string;
   prefillEndTime?: string;
+  prefillCategory?: string;
 }
 
 type Step = 'category' | 'details' | 'when';
 
-const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, editOption, prefillStartTime, prefillEndTime }: EntryFormProps) => {
+const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, editOption, prefillStartTime, prefillEndTime, prefillCategory }: EntryFormProps) => {
   const [step, setStep] = useState<Step>('category');
   const [saving, setSaving] = useState(false);
 
@@ -195,6 +196,18 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
       setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
     }
   }, [prefillStartTime, isEditing, tripTimezone]);
+
+  // Pre-fill category from sidebar "+" button
+  useEffect(() => {
+    if (prefillCategory && open && !editEntry) {
+      const cat = allCategories.find(c => c.id === prefillCategory);
+      if (cat) {
+        setCategoryId(prefillCategory);
+        applySmartDefaults(cat);
+        setStep('details');
+      }
+    }
+  }, [prefillCategory, open, editEntry, applySmartDefaults, allCategories]);
 
   const handlePlaceSelect = (details: PlaceDetails) => {
     setName(details.name);
