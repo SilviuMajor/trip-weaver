@@ -1,195 +1,169 @@
 
-# Transport Card Fixes: Map in Creation, Mode Switcher in View, Snap, No Votes for Transport/Flights
 
-## Overview
+# Fix Flight Card Sizing + Timezone Gutter Redesign + Checkin Alignment
 
-Four changes:
+## The Problem
 
-1. **Fix map not showing in transport creation dialog** -- the map only renders when `transportContext` exists AND `selectedPolyline` is set. The polyline comes from the API response but may not always be present. We need to verify the polyline is being stored from the API and add a fallback display when no polyline exists.
+Flight cards currently calculate their visual height using the difference between **departure local time** and **arrival local time**. This produces incorrect results when crossing timezones:
 
-2. **Add mode switcher + refresh to transport view overlay** -- when clicking an existing transport card, the view overlay should show all travel modes with updated times (similar to the refresh popover on the card), allowing the user to switch modes and auto-resize.
+- **Outbound (LHR to AMS)**: Real duration is 35 minutes, but the card spans 1h35m visually because Amsterdam is +1h ahead
+- **Return (AMS to LHR)**: Real duration is 1h15m, but the card shows as only 15 minutes tall because London is 1h behind
+- **Check-in/flight gap**: Check-in ends at 08:15 but flight departs at 09:15, leaving a 1h gap that shouldn't exist
 
-3. **SNAP button** -- when there's a gap between a transport card's end and the next event's start (and the next event is not locked), show a "SNAP" button below the transport card that moves the next event's start time to immediately follow the transport.
+## The Solution
 
-4. **Hide VoteButton for transport and flights** -- remove the thumbs-up vote from transport (`transfer`) and flight (`flight`) categories in both EntryCard and EntrySheet view mode.
+Three coordinated changes:
 
----
+### 1. Flight card height = actual elapsed UTC duration
 
-## 1. Fix Map in Transport Creation
+Instead of calculating height from `departureLocalTime` to `arrivalLocalTime`, use the actual UTC duration for the flight portion. The card stays positioned at the departure local time but extends for the real elapsed duration.
 
-**Problem**: The route map preview in the creation dialog (line 1327 of EntrySheet.tsx) requires `selectedPolyline` to be truthy. The `selectedPolyline` is set from `fastest.polyline` in `fetchAllRoutes`, but the Google Directions edge function may not always return a polyline.
-
-**Fix**: 
-- Check the edge function response to confirm polylines are included
-- If no polyline is available, still show a static "directions link" fallback (Google Maps link button) instead of the full RouteMapPreview
-- Also ensure `selectedPolyline` updates correctly when switching modes via `handleSelectTransportMode`
-
-**File**: `src/components/timeline/EntrySheet.tsx` (lines 1326-1335)
-
-Replace the condition to also show a fallback when polyline is missing but from/to addresses exist:
-```
-{isTransfer && transportContext && (
-  selectedPolyline ? (
-    <RouteMapPreview ... />
-  ) : transferFrom && transferTo && !transportLoading && transportResults.length > 0 ? (
-    // Fallback: show Google Maps directions link
-    <div className="flex gap-2">
-      <Button variant="outline" size="sm" className="flex-1 text-xs" asChild>
-        <a href={googleMapsUrl} target="_blank">View Route on Google Maps</a>
-      </Button>
-    </div>
-  ) : null
-)}
+**Before (return flight AMS to LHR):**
+```text
+Start: 19:35 CET (18:35 UTC)
+End:   19:50 GMT (19:50 UTC)
+Visual span: 15 minutes -- WRONG
 ```
 
----
-
-## 2. Mode Switcher in Transport View Overlay
-
-**Problem**: When clicking an existing transport card, the EntrySheet view mode shows static transport info but no way to switch modes or refresh travel times.
-
-**Fix**: Add a "Refresh routes" button inside the transport view section (after the duration/distance display, around line 997). When clicked, it fetches all modes from `google-directions` using the entry's `start_time`, then displays selectable mode options. Selecting a mode auto-updates the entry's `end_time`, `distance_km`, `route_polyline`, and `name`.
-
-**File**: `src/components/timeline/EntrySheet.tsx` (view mode, transport section ~lines 936-1023)
-
-New state variables in the component:
-- `viewRefreshing` (boolean)
-- `viewRefreshResults` (TransportResult[])
-- `viewSelectedMode` (string | null)
-- `viewApplying` (boolean)
-
-Add a "Refresh routes" Button that:
-1. Calls `google-directions` with `fromAddress`, `toAddress`, `modes: [walk, transit, drive, bicycle]`, `departureTime: entry.start_time`
-2. Shows selectable mode buttons (same style as creation dialog)
-3. On selection: updates entry `end_time` (rounded to 5m), option `distance_km`, `route_polyline`, `name`
-4. Calls `onSaved()` to refresh
-
----
-
-## 3. SNAP Button Below Transport Cards
-
-**Problem**: When a transport card ends before the next event starts, users want a quick way to close the gap.
-
-**Fix**: In `CalendarDay.tsx`, after rendering a transport entry card, detect if there's a gap to the next entry. If so, render a small "SNAP" pill button below the transport card. Clicking it moves the next entry's `start_time` (and shifts `end_time` by the same delta) to start immediately after the transport ends -- but only if the next entry is NOT locked.
-
-**File**: `src/components/timeline/CalendarDay.tsx`
-
-Logic (inside the entry rendering loop, after the card):
-```
-// After transport card render (around line 762):
-if (isTransfer && nextEntry && !nextEntryLocked) {
-  const gapMs = new Date(nextEntry.start_time).getTime() - new Date(entry.end_time).getTime();
-  if (gapMs > 0) {
-    // Show SNAP button positioned just below the transport card
-    <button onClick={handleSnap}>SNAP</button>
-  }
-}
+**After:**
+```text
+Start: 19:35 CET (positioned at 19:35 on grid)
+Duration: 1h15m (UTC difference)
+Visual span: 1h15m -- CORRECT
+Card bottom: 20:50 on the grid
 ```
 
-The `handleSnap` function:
-1. Calculates the delta between transport end and next entry start
-2. Shifts the next entry's `start_time` to `entry.end_time`
-3. Shifts the next entry's `end_time` by the same negative delta
-4. Updates via `supabase.from('entries').update(...)`
-5. Calls `onVoteChange()` to refresh data
+### 2. Timezone change indicator on time gutter
 
-The SNAP button should be styled as a small orange pill positioned just below the transport card, centered.
+Replace the current dual-column overlapping timezone labels with a cleaner approach:
 
-**New prop needed**: `onSnapNext?: (entryId: string, newStartIso: string) => Promise<void>` on CalendarDay -- or handle it inline with supabase calls.
+- Before the flight: show origin timezone labels (e.g., "CET")
+- At the flight's midpoint on the gutter: show a small badge like **"TZ -1h"** or **"TZ +1h"**
+- After the flight: show destination timezone labels (e.g., "GMT")
+
+This replaces the current confusing overlap where both timezones are shown side-by-side for 3 hours around the flight.
+
+```text
+17:00  |
+18:00  |  [Check-in card]
+19:00  |  [           ]
+19:35  |  [Flight card ] -- positioned at departure local
+       |  [  1h15m     ]
+       |  [           ]
+       |  --- TZ -1h ---    <-- badge at midpoint
+20:50  |  [           ]     <-- card ends here (19:35 + 1h15m)
+20:00  |                    <-- gutter now shows GMT
+21:00  |
+```
+
+### 3. Auto-align check-in end to flight departure
+
+When rendering the flight group card, if the check-in `end_time` doesn't match the flight `start_time`, the visual fractions are computed to align them. Additionally, when flights are created or viewed, the check-in entry's `end_time` should always equal the flight's `start_time`, and `start_time` should equal `flight_start - checkin_hours`.
 
 ---
 
-## 4. Hide VoteButton for Transport and Flights
-
-**Files affected**:
-- `src/components/timeline/EntryCard.tsx` (line 867-876): Add condition to skip VoteButton when `option.category === 'transfer' || option.category === 'flight'`
-- `src/components/timeline/EntrySheet.tsx` (lines 1065-1077): Wrap VoteButton section with a check that `option.category !== 'transfer' && option.category !== 'flight'`
-
----
-
-## File Summary
+## File Changes
 
 | File | Changes |
 |------|---------|
-| `src/components/timeline/EntrySheet.tsx` | Add map fallback in creation, add mode switcher/refresh in view overlay, hide VoteButton for transfer/flight |
-| `src/components/timeline/CalendarDay.tsx` | Add SNAP button below transport cards when gap exists to next unlocked entry |
-| `src/components/timeline/EntryCard.tsx` | Hide VoteButton for transfer and flight categories |
-
-No database changes. No edge function changes.
+| `src/components/timeline/CalendarDay.tsx` | Fix flight card height calculation to use UTC duration; fix group bounds; auto-align checkin times in visual computation |
+| `src/components/timeline/TimeSlotGrid.tsx` | Replace dual-column overlap with single-column labels + TZ change badge at flight midpoint |
+| `src/components/timeline/FlightGroupCard.tsx` | Update duration display to always use UTC elapsed time |
+| `src/pages/Timeline.tsx` | Update `flightEndHour` in `dayTimezoneMap` to use UTC-based positioning instead of arrival local time |
 
 ---
 
 ## Technical Details
 
-### SNAP handler in CalendarDay.tsx
+### CalendarDay.tsx -- Flight height fix (lines 524-554)
+
+The key change is in how `entryEndHour` is computed for flights:
 
 ```typescript
-const handleSnapNext = async (currentEntry: EntryWithOptions, nextEntry: EntryWithOptions) => {
-  const transportEndMs = new Date(currentEntry.end_time).getTime();
-  const nextStartMs = new Date(nextEntry.start_time).getTime();
-  const nextEndMs = new Date(nextEntry.end_time).getTime();
-  const duration = nextEndMs - nextStartMs;
-  const newStart = new Date(transportEndMs).toISOString();
-  const newEnd = new Date(transportEndMs + duration).toISOString();
-  
-  await supabase.from('entries')
-    .update({ start_time: newStart, end_time: newEnd })
-    .eq('id', nextEntry.id);
-  onVoteChange(); // refresh data
-  toast.success('Snapped next event into place');
-};
+// BEFORE (broken):
+entryStartHour = getHourInTimezone(entry.start_time, primaryOption.departure_tz!);
+entryEndHour = getHourInTimezone(entry.end_time, primaryOption.arrival_tz!);
+// Return AMS->LHR: 19.583 to 19.833 = 0.25h (15min) -- WRONG
+
+// AFTER (correct):
+entryStartHour = getHourInTimezone(entry.start_time, primaryOption.departure_tz!);
+const utcDurationHours = (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 3600000;
+entryEndHour = entryStartHour + utcDurationHours;
+// Return AMS->LHR: 19.583 + 1.25 = 20.833 (1h15m) -- CORRECT
 ```
 
-### SNAP button styling
+Same fix applies to the flight group bounds (checkin start, flight, checkout end):
+- Checkin: positioned at checkin start in departure TZ, height = UTC duration of checkin
+- Flight: positioned at flight start in departure TZ, height = UTC duration of flight
+- Checkout: positioned at flight card bottom, height = UTC duration of checkout
+- Group total height = sum of all three UTC durations
 
-```tsx
-<button
-  onClick={(e) => { e.stopPropagation(); handleSnapNext(entry, nextEntry); }}
-  className="absolute z-20 left-1/2 -translate-x-1/2 rounded-full bg-orange-100 dark:bg-orange-900/30 px-3 py-0.5 text-[10px] font-bold text-orange-600 dark:text-orange-300 border border-orange-200 dark:border-orange-800/40 hover:bg-orange-200 dark:hover:bg-orange-800/40 transition-colors"
-  style={{ top: cardBottom + 2 }}
->
-  SNAP
-</button>
-```
+### CalendarDay.tsx -- Checkin alignment
 
-### View mode refresh (EntrySheet.tsx)
+When computing the flight group, force checkin end to match flight start:
 
 ```typescript
-const handleViewRefresh = async () => {
-  if (!entry || !option) return;
-  setViewRefreshing(true);
-  const { data } = await supabase.functions.invoke('google-directions', {
-    body: {
-      fromAddress: option.departure_location,
-      toAddress: option.arrival_location,
-      modes: ['walk', 'transit', 'drive', 'bicycle'],
-      departureTime: entry.start_time,
-    },
-  });
-  setViewRefreshResults(data?.results ?? []);
-  // Auto-select current mode
-  const currentMode = detectMode(option.name);
-  setViewSelectedMode(currentMode);
-  setViewRefreshing(false);
-};
+if (flightGroup.checkin) {
+  // Checkin duration in hours (from UTC)
+  const ciDurationH = (new Date(flightGroup.checkin.end_time).getTime() - 
+                        new Date(flightGroup.checkin.start_time).getTime()) / 3600000;
+  // Checkin ends at flight departure, starts ciDurationH before
+  groupStartHour = entryStartHour - ciDurationH;
+}
+if (flightGroup.checkout) {
+  const coDurationH = (new Date(flightGroup.checkout.end_time).getTime() - 
+                        new Date(flightGroup.checkout.start_time).getTime()) / 3600000;
+  // Checkout starts where flight ends visually
+  groupEndHour = entryEndHour + coDurationH;
+}
+```
 
-const handleViewApplyMode = async (result: TransportResult) => {
-  setViewApplying(true);
-  const blockDur = Math.ceil(result.duration_min / 5) * 5;
-  const newEnd = new Date(new Date(entry.start_time).getTime() + blockDur * 60000).toISOString();
-  const modeLabels = { walk: 'Walk', transit: 'Transit', drive: 'Drive', bicycle: 'Cycle' };
-  const toShort = (option.arrival_location || '').split(',')[0].trim();
-  const newName = `${modeLabels[result.mode] || result.mode} to ${toShort}`;
-  
-  await supabase.from('entries').update({ end_time: newEnd }).eq('id', entry.id);
-  await supabase.from('entry_options').update({
-    distance_km: result.distance_km,
-    route_polyline: result.polyline ?? null,
-    name: newName,
-  }).eq('id', option.id);
-  
-  setViewApplying(false);
-  setViewRefreshResults([]);
-  onSaved();
+### TimeSlotGrid.tsx -- TZ change badge
+
+Replace the current dual-column rendering with:
+
+1. Before flight midpoint: single-column labels in origin timezone
+2. At the flight midpoint: render a small horizontal badge spanning the gutter area saying "TZ +Xh" or "TZ -Xh"
+3. After flight midpoint: single-column labels in destination timezone
+
+The badge replaces the current 3-hour overlap gradient zone. It's a cleaner visual that tells the user exactly what changed.
+
+```typescript
+// At the flight midpoint hour:
+<div className="absolute left-0 right-0 z-[16] flex items-center justify-center"
+     style={{ top: midpointPx }}>
+  <span className="rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 
+                   text-[9px] font-bold text-primary whitespace-nowrap">
+    TZ {offsetHours > 0 ? '+' : ''}{offsetHours}h
+  </span>
+</div>
+```
+
+### FlightGroupCard.tsx -- Duration display
+
+The `formatDuration` function already uses UTC elapsed time (line 37-44), so the duration text on the card (e.g., "1h 15m") is already correct. No change needed there.
+
+### Timeline.tsx -- dayTimezoneMap fix
+
+The `flightEndHour` in the timezone map should use UTC-duration-based positioning (departure local + UTC duration) instead of `getHour(f.end_time, opt.arrival_tz)`:
+
+```typescript
+const depHour = getHour(f.start_time, opt.departure_tz!);
+const utcDurH = (new Date(f.end_time).getTime() - new Date(f.start_time).getTime()) / 3600000;
+return {
+  originTz: opt.departure_tz!,
+  destinationTz: opt.arrival_tz!,
+  flightStartHour: depHour,
+  flightEndHour: depHour + utcDurH,  // position-based, not local arrival time
+  flightEndUtc: f.end_time,
 };
 ```
+
+### Layout + overlap calculations
+
+The `computeOverlapLayout` and `overlapMap` also need the same fix -- anywhere `getHourInTimezone(entry.end_time, endTz)` is used for a flight, it should instead be `startHourInDepTz + utcDurationHours`. This ensures overlap detection works correctly for cross-timezone flights.
+
+### Entries after the flight
+
+Non-flight entries after the flight continue to use the destination timezone for positioning. The `resolveEntryTz` function already handles this via `flightEndUtc` comparison, but `flightEndHour` (used for the gutter transition) now correctly represents where the flight card visually ends on the grid.
+
