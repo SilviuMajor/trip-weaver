@@ -215,6 +215,18 @@ Deno.serve(async (req) => {
 
     // 4. Process each day
     for (const [dayStr, dayEntries] of dayGroups) {
+      // Build maps of flight -> checkout end times and checkin start times
+      const flightCheckoutEnd = new Map<string, string>();
+      const flightCheckinStart = new Map<string, string>();
+      for (const e of dayEntries) {
+        if (e.linked_type === 'checkout' && e.linked_flight_id) {
+          flightCheckoutEnd.set(e.linked_flight_id, e.end_time);
+        }
+        if (e.linked_type === 'checkin' && e.linked_flight_id) {
+          flightCheckinStart.set(e.linked_flight_id, e.start_time);
+        }
+      }
+
       // Filter out checkin/checkout (they're part of flight groups)
       const mainEntries = dayEntries.filter((e: any) =>
         e.linked_type !== 'checkin' && e.linked_type !== 'checkout'
@@ -249,13 +261,24 @@ Deno.serve(async (req) => {
         // Resolve locations
         const fromLoc = resolveFromLocation(optA);
         const toLoc = resolveToLocation(optB);
+
         if (!fromLoc || !toLoc) {
           console.log(`Skipping ${entryA.id} -> ${entryB.id}: missing location`);
           continue;
         }
 
+        // Use checkout end_time for flights (transport starts after checkout, not flight end)
+        const transportStartTime = (optA.category === 'flight')
+          ? (flightCheckoutEnd.get(entryA.id) || entryA.end_time)
+          : entryA.end_time;
+
+        // Use checkin start_time as deadline for destination flights
+        const deadlineTime = (optB.category === 'flight')
+          ? (flightCheckinStart.get(entryB.id) || entryB.start_time)
+          : entryB.start_time;
+
         // Fetch walking + transit directions
-        const departureTime = entryA.end_time;
+        const departureTime = transportStartTime;
         const [walkResult, transitResult] = await Promise.all([
           fetchMode(GOOGLE_MAPS_API_KEY, fromLoc, toLoc, 'WALK', departureTime),
           fetchMode(GOOGLE_MAPS_API_KEY, fromLoc, toLoc, 'TRANSIT', departureTime),
@@ -285,9 +308,9 @@ Deno.serve(async (req) => {
         };
         const emoji = modeEmoji[selected.mode] || '🚶';
 
-        // Build transport entry
+        // Build transport entry - start at checkout end (for flights) or entryA end
         const transportDuration = Math.max(ceilTo5(selected.duration_min), 5);
-        const startTime = entryA.end_time;
+        const startTime = transportStartTime;
         const endTimeMs = new Date(startTime).getTime() + transportDuration * 60000;
         const endTime = new Date(endTimeMs).toISOString();
 

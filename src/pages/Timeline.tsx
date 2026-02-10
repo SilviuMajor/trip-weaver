@@ -832,92 +832,121 @@ const Timeline = () => {
       // Refresh to get the new transport entries
       await fetchData();
 
-      // If there are overlaps, run deterministic push algorithm
-      if (data?.overlaps?.length > 0) {
-        // Re-fetch latest entries after transport was added
-        const { data: freshEntries } = await supabase
-          .from('entries')
-          .select('*')
-          .eq('trip_id', tripId)
-          .eq('is_scheduled', true)
-          .order('start_time');
+      // Always run snap + push algorithm after transport creation
+      const { data: freshEntries } = await supabase
+        .from('entries')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('is_scheduled', true)
+        .order('start_time');
 
-        if (freshEntries && freshEntries.length > 0) {
-          const { data: freshOptions } = await supabase
-            .from('entry_options')
-            .select('entry_id, category')
-            .in('entry_id', freshEntries.map((e: any) => e.id));
+      if (freshEntries && freshEntries.length > 0) {
+        const { data: freshOptions } = await supabase
+          .from('entry_options')
+          .select('entry_id, category')
+          .in('entry_id', freshEntries.map((e: any) => e.id));
 
-          const optMap = new Map<string, string>();
-          for (const o of (freshOptions ?? [])) {
-            if (!optMap.has(o.entry_id)) optMap.set(o.entry_id, o.category ?? '');
-          }
+        const optMap = new Map<string, string>();
+        for (const o of (freshOptions ?? [])) {
+          if (!optMap.has(o.entry_id)) optMap.set(o.entry_id, o.category ?? '');
+        }
 
-          // Group by day
-          const dayGroupsForPush = new Map<string, any[]>();
-          for (const e of freshEntries) {
-            const dayStr = e.start_time.substring(0, 10);
-            if (!dayGroupsForPush.has(dayStr)) dayGroupsForPush.set(dayStr, []);
-            dayGroupsForPush.get(dayStr)!.push(e);
-          }
+        // Group by day
+        const dayGroupsForPush = new Map<string, any[]>();
+        for (const e of freshEntries) {
+          const dayStr = e.start_time.substring(0, 10);
+          if (!dayGroupsForPush.has(dayStr)) dayGroupsForPush.set(dayStr, []);
+          dayGroupsForPush.get(dayStr)!.push(e);
+        }
 
-          const updates: Array<{ id: string; start_time: string; end_time: string }> = [];
+        const updates: Array<{ id: string; start_time: string; end_time: string }> = [];
 
-          for (const [, dayEnts] of dayGroupsForPush) {
-            // Sort by start_time
-            dayEnts.sort((a: any, b: any) =>
-              new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
-            );
+        for (const [, dayEnts] of dayGroupsForPush) {
+          // Sort by start_time
+          dayEnts.sort((a: any, b: any) =>
+            new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+          );
 
-            // Cascade push
-            for (let i = 0; i < dayEnts.length - 1; i++) {
-              const currentEnd = new Date(dayEnts[i].end_time).getTime();
-              const nextStart = new Date(dayEnts[i + 1].start_time).getTime();
-
-              if (currentEnd > nextStart && !dayEnts[i + 1].is_locked) {
-                const overlapMs = currentEnd - nextStart;
-                const nextDuration = new Date(dayEnts[i + 1].end_time).getTime() - new Date(dayEnts[i + 1].start_time).getTime();
-
-                // Check if next entry is overnight (> 6 hours, likely hotel)
-                if (nextDuration > 6 * 3600000) {
-                  // Compress from start: move start_time forward, keep end_time
-                  dayEnts[i + 1].start_time = new Date(currentEnd).toISOString();
+          // SNAP: For each newly created transport, pull the next unlocked non-transport event forward
+          if (data?.created?.length > 0) {
+            for (const transport of data.created) {
+              const transportEnd = new Date(transport.end_time).getTime();
+              // Find the next non-transport, non-locked entry after this transport
+              const nextEntry = dayEnts.find((e: any) => {
+                const eStart = new Date(e.start_time).getTime();
+                return eStart > transportEnd - 1 && // starts at or after transport end (with 1ms tolerance)
+                  !e.is_locked &&
+                  e.linked_type !== 'checkin' && e.linked_type !== 'checkout' &&
+                  optMap.get(e.id) !== 'transfer' &&
+                  e.id !== transport.id;
+              });
+              if (nextEntry) {
+                const gap = new Date(nextEntry.start_time).getTime() - transportEnd;
+                if (gap > 0) {
+                  const duration = new Date(nextEntry.end_time).getTime() - new Date(nextEntry.start_time).getTime();
+                  nextEntry.start_time = new Date(transportEnd).toISOString();
+                  nextEntry.end_time = new Date(transportEnd + duration).toISOString();
                   updates.push({
-                    id: dayEnts[i + 1].id,
-                    start_time: dayEnts[i + 1].start_time,
-                    end_time: dayEnts[i + 1].end_time,
-                  });
-                } else {
-                  // Push: shift both start and end
-                  dayEnts[i + 1].start_time = new Date(new Date(dayEnts[i + 1].start_time).getTime() + overlapMs).toISOString();
-                  dayEnts[i + 1].end_time = new Date(new Date(dayEnts[i + 1].end_time).getTime() + overlapMs).toISOString();
-                  updates.push({
-                    id: dayEnts[i + 1].id,
-                    start_time: dayEnts[i + 1].start_time,
-                    end_time: dayEnts[i + 1].end_time,
+                    id: nextEntry.id,
+                    start_time: nextEntry.start_time,
+                    end_time: nextEntry.end_time,
                   });
                 }
               }
             }
           }
 
-          // Apply updates
-          for (const u of updates) {
-            await supabase
-              .from('entries')
-              .update({ start_time: u.start_time, end_time: u.end_time })
-              .eq('id', u.id);
-          }
+          // CASCADE PUSH: resolve any remaining overlaps
+          for (let i = 0; i < dayEnts.length - 1; i++) {
+            const currentEnd = new Date(dayEnts[i].end_time).getTime();
+            const nextStart = new Date(dayEnts[i + 1].start_time).getTime();
 
-          if (updates.length > 0) {
-            await fetchData();
-          }
+            if (currentEnd > nextStart && !dayEnts[i + 1].is_locked) {
+              const overlapMs = currentEnd - nextStart;
+              const nextDuration = new Date(dayEnts[i + 1].end_time).getTime() - new Date(dayEnts[i + 1].start_time).getTime();
 
-          toast({
-            title: `Added ${data.created.length} transport entries`,
-            description: updates.length > 0 ? `Adjusted ${updates.length} events to resolve overlaps` : undefined,
-          });
+              // Check if next entry is overnight (> 6 hours, likely hotel)
+              if (nextDuration > 6 * 3600000) {
+                // Compress from start: move start_time forward, keep end_time
+                dayEnts[i + 1].start_time = new Date(currentEnd).toISOString();
+              } else {
+                // Push: shift both start and end
+                dayEnts[i + 1].start_time = new Date(new Date(dayEnts[i + 1].start_time).getTime() + overlapMs).toISOString();
+                dayEnts[i + 1].end_time = new Date(new Date(dayEnts[i + 1].end_time).getTime() + overlapMs).toISOString();
+              }
+              // Only add to updates if not already there
+              if (!updates.find(u => u.id === dayEnts[i + 1].id)) {
+                updates.push({
+                  id: dayEnts[i + 1].id,
+                  start_time: dayEnts[i + 1].start_time,
+                  end_time: dayEnts[i + 1].end_time,
+                });
+              } else {
+                // Update existing entry in updates array
+                const existing = updates.find(u => u.id === dayEnts[i + 1].id)!;
+                existing.start_time = dayEnts[i + 1].start_time;
+                existing.end_time = dayEnts[i + 1].end_time;
+              }
+            }
+          }
         }
+
+        // Apply updates
+        for (const u of updates) {
+          await supabase
+            .from('entries')
+            .update({ start_time: u.start_time, end_time: u.end_time })
+            .eq('id', u.id);
+        }
+
+        if (updates.length > 0) {
+          await fetchData();
+        }
+
+        toast({
+          title: `Added ${data?.created?.length ?? 0} transport entries`,
+          description: updates.length > 0 ? `Adjusted ${updates.length} events to resolve overlaps` : undefined,
+        });
       } else {
         toast({ title: `Added ${data?.created?.length ?? 0} transport entries` });
       }
