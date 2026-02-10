@@ -15,6 +15,7 @@ import { localToUTC } from '@/lib/timezoneUtils';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import { Loader2 } from 'lucide-react';
+import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 
 const REFERENCE_DATE = '2099-01-01';
 
@@ -52,6 +53,11 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   const [name, setName] = useState('');
   const [website, setWebsite] = useState('');
   const [locationName, setLocationName] = useState('');
+
+  // Google Places auto-fill
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [autoPhotos, setAutoPhotos] = useState<string[]>([]);
 
   // Flight-specific
   const [departureLocation, setDepartureLocation] = useState('');
@@ -190,6 +196,15 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     }
   }, [prefillStartTime, isEditing, tripTimezone]);
 
+  const handlePlaceSelect = (details: PlaceDetails) => {
+    setName(details.name);
+    if (details.website) setWebsite(details.website);
+    if (details.address) setLocationName(details.address);
+    setLatitude(details.lat);
+    setLongitude(details.lng);
+    if (details.photos.length > 0) setAutoPhotos(details.photos);
+  };
+
   const reset = () => {
     setStep('category');
     setCategoryId('');
@@ -215,6 +230,9 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setDurationMin(60);
     setSaving(false);
     setIsReturnFlight(false);
+    setLatitude(null);
+    setLongitude(null);
+    setAutoPhotos([]);
   };
 
   const handleClose = (open: boolean) => {
@@ -450,8 +468,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         category: cat ? cat.id : null,
         category_color: cat?.color ?? null,
         location_name: locationName.trim() || null,
-        latitude: null,
-        longitude: null,
+        latitude: latitude,
+        longitude: longitude,
         departure_location: isFlight ? (departureLocation.trim() || null) : isTransfer ? (transferFrom.trim() || null) : null,
         arrival_location: isFlight ? (arrivalLocation.trim() || null) : isTransfer ? (transferTo.trim() || null) : null,
         departure_tz: isFlight ? departureTz : null,
@@ -462,17 +480,52 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         airport_checkout_min: isFlight ? checkoutMin : null,
       };
 
+      let optionId: string | null = null;
+
       if (isEditing && editOption) {
         const { error } = await supabase
           .from('entry_options')
           .update(optionPayload)
           .eq('id', editOption.id);
         if (error) throw error;
+        optionId = editOption.id;
       } else {
-        const { error } = await supabase
+        const { data: optData, error } = await supabase
           .from('entry_options')
-          .insert(optionPayload);
+          .insert(optionPayload)
+          .select('id')
+          .single();
         if (error) throw error;
+        optionId = optData.id;
+      }
+
+      // Upload auto-fetched photos
+      if (optionId && autoPhotos.length > 0 && !isEditing) {
+        const existingCount = 0;
+        for (let i = 0; i < autoPhotos.length; i++) {
+          try {
+            const photoUrl = autoPhotos[i];
+            const res = await fetch(photoUrl);
+            if (!res.ok) continue;
+            const blob = await res.blob();
+            const ext = 'jpg';
+            const path = `${optionId}/${Date.now()}_${i}.${ext}`;
+            const { error: uploadErr } = await supabase.storage
+              .from('trip-images')
+              .upload(path, blob, { upsert: false });
+            if (uploadErr) { console.error('Photo upload:', uploadErr); continue; }
+            const { data: urlData } = supabase.storage
+              .from('trip-images')
+              .getPublicUrl(path);
+            await supabase.from('option_images').insert({
+              option_id: optionId,
+              image_url: urlData.publicUrl,
+              sort_order: existingCount + i,
+            });
+          } catch (err) {
+            console.error('Auto-photo upload failed:', err);
+          }
+        }
       }
 
       // Auto-create airport processing entries for new flights
@@ -665,13 +718,23 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
 
               <div className="space-y-2">
                 <Label htmlFor="opt-name">Name *</Label>
-                <Input
-                  id="opt-name"
-                  placeholder={isFlight ? 'e.g. BA1234' : isTransfer ? 'e.g. Airport to Hotel' : 'e.g. Anne Frank House'}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  autoFocus
-                />
+                {!isFlight && !isTransfer ? (
+                  <PlacesAutocomplete
+                    value={name}
+                    onChange={setName}
+                    onPlaceSelect={handlePlaceSelect}
+                    placeholder="e.g. Anne Frank House"
+                    autoFocus
+                  />
+                ) : (
+                  <Input
+                    id="opt-name"
+                    placeholder={isFlight ? 'e.g. BA1234' : 'e.g. Airport to Hotel'}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    autoFocus
+                  />
+                )}
               </div>
 
               {isFlight && (
