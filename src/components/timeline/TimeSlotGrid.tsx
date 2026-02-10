@@ -20,7 +20,6 @@ interface TimeSlotGridProps {
 }
 
 const SNAP_MINUTES = 15;
-const OVERLAP_HOURS = 1.5;
 
 function snapMinutes(totalMinutes: number): number {
   return Math.round(totalMinutes / SNAP_MINUTES) * SNAP_MINUTES;
@@ -36,14 +35,6 @@ function getTzAbbr(tz: string): string {
   } catch {
     return tz.split('/').pop() ?? tz;
   }
-}
-
-function formatHourInTz(hour: number, minute: number, tz: string, refDate: Date): string {
-  // Create a date at the given hour in UTC-ish, then format in the target TZ
-  // For the gutter we just show the hour label offset by TZ difference
-  const h = Math.floor(hour);
-  const m = minute;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 const TimeSlotGrid = ({
@@ -63,32 +54,26 @@ const TimeSlotGrid = ({
 
   const hasDualTz = flights.length > 0;
 
-  // Compute visibility ranges for each timezone column
-  const tzRanges = useMemo(() => {
+  // Compute flight midpoint and TZ offset for the badge
+  const tzInfo = useMemo(() => {
     if (!hasDualTz) return null;
-
-    // Center the 3h overlap on the flight midpoint
-    return flights.map(f => {
-      const midpoint = (f.flightStartHour + f.flightEndHour) / 2;
-      return {
-        ...f,
-        overlapStart: midpoint - OVERLAP_HOURS,
-        overlapEnd: midpoint + OVERLAP_HOURS,
-        originAbbr: getTzAbbr(f.originTz),
-        destAbbr: getTzAbbr(f.destinationTz),
-      };
-    });
+    const f = flights[0];
+    const midpoint = (f.flightStartHour + f.flightEndHour) / 2;
+    const offsetHours = getUtcOffsetHoursDiff(f.originTz, f.destinationTz);
+    return {
+      ...f,
+      midpoint,
+      offsetHours,
+      originAbbr: getTzAbbr(f.originTz),
+      destAbbr: getTzAbbr(f.destinationTz),
+    };
   }, [flights, hasDualTz]);
 
-  // Determine TZ display state at a given hour
-  type TzState = 'single-origin' | 'dual' | 'single-dest';
-  const getTzStateAtHour = useCallback((hour: number): TzState => {
-    if (!tzRanges || tzRanges.length === 0) return 'single-origin';
-    const r = tzRanges[0];
-    if (hour < r.overlapStart) return 'single-origin';
-    if (hour > r.overlapEnd) return 'single-dest';
-    return 'dual';
-  }, [tzRanges]);
+  // Determine which TZ to use for a given hour label
+  const getHourTz = useCallback((hour: number): 'origin' | 'dest' => {
+    if (!tzInfo) return 'origin';
+    return hour >= tzInfo.midpoint ? 'dest' : 'origin';
+  }, [tzInfo]);
 
   // Compute TZ offset in hours between two timezones
   const getTzOffsetHours = useCallback((originTz: string, destTz: string): number => {
@@ -187,28 +172,6 @@ const TimeSlotGrid = ({
     );
   };
 
-  // Render the overlap gradient background
-  const renderOverlapBg = () => {
-    if (!tzRanges || tzRanges.length === 0) return null;
-    const r = tzRanges[0];
-    const overlapStart = r.overlapStart;
-    const overlapEnd = r.overlapEnd;
-
-    if (overlapStart >= endHour || overlapEnd <= startHour) return null;
-
-    const clampedStart = Math.max(overlapStart, startHour);
-    const clampedEnd = Math.min(overlapEnd, endHour);
-    const top = (clampedStart - startHour) * pixelsPerHour;
-    const height = (clampedEnd - clampedStart) * pixelsPerHour;
-
-    return (
-      <div
-        className="pointer-events-none absolute left-0 right-0 z-[1] bg-gradient-to-b from-primary/5 via-primary/8 to-primary/5"
-        style={{ top, height }}
-      />
-    );
-  };
-
   return (
     <div
       ref={containerRef}
@@ -225,13 +188,19 @@ const TimeSlotGrid = ({
       }}
     >
       {hours.map(hour => {
-        const tzState = hasDualTz ? getTzStateAtHour(hour) : null;
-        const tzOffset = hasDualTz && tzRanges?.[0]
-          ? getTzOffsetHours(tzRanges[0].originTz, tzRanges[0].destinationTz)
-          : 0;
-        const destHour = hour + tzOffset;
-        const destH = ((Math.floor(destHour) % 24) + 24) % 24;
-        const destM = Math.round((destHour % 1) * 60);
+        const hourTz = hasDualTz ? getHourTz(hour) : null;
+        const tzOffset = hasDualTz && tzInfo ? tzInfo.offsetHours : 0;
+
+        // For destination TZ hours, show the offset-adjusted time
+        let displayHour: string;
+        if (hourTz === 'dest') {
+          const destHour = hour + tzOffset;
+          const destH = ((Math.floor(destHour) % 24) + 24) % 24;
+          const destM = Math.round((destHour % 1) * 60);
+          displayHour = `${String(destH).padStart(2, '0')}:${String(Math.abs(destM)).padStart(2, '0')}`;
+        } else {
+          displayHour = `${String(hour).padStart(2, '0')}:00`;
+        }
 
         return (
           <div
@@ -239,29 +208,30 @@ const TimeSlotGrid = ({
             className="absolute left-0 right-0 border-t border-border/30"
             style={{ top: (hour - startHour) * pixelsPerHour }}
           >
-            {hasDualTz && tzState === 'dual' ? (
-              <div className="absolute -top-2.5 z-[15] flex select-none items-center" style={{ left: -68, width: 52 }}>
-                <span className="flex-1 text-center text-[9px] font-medium text-muted-foreground">
-                  {String(hour).padStart(2, '0')}:00
-                </span>
-                <span className="h-3 w-px bg-border/60" />
-                <span className="flex-1 text-center text-[9px] font-medium text-primary/70">
-                  {String(destH).padStart(2, '0')}:{String(destM).padStart(2, '0')}
-                </span>
-              </div>
-            ) : hasDualTz && tzState === 'single-dest' ? (
-              <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -46, width: 30 }}>
-                {String(destH).padStart(2, '0')}:{String(destM).padStart(2, '0')}
-              </span>
-            ) : (
-              <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -46, width: 30 }}>
-                {String(hour).padStart(2, '0')}:00
-              </span>
-            )}
+            <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -46, width: 30 }}>
+              {displayHour}
+            </span>
           </div>
         );
       })}
 
+      {/* TZ Change badge at flight midpoint */}
+      {tzInfo && (() => {
+        const midpointPx = (tzInfo.midpoint - startHour) * pixelsPerHour;
+        if (midpointPx < 0 || midpointPx > (endHour - startHour) * pixelsPerHour) return null;
+        const offset = tzInfo.offsetHours;
+        if (offset === 0) return null;
+        return (
+          <div
+            className="absolute z-[16] flex items-center justify-center pointer-events-none"
+            style={{ top: midpointPx - 8, left: -72, width: 56 }}
+          >
+            <span className="rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[9px] font-bold text-primary whitespace-nowrap">
+              TZ {offset > 0 ? '+' : ''}{offset}h
+            </span>
+          </div>
+        );
+      })()}
 
       {renderPreview()}
     </div>
@@ -272,6 +242,17 @@ function getUtcOffsetMinutes(date: Date, tz: string): number {
   const utcStr = date.toLocaleString('en-US', { timeZone: 'UTC' });
   const tzStr = date.toLocaleString('en-US', { timeZone: tz });
   return (new Date(tzStr).getTime() - new Date(utcStr).getTime()) / 60000;
+}
+
+function getUtcOffsetHoursDiff(originTz: string, destTz: string): number {
+  try {
+    const now = new Date();
+    const originOffset = getUtcOffsetMinutes(now, originTz);
+    const destOffset = getUtcOffsetMinutes(now, destTz);
+    return (destOffset - originOffset) / 60;
+  } catch {
+    return 0;
+  }
 }
 
 export default TimeSlotGrid;

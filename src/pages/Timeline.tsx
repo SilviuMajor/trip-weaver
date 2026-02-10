@@ -266,11 +266,13 @@ const Timeline = () => {
             const m = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0');
             return h + m / 60;
           };
+          const depHour = getHour(f.start_time, opt.departure_tz!);
+          const utcDurH = (new Date(f.end_time).getTime() - new Date(f.start_time).getTime()) / 3600000;
           return {
             originTz: opt.departure_tz!,
             destinationTz: opt.arrival_tz!,
-            flightStartHour: getHour(f.start_time, opt.departure_tz!),
-            flightEndHour: getHour(f.end_time, opt.arrival_tz!),
+            flightStartHour: depHour,
+            flightEndHour: depHour + utcDurH,
             flightEndUtc: f.end_time,
           };
         });
