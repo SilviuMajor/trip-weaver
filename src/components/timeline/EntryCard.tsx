@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { MapPin, Clock, Plane, ArrowRight, Lock, LockOpen } from 'lucide-react';
+import { MapPin, Clock, Plane, ArrowRight, Lock, LockOpen, RefreshCw, Loader2, Check } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import RouteMapPreview from './RouteMapPreview';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
 
 import { findCategory } from '@/lib/categories';
 import VoteButton from './VoteButton';
@@ -186,12 +188,133 @@ const EntryCard = ({
     return { emoji: '🚆', label: 'Transport' };
   };
 
+  const formatDistanceVal = (km: number | null | undefined): string => {
+    if (km == null) return '';
+    if (km < 1) return `${Math.round(km * 1000)}m`;
+    return `${km.toFixed(1)}km`;
+  };
+
+  // ─── Refresh state ───
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshResults, setRefreshResults] = useState<{ mode: string; duration_min: number; distance_km: number; polyline?: string | null }[]>([]);
+  const [showRefreshPopover, setShowRefreshPopover] = useState(false);
+  const [selectedRefreshMode, setSelectedRefreshMode] = useState<string | null>(null);
+  const [applyingRefresh, setApplyingRefresh] = useState(false);
+
+  const handleRefresh = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRefreshing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('google-directions', {
+        body: {
+          fromAddress: option.departure_location,
+          toAddress: option.arrival_location,
+          modes: ['walk', 'transit', 'drive', 'bicycle'],
+          departureTime: startTime,
+        },
+      });
+      if (error) throw error;
+      const results = data?.results ?? [];
+      setRefreshResults(results);
+      const currentMode = detectTransportMode(option.name);
+      const modeMap: Record<string, string> = { Walking: 'walk', Transit: 'transit', Driving: 'drive', Cycling: 'bicycle', Transport: 'transit' };
+      setSelectedRefreshMode(modeMap[currentMode.label] ?? results[0]?.mode ?? null);
+      setShowRefreshPopover(true);
+    } catch (err) {
+      console.error('Transport refresh failed:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleApplyRefresh = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const result = refreshResults.find(r => r.mode === selectedRefreshMode);
+    if (!result) return;
+    setApplyingRefresh(true);
+    try {
+      const blockDur = Math.ceil(result.duration_min / 5) * 5;
+      const startDt = new Date(startTime);
+      const newEndIso = new Date(startDt.getTime() + blockDur * 60000).toISOString();
+      const modeLabels: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', bicycle: 'Cycle' };
+      const toShort = (option.arrival_location || '').split(',')[0].trim();
+      const newName = `${modeLabels[result.mode] || result.mode} to ${toShort}`;
+
+      await supabase.from('entries').update({ end_time: newEndIso }).eq('id', option.entry_id);
+      await supabase.from('entry_options').update({
+        distance_km: result.distance_km,
+        route_polyline: result.polyline ?? null,
+        name: newName,
+      } as any).eq('id', option.id);
+
+      setShowRefreshPopover(false);
+      onVoteChange();
+    } catch (err) {
+      console.error('Failed to apply refresh:', err);
+    } finally {
+      setApplyingRefresh(false);
+    }
+  };
+
+  const fmtDurShort = (min: number): string => {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    if (h === 0) return `${m}m`;
+    if (m === 0) return `${h}h`;
+    return `${h}h ${m}m`;
+  };
+
+  const refreshModeEmoji: Record<string, string> = { walk: '🚶', transit: '🚌', drive: '🚗', bicycle: '🚲' };
+
+  const refreshPopover = (
+    <Popover open={showRefreshPopover} onOpenChange={setShowRefreshPopover}>
+      <PopoverTrigger asChild>
+        <button
+          onClick={handleRefresh}
+          className="shrink-0 rounded-full p-1 hover:bg-orange-200/50 dark:hover:bg-orange-800/30 transition-colors"
+        >
+          {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin text-orange-500" /> : <RefreshCw className="h-3.5 w-3.5 text-orange-500" />}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-2.5" align="end" onClick={e => e.stopPropagation()}>
+        <p className="text-[10px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">Updated routes</p>
+        {refreshResults.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-2">No routes found</p>
+        ) : (
+          <div className="space-y-1">
+            {refreshResults.map(r => (
+              <button
+                key={r.mode}
+                onClick={(e) => { e.stopPropagation(); setSelectedRefreshMode(r.mode); }}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs transition-colors',
+                  selectedRefreshMode === r.mode ? 'bg-orange-100 dark:bg-orange-900/30 font-medium' : 'hover:bg-muted'
+                )}
+              >
+                <span className="text-sm">{refreshModeEmoji[r.mode] ?? '🚌'}</span>
+                <span className="flex-1 text-left capitalize">{r.mode === 'bicycle' ? 'Cycle' : r.mode}</span>
+                <span className="text-[10px] text-muted-foreground">{fmtDurShort(r.duration_min)} · {formatDistanceVal(r.distance_km)}</span>
+                {selectedRefreshMode === r.mode && <Check className="h-3 w-3 text-orange-500" />}
+              </button>
+            ))}
+          </div>
+        )}
+        {selectedRefreshMode && refreshResults.length > 0 && (
+          <Button size="sm" className="w-full mt-2 text-xs h-7 bg-orange-500 hover:bg-orange-600" onClick={handleApplyRefresh} disabled={applyingRefresh}>
+            {applyingRefresh ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Apply
+          </Button>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+
   // ─── Transport connector card (all variants) ───
   if (isTransfer) {
     const mode = detectTransportMode(option.name);
-    const blockMin = Math.round(totalMs / 60000);
-    const contingency = blockMin > 0 && blockMin % 5 === 0 ? Math.min(4, blockMin - 1) : 0;
-    // For compact: emoji + duration only
+    const optionDistanceKm = (option as any).distance_km as number | null | undefined;
+    const distStr = formatDistanceVal(optionDistanceKm);
+
     if (isCompact) {
       return (
         <motion.div
@@ -200,21 +323,22 @@ const EntryCard = ({
           onMouseDown={onDragStart}
           onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
           className={cn(
-            'group relative flex items-center gap-1.5 overflow-hidden rounded-lg border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md',
+            'group relative flex items-center gap-1.5 overflow-hidden rounded-lg border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
             isEntryPast && 'opacity-50 grayscale-[30%]',
             isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
             cardSizeClass
           )}
-          style={{ borderLeftColor: catColor, background: `${catColor}0a` }}
+          style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
         >
           <div className="flex w-full items-center gap-1.5 px-2 py-0.5">
             <span className="text-xs shrink-0">{mode.emoji}</span>
-            <span className="text-[10px] font-semibold text-muted-foreground">{durationLabel}</span>
+            <span className="text-[10px] font-semibold text-orange-700 dark:text-orange-300">{durationLabel}</span>
+            {distStr && <span className="text-[10px] text-orange-600/70 dark:text-orange-400/70">· {distStr}</span>}
           </div>
         </motion.div>
       );
     }
-    // For medium: emoji + truncated name + duration
+
     if (isMedium) {
       return (
         <motion.div
@@ -223,22 +347,23 @@ const EntryCard = ({
           onMouseDown={onDragStart}
           onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
           className={cn(
-            'group relative flex items-center overflow-hidden rounded-lg border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md',
+            'group relative flex items-center overflow-hidden rounded-lg border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
             isEntryPast && 'opacity-50 grayscale-[30%]',
             isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
             cardSizeClass
           )}
-          style={{ borderLeftColor: catColor, background: `${catColor}0a` }}
+          style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
         >
           <div className="flex w-full items-center gap-2 px-2.5 py-1">
-            <span className="text-sm shrink-0">{mode.emoji}</span>
+            <span className="text-base shrink-0">{mode.emoji}</span>
             <span className="truncate text-xs font-medium text-foreground flex-1 min-w-0">{option.name}</span>
-            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">{durationLabel}</span>
+            <span className="shrink-0 text-[10px] font-bold text-orange-700 dark:text-orange-300">{durationLabel}</span>
+            {distStr && <span className="shrink-0 text-[10px] text-orange-600/70 dark:text-orange-400/70">· {distStr}</span>}
           </div>
         </motion.div>
       );
     }
-    // For condensed: two lines
+
     if (isCondensed) {
       return (
         <motion.div
@@ -247,27 +372,34 @@ const EntryCard = ({
           onMouseDown={onDragStart}
           onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
           className={cn(
-            'group relative overflow-hidden rounded-xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md',
+            'group relative overflow-hidden rounded-xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
             isEntryPast && 'opacity-50 grayscale-[30%]',
             isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
             cardSizeClass
           )}
-          style={{ borderLeftColor: catColor, background: `${catColor}0a` }}
+          style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
         >
-          <div className="flex h-full flex-col justify-center gap-1 px-3 py-2">
-            <div className="flex items-center gap-2">
-              <span className="text-base shrink-0">{mode.emoji}</span>
-              <span className="truncate text-sm font-semibold text-foreground">{option.name}</span>
+          <div className="flex h-full">
+            <div className="flex items-center justify-center w-12 shrink-0">
+              <span className="text-xl">{mode.emoji}</span>
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="font-bold">{durationLabel}</span>
-              <span className="h-px flex-1 bg-border/50" />
-              <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
+            <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5 py-2 pr-2">
+              <span className="truncate text-sm font-semibold text-foreground">{option.name}</span>
+              <div className="flex items-center gap-2 text-xs text-orange-700 dark:text-orange-300">
+                <span className="font-bold">{durationLabel}</span>
+                {distStr && <span className="text-orange-600/70 dark:text-orange-400/70">· {distStr}</span>}
+                <span className="h-px flex-1 bg-orange-300/30 dark:bg-orange-700/30" />
+                <span className="text-muted-foreground">{formatTime(startTime)} — {formatTime(endTime)}</span>
+              </div>
+            </div>
+            <div className="flex items-start pt-2 pr-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              {refreshPopover}
             </div>
           </div>
         </motion.div>
       );
     }
+
     // Full transport card
     return (
       <motion.div
@@ -276,55 +408,53 @@ const EntryCard = ({
         onMouseDown={onDragStart}
         onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
         className={cn(
-          'group relative overflow-hidden rounded-2xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md',
+          'group relative overflow-hidden rounded-2xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
           isEntryPast && 'opacity-50 grayscale-[30%]',
           isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
           isLocked && 'border-r border-t border-b border-dashed border-muted-foreground/40',
           cardSizeClass
         )}
-        style={{ borderLeftColor: catColor, background: `${catColor}0a` }}
+        style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
       >
-        <div className="relative z-10 p-3 space-y-2">
-          {/* Header row */}
-          <div className="flex items-center gap-2.5">
-            <span className="text-xl shrink-0">{mode.emoji}</span>
-            <div className="flex-1 min-w-0">
-              <h3 className="truncate text-sm font-bold text-foreground">{option.name}</h3>
-              {(option.departure_location || option.arrival_location) && (
-                <p className="truncate text-[11px] text-muted-foreground">
-                  {option.departure_location} → {option.arrival_location}
-                </p>
-              )}
+        <div className="relative z-10 flex h-full">
+          <div className="flex items-center justify-center w-14 shrink-0">
+            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-orange-100 dark:bg-orange-900/30">
+              <span className="text-2xl">{mode.emoji}</span>
             </div>
-            <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">{durationLabel}</span>
           </div>
-
-          {/* Dashed connector line */}
-          <div className="flex items-center gap-2 px-1">
-            <div className="flex-1 border-t-2 border-dashed" style={{ borderColor: `${catColor}40` }} />
-          </div>
-
-          {/* Time + lock */}
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <Clock className="h-3 w-3" />
-              <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
+          <div className="flex-1 min-w-0 py-3 pr-3 space-y-1.5">
+            <h3 className="truncate text-sm font-bold text-foreground">{option.name}</h3>
+            {(option.departure_location || option.arrival_location) && (
+              <p className="truncate text-[11px] text-muted-foreground">
+                {option.departure_location} → {option.arrival_location}
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 text-xs font-bold text-orange-700 dark:text-orange-300">{durationLabel}</span>
+              {distStr && <span className="text-xs text-orange-600/70 dark:text-orange-400/70">{distStr}</span>}
             </div>
-            {isLocked && <Lock className="h-3 w-3 text-muted-foreground/60" />}
-          </div>
-
-          {/* Mini route map */}
-          {(option as any).route_polyline && (
-            <div className="mt-1">
-              <RouteMapPreview
-                polyline={(option as any).route_polyline}
-                fromAddress={option.departure_location || ''}
-                toAddress={option.arrival_location || ''}
-                travelMode={mode.label.toLowerCase()}
-                size="mini"
-              />
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <div className="flex items-center gap-1.5">
+                <Clock className="h-3 w-3" />
+                <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
+              </div>
+              {isLocked && <Lock className="h-3 w-3 text-muted-foreground/60" />}
             </div>
-          )}
+            {(option as any).route_polyline && (
+              <div className="mt-1">
+                <RouteMapPreview
+                  polyline={(option as any).route_polyline}
+                  fromAddress={option.departure_location || ''}
+                  toAddress={option.arrival_location || ''}
+                  travelMode={mode.label.toLowerCase()}
+                  size="mini"
+                />
+              </div>
+            )}
+          </div>
+          <div className="flex items-start pt-3 pr-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            {refreshPopover}
+          </div>
         </div>
       </motion.div>
     );
