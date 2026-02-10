@@ -145,8 +145,11 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     if (prefillStartTime && open && !editEntry) {
       const dt = new Date(prefillStartTime);
       setStartTime(format(dt, 'HH:mm'));
+      if (!isUndated) {
+        setDate(format(dt, 'yyyy-MM-dd'));
+      }
     }
-  }, [prefillStartTime, open, editEntry]);
+  }, [prefillStartTime, open, editEntry, isUndated]);
 
   // Pre-fill end time from prop (drag-to-create)
   useEffect(() => {

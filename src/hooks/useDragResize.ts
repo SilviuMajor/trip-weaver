@@ -105,7 +105,7 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit }: UseDragRes
 
   const commitDrag = useCallback(() => {
     const state = dragStateRef.current;
-    if (state) {
+    if (state && wasDraggedRef.current) {
       onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz);
     }
     setDragState(null);
