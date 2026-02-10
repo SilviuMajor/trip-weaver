@@ -1,84 +1,59 @@
 
 
-# Fix: Header Gap, Invisible Flight Dividers, and Misplaced + Buttons
+# Fix: Reposition "+" Buttons to Card Corners
 
-## Root Cause Analysis
+## Problem
 
-After thoroughly reviewing the full codebase, I found three distinct bugs:
+The "+" buttons are currently placed in the gutter (left of cards, between time labels and the gradient line) using negative `left` offsets. The user wants them at the **top-left and bottom-left corners of each card**, so users can insert something before or after any event.
 
-### 1. Header Gap (Sticky Day Header)
+## Current Implementation
 
-The page structure is:
+- A standalone "+" button before the first entry (lines 360-379) -- positioned in gutter with `left: -14/-20`
+- A standalone "+" button between/after entries (lines 614-684) -- also in gutter with gap-detection logic
+
+Both are siblings of the card div, positioned absolutely within the grid container.
+
+## New Approach
+
+Move the "+" buttons **inside each card's container** so they are positioned relative to the card itself:
+
+- **Top-left corner**: Small "+" button at `top: -10px, left: -10px` (overlapping the card corner). Clicking inserts an entry before this one.
+- **Bottom-left corner**: Small "+" button at `bottom: -10px, left: -10px`. Clicking inserts an entry after this one.
+
+This eliminates the need for gap-detection logic and the separate "before first entry" button. Every card simply has two insertion points.
+
+The buttons will show on hover (using `group-hover` or `opacity-0 hover:opacity-100`) to keep the UI clean.
+
+## File: `src/components/timeline/CalendarDay.tsx`
+
+### Changes
+
+1. **Remove** the standalone "before first entry" + button block (lines 360-379)
+
+2. **Remove** the entire between/after + button block (lines 614-684)
+
+3. **Add two + buttons inside each card's inner container** (the `<div className="relative h-full">` at line 510). These will be:
+   - Top-left: absolutely positioned at `top: -10, left: -10`, triggers `onAddBetween` with a time 60 minutes before the entry start
+   - Bottom-left: absolutely positioned at `bottom: -10, left: -10`, triggers `onAddBetween` with the entry's end time
+   - Both use `z-20`, `opacity-0 group-hover:opacity-100` transition for clean appearance
+   - The parent card container (line 498) gets a `group` class for hover detection
+
+4. Add `group` class to the card wrapper div so the + buttons appear on hover
+
+### Visual Result
+
 ```text
-<div>                                    (root, no overflow)
-  <TimelineHeader sticky top-0 z-30 />  (sticks to viewport)
-  <div className="flex overflow-hidden"> (layout wrapper)
-    <main overflow-y-auto>               (SCROLL CONTAINER)
-      <CalendarDay>
-        <div sticky top={headerHeight}>  (day header)
+  +------------------+
+  |+ (top-left)       |
+  |                   |
+  |   Card Content    |
+  |                   |
+  |+ (bottom-left)    |
+  +------------------+
 ```
 
-The day headers are inside `<main>` which has `overflow-y-auto` -- making `<main>` the scroll container. Sticky elements inside `<main>` position relative to `<main>`'s viewport, which already starts directly below the TimelineHeader. So the correct `top` value is `0`, not `headerHeight`.
+Both buttons are small (20x20px) dashed-border circles, matching the existing style but positioned on the card corners instead of the gutter.
 
-Setting `top: headerHeight` (53-69px) pushes the day header DOWN by the header's height, creating the visible gap.
+## No other files need changes
 
-**Fix**: Set `top: 0` on the day header sticky div. Remove the `headerHeight` prop entirely -- it's not needed.
-
-### 2. Invisible Flight Card Dividers
-
-The dividers use:
-```text
-style={{ backgroundColor: `${catColor}66` }}
-```
-
-But `catColor` is an HSL string like `hsl(260, 50%, 55%)`. Appending `66` to it produces `hsl(260, 50%, 55%)66` which is an invalid CSS color. The browser ignores it, so the dividers are invisible.
-
-**Fix**: Use `hsla()` format or CSS `opacity` instead. Replace with a proper rgba/hsla approach, or use Tailwind's opacity utilities with an inline border approach.
-
-### 3. Misplaced + Buttons
-
-The + buttons use `className="absolute left-0"` but are positioned inside the grid container that has `ml-20` (or `ml-14`). With `left: 0` they render at the left edge of the grid, overlapping the time labels. They should be positioned further left (negative left) to sit in the gutter, or use a different positioning approach.
-
-**Fix**: Change the + buttons to use `style={{ left: -14 }}` (for non-flight days) or `style={{ left: -20 }}` (for flight days) to position them in the gutter area between the time labels and the gradient line.
-
----
-
-## Implementation
-
-### File: `src/components/timeline/CalendarDay.tsx`
-
-**Day header sticky offset (line 247)**:
-- Change `style={{ top: headerHeight ?? 53 }}` to `style={{ top: 0 }}`
-- Remove `headerHeight` from the props interface and destructuring
-
-**+ button positioning (lines 369, 627, 657, 674)**:
-- Change all `className="absolute left-0 z-[15] flex w-10 items-center justify-center"` instances to use `style={{ left: -14 }}` so buttons sit in the gutter, left of cards
-
-### File: `src/components/timeline/FlightGroupCard.tsx`
-
-**Divider colors (lines 118, 172)**:
-- Replace `style={{ backgroundColor: catColor + '66' }}` with a proper approach
-- Use: `style={{ backgroundColor: catColor, opacity: 0.4 }}` which works regardless of color format
-
-### File: `src/pages/Timeline.tsx`
-
-**Remove headerHeight logic**:
-- Remove the `headerRef`, `headerHeight` state, and `ResizeObserver` effect (lines 79-92)
-- Remove `ref={headerRef}` from TimelineHeader (line 537)
-- Remove `headerHeight={headerHeight}` from CalendarDay (line 603)
-
-### File: `src/components/timeline/TimelineHeader.tsx`
-
-**Simplify**: Can remove `forwardRef` since the ref is no longer needed. Revert to a plain function component. (Optional -- keeping forwardRef is harmless.)
-
----
-
-## Summary
-
-| File | Change |
-|------|--------|
-| `CalendarDay.tsx` | Day header `top: 0`, remove `headerHeight` prop, fix + button left positioning |
-| `FlightGroupCard.tsx` | Fix divider color to use `opacity: 0.4` instead of invalid hex suffix on HSL |
-| `Timeline.tsx` | Remove ResizeObserver, headerRef, headerHeight state and prop passing |
-
-These are three small, surgical fixes targeting the actual root causes rather than adding more complexity.
+This is a purely positional change within `CalendarDay.tsx`. The `FlightGroupCard` and `EntryCard` components don't need modification -- the + buttons are rendered by the parent layout.
