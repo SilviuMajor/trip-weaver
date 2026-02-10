@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { MapPin, Clock, Plane, ArrowRight, Lock, LockOpen } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
+import RouteMapPreview from './RouteMapPreview';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -491,6 +492,30 @@ const EntryCard = ({
             <span>{option.departure_location}</span>
             <ArrowRight className="h-3 w-3" />
             <span>{option.arrival_location}</span>
+          </div>
+        )}
+
+        {/* Contingency buffer label for transport */}
+        {isTransfer && (() => {
+          const totalMs = new Date(endTime).getTime() - new Date(startTime).getTime();
+          const blockMin = Math.round(totalMs / 60000);
+          const contingency = blockMin % 5 === 0 ? blockMin - Math.floor(blockMin / 5) * 5 : 0;
+          // A simpler approach: if block is a multiple of 5 and > real duration, show contingency
+          // We don't know real duration here, but we can detect if the block is rounded
+          // For now, show nothing - contingency is visual in the block size
+          return null;
+        })()}
+
+        {/* Mini route map on transport cards */}
+        {isTransfer && (option as any).route_polyline && !isCompact && !isMedium && (
+          <div className="mb-2">
+            <RouteMapPreview
+              polyline={(option as any).route_polyline}
+              fromAddress={option.departure_location || ''}
+              toAddress={option.arrival_location || ''}
+              travelMode="transit"
+              size="mini"
+            />
           </div>
         )}
 
