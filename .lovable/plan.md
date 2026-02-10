@@ -1,85 +1,116 @@
 
 
-# Entry Creation: Image Picker + Merged Form
+# Fix Transport Gap Button + Flight Booking Upload
 
 ## Overview
 
-Three changes to the entry creation flow:
+Two changes:
 
-1. **Show Google Places photos** in the creation form as a horizontal scrollable strip with select/delete and drag-to-reorder
-2. **Merge the "When" step** into the "Details" step, making it a single scrollable page
-3. First image in the strip becomes the **cover photo** for the entry card
+1. **Transport gap button**: Skip the category picker and open directly into a transport-specific form with From/To auto-filled from adjacent entries and all route options auto-fetched
+2. **Flight booking upload**: Add a document upload option to the flight form that parses booking confirmations (PDF/image) using AI to extract flight details
 
 ---
 
-## 1. Image Picker Strip
+## 1. Transport Gap Button Fix
+
+### Current problem
+The "Transport" button in timeline gaps calls `onAddBetween(entry.end_time)` which opens the generic `EntryForm` at the category picker step. It does not pass adjacent entry context or skip to the transport layout.
+
+### Solution
+
+**CalendarDay.tsx** -- Add a new `onAddTransport` callback:
+
+```
+onAddTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string) => void;
+```
+
+The transport gap button calls `onAddTransport(entry.id, nextEntry.id, entry.end_time)` instead of `onAddBetween(entry.end_time)`.
+
+**Timeline.tsx** -- Add `handleAddTransport` handler + `transportContext` state:
+
+- New state: `transportContext: { fromAddress: string; toAddress: string } | null`
+- Handler extracts `location_name` (or `arrival_location` for flights) from the "from" entry's primary option, and `location_name` (or `departure_location`) from the "to" entry's primary option
+- Sets `prefillCategory='transport'` so the category picker is skipped
+- Sets `prefillStartTime` from the gap time
+- Passes `transportContext` to EntryForm
+
+**EntryForm.tsx** -- Accept and use `transportContext`:
+
+- New prop: `transportContext?: { fromAddress: string; toAddress: string } | null`
+- When provided alongside `prefillCategory='transport'`:
+  - Auto-fill `transferFrom` and `transferTo`
+  - Auto-fetch all 4 route modes (walk/transit/cycle/drive) on mount using the existing multi-mode `google-directions` edge function
+  - Display results as an **inline route comparison list** (embedded version of TransportPicker UI) replacing the current manual "From / To / Mode grid / Calculate" layout
+  - Auto-select the fastest mode
+  - Auto-set `durationMin` and `endTime` from the selected route
+  - Auto-generate name: e.g. "Walk to Restaurant Y"
+  - User can tap a different mode to switch
+
+Route comparison inline UI:
+
+```
+From: Museum X           To: Restaurant Y
+ 
+Routes:
+ [x] Walk      12m  0.8km
+ [ ] Transit    8m  1.2km  
+ [ ] Drive      4m  1.1km
+ [ ] Cycle      6m  0.9km
+
+-------- When --------
+Start: 12:30    End: 12:42
+Duration: 12 min (auto)
+```
+
+When `transportContext` is NOT provided (manual transport creation from category picker), the current manual From/To/Mode layout remains unchanged.
+
+---
+
+## 2. Flight Booking Document Upload
 
 ### Behavior
+In the flight details form, add a "Upload booking" button that accepts PDF or image files. The document is sent to an AI edge function that extracts:
+- Flight number (name)
+- Departure/arrival airports (IATA codes)
+- Departure/arrival terminals
+- Departure/arrival times
+- Date
 
-- When the user types a place name and selects from autocomplete, `handlePlaceSelect` currently stores photos in `autoPhotos` (string array of URLs)
-- After photos load, show a **horizontal scroll strip** of thumbnails below the name field
-- Each thumbnail:
-  - Shows a checkmark overlay when selected (all are selected by default)
-  - Tap the **X** button to deselect/delete a photo (removes it from the array)
-  - First image in the strip = cover photo, indicated with a small "Cover" badge
-- **Drag to reorder**: users can drag thumbnails left/right to change order. The leftmost image becomes the cover.
-- Only selected (remaining) photos are saved to `option_images` on submit
-- Does NOT apply to flights or transfers (they use plain `Input`, not `PlacesAutocomplete`)
-- A loading spinner shows while photos are being fetched (use existing `fetchingDetails` state from PlacesAutocomplete)
+Extracted data auto-fills the corresponding form fields. The user can review and correct before saving.
 
 ### Implementation
 
-**New file: `src/components/timeline/PhotoStripPicker.tsx`**
+**New edge function: `supabase/functions/parse-flight-booking/index.ts`**
 
-A self-contained component that:
-- Accepts `photos: string[]` and `onChange: (photos: string[]) => void`
-- Renders a horizontal scrollable row of image thumbnails (fixed height ~80px, aspect ratio preserved)
-- Each thumbnail has an X button (top-right) to remove
-- First thumbnail gets a "Cover" badge (bottom-left)
-- Supports drag-to-reorder using native HTML drag events (`draggable`, `onDragStart`, `onDragOver`, `onDrop`)
-- Smooth reorder animation with a visual drop indicator
-
-**File: `src/components/timeline/EntryForm.tsx`**
-
-- Import `PhotoStripPicker`
-- In the details step (line ~731, after the PlacesAutocomplete field), render:
+- Accepts a base64-encoded file (PDF or image) in the request body
+- Uses Lovable AI (google/gemini-2.5-flash -- good at document understanding, cost-effective) to analyze the document
+- Prompt instructs the model to extract structured flight data
+- Returns JSON with extracted fields:
+  ```json
+  {
+    "flights": [{
+      "flight_number": "BA1234",
+      "departure_airport": "LHR",
+      "arrival_airport": "AMS", 
+      "departure_terminal": "T5",
+      "arrival_terminal": "T1",
+      "departure_time": "10:30",
+      "arrival_time": "13:00",
+      "date": "2025-03-15"
+    }]
+  }
   ```
-  {autoPhotos.length > 0 && !isFlight && !isTransfer && (
-    <PhotoStripPicker photos={autoPhotos} onChange={setAutoPhotos} />
-  )}
-  ```
-- The existing save logic (lines 516-542) already uploads `autoPhotos` to storage -- no change needed there, it will just upload whatever photos remain in the array after user selection
 
----
+**EntryForm.tsx** -- Add upload button to flight section:
 
-## 2. Merge "When" into "Details" (Single Scrollable Page)
-
-### Current flow
-- Step 1: Category picker (grid of emoji buttons)
-- Step 2: Details (name, website, location, etc.) with "Next: When?" button
-- Step 3: When (day/date, time, duration) with "Create Entry" button
-
-### New flow
-- Step 1: Category picker (unchanged)
-- Step 2: Details + When (single scrollable page)
-  - Top: Category badge, name field, photo strip, website, location
-  - Divider or subtle section header: "When"
-  - Day/date picker, time inputs, duration
-  - Footer: "Back" | "Add to Ideas" | "Create Entry"
-
-### Implementation
-
-**File: `src/components/timeline/EntryForm.tsx`**
-
-- Remove the `'when'` step entirely from the `Step` type -- change to `type Step = 'category' | 'details'`
-- Remove `handleDetailsNext` function (no longer needed)
-- In the `step === 'details'` block (lines 717-907):
-  - Keep all existing details fields
-  - After the location/website fields, add a subtle separator: `<div className="border-t border-border/50 pt-4 mt-2"><Label className="text-sm font-semibold text-muted-foreground">When</Label></div>`
-  - Paste in the "when" content (currently lines 910-1026): day/date picker, time inputs, duration
-  - Update the footer to show all three buttons: "Back" (to category), "Add to Ideas", "Create Entry"
-- Remove the `step === 'when'` block entirely (lines 909-1027)
-- The dialog already has `max-h-[90vh] overflow-y-auto` so scrolling works automatically
+- After the "Name" field, add a small "Upload booking" button with a file input (accept: `.pdf, image/*`)
+- On file select:
+  - Read file as base64
+  - Show loading spinner
+  - Call `parse-flight-booking` edge function
+  - Auto-fill: name (flight number), departure/arrival airports (trigger existing airport picker lookup by IATA code), terminals, times, date
+  - Show toast: "Extracted flight details -- please review"
+- If multiple flights found in the document, show a selector to pick which flight to use
 
 ---
 
@@ -87,87 +118,80 @@ A self-contained component that:
 
 | File | Action | Changes |
 |------|--------|---------|
-| `src/components/timeline/PhotoStripPicker.tsx` | **New** | Horizontal drag-to-reorder photo strip with delete and cover badge |
-| `src/components/timeline/EntryForm.tsx` | Edit | Add photo strip after name field; merge "when" step into "details" step; remove step 3 |
+| `src/components/timeline/CalendarDay.tsx` | Edit | Add `onAddTransport` prop; transport gap button uses it with adjacent entries |
+| `src/pages/Timeline.tsx` | Edit | Add `transportContext` state and `handleAddTransport`; pass context to EntryForm |
+| `src/components/timeline/EntryForm.tsx` | Edit | Accept `transportContext` prop; auto-fill from/to; auto-fetch all route modes inline; add flight booking upload button |
+| `supabase/functions/parse-flight-booking/index.ts` | Create | AI-powered flight booking document parser using Gemini |
 
-No database changes. No edge function changes.
+No database changes needed.
 
 ---
 
 ## Technical Details
 
-### PhotoStripPicker component structure
+### Transport auto-fetch on mount (EntryForm.tsx)
 
-```text
-Props:
-  photos: string[]        -- ordered array of image URLs
-  onChange: (p: string[]) => void  -- called when order changes or photo removed
+```typescript
+// New state
+const [transportResults, setTransportResults] = useState<{mode: string; duration_min: number; distance_km: number}[]>([]);
+const [transportLoading, setTransportLoading] = useState(false);
 
-State:
-  dragIndex: number | null  -- index being dragged
+// Auto-fetch when transportContext provided
+useEffect(() => {
+  if (transportContext && categoryId === 'transport' && open) {
+    setTransferFrom(transportContext.fromAddress);
+    setTransferTo(transportContext.toAddress);
+    fetchAllRoutes(transportContext.fromAddress, transportContext.toAddress);
+  }
+}, [transportContext, categoryId, open]);
 
-Render:
-  <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
-    {photos.map((url, i) => (
-      <div
-        key={url}
-        draggable
-        onDragStart={() => setDragIndex(i)}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={() => handleReorder(dragIndex, i)}
-        className="relative flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 cursor-grab
-                   {dragIndex === i ? 'opacity-50' : ''} 
-                   {i === 0 ? 'border-primary' : 'border-border'}"
-      >
-        <img src={url} className="w-full h-full object-cover" />
-        {i === 0 && <span className="absolute bottom-0 left-0 bg-primary text-white text-[9px] px-1.5 py-0.5 rounded-tr-md font-medium">Cover</span>}
-        <button onClick={() => removePhoto(i)} className="absolute top-0.5 right-0.5 bg-black/60 rounded-full p-0.5">
-          <X className="h-3 w-3 text-white" />
-        </button>
-      </div>
-    ))}
-  </div>
-
-handleReorder(from, to):
-  const copy = [...photos]
-  const [item] = copy.splice(from, 1)
-  copy.splice(to, 0, item)
-  onChange(copy)
-
-removePhoto(index):
-  onChange(photos.filter((_, i) => i !== index))
+const fetchAllRoutes = async (from: string, to: string) => {
+  setTransportLoading(true);
+  const { data, error } = await supabase.functions.invoke('google-directions', {
+    body: { fromAddress: from, toAddress: to, modes: ['walk', 'transit', 'drive', 'bicycle'] },
+  });
+  if (!error && data?.results) {
+    setTransportResults(data.results);
+    // Auto-select fastest
+    const fastest = data.results.reduce((a, b) => a.duration_min < b.duration_min ? a : b);
+    setTransferMode(fastest.mode);
+    setDurationMin(fastest.duration_min);
+    // Update end time
+    // Auto-generate name
+    setName(`${modeLabel(fastest.mode)} to ${to.split(',')[0]}`);
+  }
+  setTransportLoading(false);
+};
 ```
 
-### Merged form layout
+### Address extraction in Timeline.tsx
 
-```text
-+----------------------------------+
-| [category badge] <- change       |
-|                                  |
-| Name *                           |
-| [PlacesAutocomplete input]       |
-|                                  |
-| [photo1] [photo2] [photo3] -->   |  <- horizontal scroll strip
-|  Cover                           |
-|                                  |
-| Website                          |
-| [input]                          |
-|                                  |
-| Location Name                    |
-| [input]                          |
-|                                  |
-| -------- When --------           |  <- subtle divider
-|                                  |
-| Day / Date                       |
-| [day picker or date input]       |
-|                                  |
-| Time         Suggested: 09:00... |
-| [Start]      [End]               |
-|                                  |
-| Duration (minutes)               |
-| [input]                          |
-|                                  |
-| [Back] [Add to Ideas] [Create]   |
-+----------------------------------+
+```typescript
+const handleAddTransport = (fromEntryId: string, toEntryId: string, prefillTime: string) => {
+  const allE = /* current entries array */;
+  const fromEntry = allE.find(e => e.id === fromEntryId);
+  const toEntry = allE.find(e => e.id === toEntryId);
+  const fromOpt = fromEntry?.options[0];
+  const toOpt = toEntry?.options[0];
+  
+  // Use location_name for regular entries, arrival_location for flights
+  const fromAddr = fromOpt?.location_name || fromOpt?.arrival_location || '';
+  const toAddr = toOpt?.location_name || toOpt?.departure_location || '';
+  
+  setTransportContext({ fromAddress: fromAddr, toAddress: toAddr });
+  setPrefillStartTime(prefillTime);
+  setPrefillCategory('transport');
+  setEntryFormOpen(true);
+};
 ```
+
+### Flight booking parser edge function
+
+Uses Lovable AI endpoint with Gemini 2.5 Flash for document understanding. The function:
+1. Receives base64 file + MIME type
+2. Sends to Gemini with a structured extraction prompt
+3. Parses the JSON response
+4. Returns extracted flight data
+
+The prompt instructs the model to find flight numbers, IATA codes, terminals, times, and dates from booking confirmations, e-tickets, or itinerary screenshots.
 
