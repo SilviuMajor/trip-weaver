@@ -75,6 +75,19 @@ const Timeline = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { zoom, changeZoom, spacingClass, cardSizeClass, zoomLabel } = useTimelineZoom(scrollRef);
 
+  // Dynamic header height
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(53);
+
+  useEffect(() => {
+    if (!headerRef.current) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setHeaderHeight(entry.contentRect.height + 1);
+    });
+    ro.observe(headerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
   // Redirect if no user
   useEffect(() => {
     if (!currentUser) {
@@ -227,7 +240,7 @@ const Timeline = () => {
       const dayStr = format(day, 'yyyy-MM-dd');
       const dayEntries = scheduledEntries
         .filter(entry => {
-          const entryDay = getDateInTimezone(entry.start_time, tripTimezone);
+          const entryDay = getDateInTimezone(entry.start_time, currentTz);
           return entryDay === dayStr;
         })
         .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
@@ -342,8 +355,10 @@ const Timeline = () => {
 
   const getEntriesForDay = (day: Date): EntryWithOptions[] => {
     const dayStr = format(day, 'yyyy-MM-dd');
+    const tzInfo = dayTimezoneMap.get(dayStr);
+    const tz = tzInfo?.activeTz || tripTimezone;
     return scheduledEntries.filter(entry => {
-      const entryDay = getDateInTimezone(entry.start_time, tripTimezone);
+      const entryDay = getDateInTimezone(entry.start_time, tz);
       return entryDay === dayStr;
     });
   };
@@ -516,6 +531,7 @@ const Timeline = () => {
   return (
     <div className="flex min-h-screen flex-col bg-background" ref={scrollRef}>
       <TimelineHeader
+        ref={headerRef}
         trip={trip}
         tripId={tripId ?? ''}
         onAddEntry={() => {
@@ -581,6 +597,7 @@ const Timeline = () => {
                     dayFlights={tzInfo?.flights}
                     isEditor={isEditor}
                     onToggleLock={handleToggleLock}
+                    headerHeight={headerHeight}
                   />
                 );
               })}
