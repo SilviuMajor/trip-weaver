@@ -19,6 +19,7 @@ import CalendarDay from '@/components/timeline/CalendarDay';
 import EntryOverlay from '@/components/timeline/EntryOverlay';
 import EntryForm from '@/components/timeline/EntryForm';
 import CategorySidebar from '@/components/timeline/CategorySidebar';
+import LivePanel from '@/components/timeline/LivePanel';
 import ConflictResolver from '@/components/timeline/ConflictResolver';
 import DayPickerDialog from '@/components/timeline/DayPickerDialog';
 import HotelWizard from '@/components/timeline/HotelWizard';
@@ -65,6 +66,9 @@ const Timeline = () => {
 
   // Category sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Live panel state
+  const [liveOpen, setLiveOpen] = useState(false);
 
   // Conflict resolution state
   const [conflictOpen, setConflictOpen] = useState(false);
@@ -717,6 +721,8 @@ const Timeline = () => {
         }}
         onDataRefresh={fetchData}
         onToggleIdeas={() => setSidebarOpen(prev => !prev)}
+        onToggleLive={() => setLiveOpen(prev => !prev)}
+        liveOpen={liveOpen}
         ideasCount={unscheduledEntries.length}
         scheduledEntries={scheduledEntries}
       />
@@ -740,6 +746,11 @@ const Timeline = () => {
       ) : (
         <>
           <div className="flex flex-1 overflow-hidden">
+            {/* LIVE panel (left) */}
+            {!isMobile && (
+              <LivePanel open={liveOpen} onOpenChange={setLiveOpen} />
+            )}
+
             <main className="flex-1 overflow-y-auto pb-20">
               {days.map((day, index) => {
                 const dayStr = format(day, 'yyyy-MM-dd');
@@ -829,9 +840,11 @@ const Timeline = () => {
             )}
           </div>
 
-          {/* Mobile FAB for sidebar */}
+          {/* Mobile FABs */}
           {isMobile && (
             <>
+              {/* Mobile Live panel */}
+              <LivePanel open={liveOpen} onOpenChange={setLiveOpen} />
               <button
                 onClick={() => setSidebarOpen(prev => !prev)}
                 className="fixed bottom-20 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-primary shadow-lg transition-transform hover:scale-105 active:scale-95"

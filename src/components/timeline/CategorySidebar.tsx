@@ -35,7 +35,7 @@ const CategorySidebar = ({
 
   // Build full category list: predefined (minus airport_processing) + custom
   const allCategories = useMemo(() => {
-    const cats: CategoryDef[] = PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing');
+    const cats: CategoryDef[] = PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing' && c.id !== 'transport');
     const custom = (trip?.category_presets as CategoryPreset[] | null) ?? [];
     custom.forEach((c, i) => {
       cats.push({
@@ -62,8 +62,8 @@ const CategorySidebar = ({
 
     for (const entry of entries) {
       const catId = entry.options[0]?.category;
-      // Skip airport_processing entries (they're linked to flights)
-      if (catId === 'airport_processing') continue;
+      // Skip airport_processing and transport entries
+      if (catId === 'airport_processing' || catId === 'transport') continue;
 
       if (catId && map.has(catId)) {
         map.get(catId)!.push(entry);
@@ -146,9 +146,7 @@ const CategorySidebar = ({
                     />
                   ))}
                 </div>
-              ) : (
-                <p className="text-[10px] text-muted-foreground/40 pl-6 py-1">No entries</p>
-              )}
+              ) : null}
             </div>
           );
         })}
