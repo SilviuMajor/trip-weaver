@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,19 +9,99 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { addDays, format, parseISO } from 'date-fns';
-import { utcToLocal } from '@/lib/timezoneUtils';
+import { utcToLocal, localToUTC } from '@/lib/timezoneUtils';
 import { PREDEFINED_CATEGORIES, TRAVEL_MODES, type CategoryDef } from '@/lib/categories';
 import type { Trip, EntryWithOptions, EntryOption, CategoryPreset } from '@/types/trip';
-import { localToUTC } from '@/lib/timezoneUtils';
+import { haversineKm } from '@/lib/distance';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import AIRPORTS from '@/lib/airports';
-import { Loader2, Upload, Check } from 'lucide-react';
+import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, Lightbulb, Plane } from 'lucide-react';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import PhotoStripPicker from './PhotoStripPicker';
+import ImageGallery from './ImageGallery';
+import ImageUploader from './ImageUploader';
+import MapPreview from './MapPreview';
+import VoteButton from './VoteButton';
 import { cn } from '@/lib/utils';
 
 const REFERENCE_DATE = '2099-01-01';
+
+// ─── Inline Field (click-to-edit for view mode) ───
+
+interface InlineFieldProps {
+  value: string;
+  canEdit: boolean;
+  onSave: (newValue: string) => Promise<void>;
+  renderDisplay?: (val: string) => React.ReactNode;
+  renderInput?: (val: string, onChange: (v: string) => void, onDone: () => void) => React.ReactNode;
+  className?: string;
+  inputType?: string;
+  placeholder?: string;
+}
+
+const InlineField = ({ value, canEdit, onSave, renderDisplay, renderInput, className, inputType = 'text', placeholder }: InlineFieldProps) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+
+  const handleDone = async () => {
+    if (draft !== value) {
+      setSaving(true);
+      await onSave(draft);
+      setSaving(false);
+    }
+    setEditing(false);
+  };
+
+  if (editing && canEdit) {
+    if (renderInput) {
+      return <>{renderInput(draft, setDraft, handleDone)}</>;
+    }
+    return (
+      <Input
+        type={inputType}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={handleDone}
+        onKeyDown={e => { if (e.key === 'Enter') handleDone(); if (e.key === 'Escape') { setDraft(value); setEditing(false); } }}
+        autoFocus
+        disabled={saving}
+        placeholder={placeholder}
+        className={cn('h-8', className)}
+      />
+    );
+  }
+
+  const display = renderDisplay ? renderDisplay(value) : <span>{value || <span className="text-muted-foreground italic">{placeholder || 'Empty'}</span>}</span>;
+
+  return (
+    <div
+      className={cn('group inline-flex items-center gap-1.5', canEdit && 'cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1 transition-colors', className)}
+      onClick={() => { if (canEdit) { setDraft(value); setEditing(true); } }}
+    >
+      {display}
+      {canEdit && <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />}
+    </div>
+  );
+};
+
+// ─── Helpers ───
+
+function formatTimeInTz(isoString: string, tz: string): string {
+  const d = new Date(isoString);
+  return d.toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function getTzAbbr(tz: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date());
+    return parts.find(p => p.type === 'timeZoneName')?.value ?? tz.split('/').pop() ?? tz;
+  } catch { return tz.split('/').pop() ?? tz; }
+}
+
+// ─── Types ───
 
 interface ReturnFlightData {
   departureLocation: string;
@@ -37,12 +118,26 @@ interface TransportResult {
   distance_km: number;
 }
 
-interface EntryFormProps {
+interface EntrySheetProps {
+  mode: 'create' | 'view';
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tripId: string;
-  onCreated: () => void;
   trip?: Trip | null;
+  onSaved: () => void;
+
+  // View mode
+  entry?: EntryWithOptions | null;
+  option?: EntryOption | null;
+  formatTime?: (iso: string) => string;
+  userLat?: number | null;
+  userLng?: number | null;
+  votingLocked?: boolean;
+  userVotes?: string[];
+  onVoteChange?: () => void;
+  onMoveToIdeas?: (entryId: string) => void;
+
+  // Create mode
   editEntry?: EntryWithOptions | null;
   editOption?: EntryOption | null;
   prefillStartTime?: string;
@@ -53,34 +148,36 @@ interface EntryFormProps {
 
 type Step = 'category' | 'details';
 
-const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, editOption, prefillStartTime, prefillEndTime, prefillCategory, transportContext }: EntryFormProps) => {
+const EntrySheet = ({
+  mode, open, onOpenChange, tripId, trip, onSaved,
+  entry, option, formatTime: formatTimeProp, userLat, userLng,
+  votingLocked, userVotes = [], onVoteChange, onMoveToIdeas,
+  editEntry, editOption, prefillStartTime, prefillEndTime, prefillCategory, transportContext,
+}: EntrySheetProps) => {
+  const { currentUser, isEditor } = useCurrentUser();
+
+  // ─── View mode state ───
+  const [deleting, setDeleting] = useState(false);
+  const [toggling, setToggling] = useState(false);
+
+  // ─── Create mode state ───
   const [step, setStep] = useState<Step>('category');
   const [saving, setSaving] = useState(false);
-
-  // Transport route results (for gap-button flow)
   const [transportResults, setTransportResults] = useState<TransportResult[]>([]);
   const [transportLoading, setTransportLoading] = useState(false);
   const transportFetchedRef = useRef(false);
-
-  // Flight booking upload
   const [flightParseLoading, setFlightParseLoading] = useState(false);
   const [parsedFlights, setParsedFlights] = useState<any[]>([]);
   const flightFileRef = useRef<HTMLInputElement>(null);
 
-  // Step 1: Category
   const [categoryId, setCategoryId] = useState('');
-
-  // Step 2: Details
   const [name, setName] = useState('');
   const [website, setWebsite] = useState('');
   const [locationName, setLocationName] = useState('');
-
-  // Google Places auto-fill
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
   const [autoPhotos, setAutoPhotos] = useState<string[]>([]);
 
-  // Flight-specific
   const [departureLocation, setDepartureLocation] = useState('');
   const [arrivalLocation, setArrivalLocation] = useState('');
   const [departureTz, setDepartureTz] = useState('Europe/London');
@@ -90,20 +187,17 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   const [checkinHours, setCheckinHours] = useState(2);
   const [checkoutMin, setCheckoutMin] = useState(30);
 
-  // Transfer-specific
   const [transferFrom, setTransferFrom] = useState('');
   const [transferTo, setTransferTo] = useState('');
   const [transferMode, setTransferMode] = useState('transit');
   const [calcLoading, setCalcLoading] = useState(false);
 
-  // Step 3: When
   const [date, setDate] = useState('');
   const [selectedDay, setSelectedDay] = useState('0');
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('10:00');
   const [durationMin, setDurationMin] = useState(60);
 
-  // Return flight prompt
   const [returnFlightData, setReturnFlightData] = useState<ReturnFlightData | null>(null);
   const [showReturnPrompt, setShowReturnPrompt] = useState(false);
   const [isReturnFlight, setIsReturnFlight] = useState(false);
@@ -132,10 +226,11 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     })),
   ];
 
-  // Pre-fill when editing
+  // ─── Create mode logic (all preserved from EntryForm) ───
+
   useEffect(() => {
+    if (mode !== 'create') return;
     if (editEntry && open) {
-      const startDt = parseISO(editEntry.start_time);
       const { date: sDate, time: sTime } = utcToLocal(editEntry.start_time, tripTimezone);
       const { time: eTime } = utcToLocal(editEntry.end_time, tripTimezone);
       setDate(sDate);
@@ -144,6 +239,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
 
       if (isUndated) {
         const refDate = parseISO(REFERENCE_DATE);
+        const startDt = parseISO(editEntry.start_time);
         const diff = Math.round((startDt.getTime() - refDate.getTime()) / (1000 * 60 * 60 * 24));
         setSelectedDay(String(Math.max(0, diff)));
       }
@@ -159,7 +255,6 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         setArrivalTz(editOption.arrival_tz ?? 'Europe/Amsterdam');
         setDepartureTerminal(editOption.departure_terminal ?? '');
         setArrivalTerminal(editOption.arrival_terminal ?? '');
-        // For transfer: reuse departure/arrival as from/to
         if (editOption.category === 'transfer') {
           setTransferFrom(editOption.departure_location ?? '');
           setTransferTo(editOption.arrival_location ?? '');
@@ -167,25 +262,22 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         setStep('details');
       }
     }
-  }, [editEntry, editOption, open, isUndated]);
+  }, [editEntry, editOption, open, isUndated, mode]);
 
-  // Pre-fill start time from prop
   useEffect(() => {
+    if (mode !== 'create') return;
     if (prefillStartTime && open && !editEntry) {
       const { date: d, time: t } = utcToLocal(prefillStartTime, tripTimezone);
       setStartTime(t);
-      if (!isUndated) {
-        setDate(d);
-      }
+      if (!isUndated) setDate(d);
     }
-  }, [prefillStartTime, open, editEntry, isUndated, tripTimezone]);
+  }, [prefillStartTime, open, editEntry, isUndated, tripTimezone, mode]);
 
-  // Pre-fill end time from prop (drag-to-create)
   useEffect(() => {
+    if (mode !== 'create') return;
     if (prefillEndTime && open && !editEntry) {
       const { time: eT } = utcToLocal(prefillEndTime, tripTimezone);
       setEndTime(eT);
-      // Calculate duration from prefilled times
       if (prefillStartTime) {
         const startDt = new Date(prefillStartTime);
         const endDt = new Date(prefillEndTime);
@@ -193,7 +285,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         if (diffMin > 0) setDurationMin(diffMin);
       }
     }
-  }, [prefillEndTime, prefillStartTime, open, editEntry, tripTimezone]);
+  }, [prefillEndTime, prefillStartTime, open, editEntry, tripTimezone, mode]);
 
   const applySmartDefaults = useCallback((cat: CategoryDef) => {
     const h = cat.defaultStartHour;
@@ -217,8 +309,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     }
   }, [prefillStartTime, isEditing, tripTimezone]);
 
-  // Pre-fill category from sidebar "+" button
   useEffect(() => {
+    if (mode !== 'create') return;
     if (prefillCategory && open && !editEntry) {
       const cat = allCategories.find(c => c.id === prefillCategory);
       if (cat) {
@@ -227,7 +319,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         setStep('details');
       }
     }
-  }, [prefillCategory, open, editEntry, applySmartDefaults, allCategories]);
+  }, [prefillCategory, open, editEntry, applySmartDefaults, mode]);
 
   const handlePlaceSelect = (details: PlaceDetails) => {
     setName(details.name);
@@ -271,9 +363,11 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     transportFetchedRef.current = false;
     setParsedFlights([]);
     setFlightParseLoading(false);
+    setDeleting(false);
+    setToggling(false);
   };
 
-  // --- Transport gap-button: auto-fill from/to and fetch all routes ---
+  // Transport gap auto-fill
   const fetchAllRoutes = useCallback(async (from: string, to: string) => {
     setTransportLoading(true);
     try {
@@ -282,19 +376,14 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
       });
       if (!error && data?.results) {
         setTransportResults(data.results);
-        // Auto-select fastest
-        const fastest = data.results.reduce((a: TransportResult, b: TransportResult) =>
-          a.duration_min < b.duration_min ? a : b
-        );
+        const fastest = data.results.reduce((a: TransportResult, b: TransportResult) => a.duration_min < b.duration_min ? a : b);
         setTransferMode(fastest.mode);
         setDurationMin(fastest.duration_min);
-        // Update end time
         const [h, m] = startTime.split(':').map(Number);
         const endTotalMin = h * 60 + m + fastest.duration_min;
         const endH = Math.floor(endTotalMin / 60) % 24;
         const endM = endTotalMin % 60;
         setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
-        // Auto-generate name
         const modeLabels: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', bicycle: 'Cycle' };
         const toShort = to.split(',')[0].trim();
         setName(`${modeLabels[fastest.mode] || fastest.mode} to ${toShort}`);
@@ -307,15 +396,15 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   }, [startTime]);
 
   useEffect(() => {
+    if (mode !== 'create') return;
     if (transportContext && open && !transportFetchedRef.current && categoryId === 'transfer') {
       transportFetchedRef.current = true;
       setTransferFrom(transportContext.fromAddress);
       setTransferTo(transportContext.toAddress);
       fetchAllRoutes(transportContext.fromAddress, transportContext.toAddress);
     }
-  }, [transportContext, open, categoryId, fetchAllRoutes]);
+  }, [transportContext, open, categoryId, fetchAllRoutes, mode]);
 
-  // When user selects a different transport mode from inline results
   const handleSelectTransportMode = (result: TransportResult) => {
     setTransferMode(result.mode);
     setDurationMin(result.duration_min);
@@ -329,7 +418,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setName(`${modeLabels[result.mode] || result.mode} to ${toShort}`);
   };
 
-  // --- Flight booking upload ---
+  // Flight booking upload
   const handleFlightFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -337,19 +426,14 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     try {
       const reader = new FileReader();
       const base64 = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(',')[1]); // strip data: prefix
-        };
+        reader.onload = () => { resolve((reader.result as string).split(',')[1]); };
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-
       const { data, error } = await supabase.functions.invoke('parse-flight-booking', {
         body: { fileBase64: base64, mimeType: file.type },
       });
       if (error) throw error;
-
       if (data?.flights?.length > 0) {
         if (data.flights.length === 1) {
           applyParsedFlight(data.flights[0]);
@@ -375,42 +459,29 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     if (flight.arrival_terminal) setArrivalTerminal(flight.arrival_terminal);
     if (flight.departure_time) setStartTime(flight.departure_time);
     if (flight.arrival_time) setEndTime(flight.arrival_time);
-
-    // Look up airports by IATA code
     if (flight.departure_airport) {
       const apt = AIRPORTS.find(a => a.iata === flight.departure_airport.toUpperCase());
-      if (apt) {
-        setDepartureLocation(`${apt.iata} - ${apt.name}`);
-        setDepartureTz(apt.timezone);
-      } else {
-        setDepartureLocation(flight.departure_airport);
-      }
+      if (apt) { setDepartureLocation(`${apt.iata} - ${apt.name}`); setDepartureTz(apt.timezone); }
+      else setDepartureLocation(flight.departure_airport);
     }
     if (flight.arrival_airport) {
       const apt = AIRPORTS.find(a => a.iata === flight.arrival_airport.toUpperCase());
-      if (apt) {
-        setArrivalLocation(`${apt.iata} - ${apt.name}`);
-        setArrivalTz(apt.timezone);
-      } else {
-        setArrivalLocation(flight.arrival_airport);
-      }
+      if (apt) { setArrivalLocation(`${apt.iata} - ${apt.name}`); setArrivalTz(apt.timezone); }
+      else setArrivalLocation(flight.arrival_airport);
     }
     if (flight.date) setDate(flight.date);
-
-    // Recalc duration
     if (flight.departure_time && flight.arrival_time) {
       const entryDate = flight.date || '2099-01-01';
       const dTz = flight.departure_airport ? (AIRPORTS.find(a => a.iata === flight.departure_airport.toUpperCase())?.timezone || departureTz) : departureTz;
       const aTz = flight.arrival_airport ? (AIRPORTS.find(a => a.iata === flight.arrival_airport.toUpperCase())?.timezone || arrivalTz) : arrivalTz;
       calcFlightDuration(flight.departure_time, flight.arrival_time, dTz, aTz, entryDate);
     }
-
     setParsedFlights([]);
   };
 
-  const handleClose = (open: boolean) => {
-    if (!open) reset();
-    onOpenChange(open);
+  const handleClose = (openVal: boolean) => {
+    if (!openVal) reset();
+    onOpenChange(openVal);
   };
 
   const handleCategorySelect = (catId: string) => {
@@ -420,9 +491,6 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setStep('details');
   };
 
-  // handleDetailsNext removed -- when step is merged into details
-
-  // Auto-calculate flight duration
   const calcFlightDuration = useCallback((sTime: string, eTime: string, dTz: string, aTz: string, dateStr: string) => {
     if (!sTime || !eTime) return;
     const entryDate = dateStr || '2099-01-01';
@@ -445,7 +513,6 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     calcFlightDuration(startTime, newEnd, departureTz, arrivalTz, entryDate || '2099-01-01');
   };
 
-  // Airport selection handlers
   const handleDepartureAirportChange = (airport: Airport) => {
     setDepartureLocation(`${airport.iata} - ${airport.name}`);
     setDepartureTz(airport.timezone);
@@ -456,7 +523,6 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setArrivalTz(airport.timezone);
   };
 
-  // Calculate transfer duration via Google Directions
   const calcTransferDuration = async () => {
     if (!transferFrom.trim() || !transferTo.trim()) {
       toast({ title: 'Enter both From and To locations', variant: 'destructive' });
@@ -486,13 +552,11 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     }
   };
 
-  // Auto-detect trip dates from flight
   const autoDetectTripDates = async (entryDate: string, dayIndex: number) => {
     if (!trip || !isUndated || !isFlight) return;
     try {
       const startDate = addDays(parseISO(entryDate), -dayIndex);
       const endDate = addDays(startDate, (trip.duration_days ?? 3) - 1);
-
       await supabase.from('trips').update({
         start_date: format(startDate, 'yyyy-MM-dd'),
         end_date: format(endDate, 'yyyy-MM-dd'),
@@ -500,27 +564,20 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
 
       const { data: allEntries } = await supabase.from('entries').select('*').eq('trip_id', trip.id);
       if (allEntries) {
-        for (const entry of allEntries) {
-          const entryStart = new Date(entry.start_time);
+        for (const ent of allEntries) {
+          const entryStart = new Date(ent.start_time);
           const refBase = new Date('2099-01-01T00:00:00Z');
           const entryDayOffset = Math.round((entryStart.getTime() - refBase.getTime()) / (1000 * 60 * 60 * 24));
-
           if (entryDayOffset >= 0 && entryDayOffset < 365) {
             const realDate = addDays(startDate, entryDayOffset);
-            const entryEnd = new Date(entry.end_time);
             const startTimeStr = format(entryStart, 'HH:mm:ss');
-            const endTimeStr = format(entryEnd, 'HH:mm:ss');
+            const endTimeStr = format(new Date(ent.end_time), 'HH:mm:ss');
             const newStart = `${format(realDate, 'yyyy-MM-dd')}T${startTimeStr}Z`;
             const newEnd = `${format(realDate, 'yyyy-MM-dd')}T${endTimeStr}Z`;
-
-            await supabase.from('entries').update({
-              start_time: newStart,
-              end_time: newEnd,
-            }).eq('id', entry.id);
+            await supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', ent.id);
           }
         }
       }
-
       toast({ title: 'Trip dates set based on your flight! 🎉' });
     } catch (err) {
       console.error('Failed to auto-detect trip dates:', err);
@@ -528,119 +585,77 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   };
 
   const handleSaveAsIdea = async () => {
-    if (!name.trim()) {
-      toast({ title: 'Name is required', variant: 'destructive' });
-      return;
-    }
+    if (!name.trim()) { toast({ title: 'Name is required', variant: 'destructive' }); return; }
     setSaving(true);
     try {
-      // Use a placeholder time for unscheduled entries
       const placeholderDate = isUndated
         ? format(addDays(parseISO(REFERENCE_DATE), Number(selectedDay)), 'yyyy-MM-dd')
         : (date || format(new Date(), 'yyyy-MM-dd'));
       const startIso = localToUTC(placeholderDate, '00:00', tripTimezone);
       const endIso = localToUTC(placeholderDate, '01:00', tripTimezone);
-
       const scheduledDay = isUndated ? Number(selectedDay) : null;
 
-      const { data, error } = await supabase
+      const { data: d, error } = await supabase
         .from('entries')
-        .insert({
-          trip_id: tripId,
-          start_time: startIso,
-          end_time: endIso,
-          is_scheduled: false,
-          scheduled_day: scheduledDay,
-        } as any)
-        .select('id')
-        .single();
+        .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false, scheduled_day: scheduledDay } as any)
+        .select('id').single();
       if (error) throw error;
 
       const cat = allCategories.find(c => c.id === categoryId);
       await supabase.from('entry_options').insert({
-        entry_id: data.id,
-        name: name.trim(),
-        website: website.trim() || null,
-        category: cat ? cat.id : null,
-        category_color: cat?.color ?? null,
+        entry_id: d.id, name: name.trim(), website: website.trim() || null,
+        category: cat ? cat.id : null, category_color: cat?.color ?? null,
         location_name: locationName.trim() || null,
         departure_location: isFlight ? (departureLocation.trim() || null) : isTransfer ? (transferFrom.trim() || null) : null,
         arrival_location: isFlight ? (arrivalLocation.trim() || null) : isTransfer ? (transferTo.trim() || null) : null,
-        departure_tz: isFlight ? departureTz : null,
-        arrival_tz: isFlight ? arrivalTz : null,
+        departure_tz: isFlight ? departureTz : null, arrival_tz: isFlight ? arrivalTz : null,
       } as any);
 
-      onCreated();
+      onSaved();
       handleClose(false);
       toast({ title: 'Added to ideas panel 💡' });
     } catch (err: any) {
       toast({ title: 'Failed to save', description: err.message, variant: 'destructive' });
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const handleSave = async () => {
-    const entryDate = isUndated
-      ? format(addDays(parseISO(REFERENCE_DATE), Number(selectedDay)), 'yyyy-MM-dd')
-      : date;
-
-    if (!entryDate) {
-      toast({ title: 'Please select a date', variant: 'destructive' });
-      return;
-    }
+    const entryDate = isUndated ? format(addDays(parseISO(REFERENCE_DATE), Number(selectedDay)), 'yyyy-MM-dd') : date;
+    if (!entryDate) { toast({ title: 'Please select a date', variant: 'destructive' }); return; }
 
     setSaving(true);
     try {
-      let startIso: string;
-      let endIso: string;
-
+      let startIso: string, endIso: string;
       if (isFlight) {
         startIso = localToUTC(entryDate, startTime, departureTz);
         endIso = localToUTC(entryDate, endTime, arrivalTz);
         if (new Date(endIso) <= new Date(startIso)) {
-          const nextDay = format(addDays(parseISO(entryDate), 1), 'yyyy-MM-dd');
-          endIso = localToUTC(nextDay, endTime, arrivalTz);
+          endIso = localToUTC(format(addDays(parseISO(entryDate), 1), 'yyyy-MM-dd'), endTime, arrivalTz);
         }
       } else {
-        // Fix: convert local time to proper UTC using trip timezone
         startIso = localToUTC(entryDate, startTime, tripTimezone);
         endIso = localToUTC(entryDate, endTime, tripTimezone);
       }
 
       let entryId: string;
-
       if (isEditing && editEntry) {
-        const { error } = await supabase
-          .from('entries')
-          .update({ start_time: startIso, end_time: endIso })
-          .eq('id', editEntry.id);
+        const { error } = await supabase.from('entries').update({ start_time: startIso, end_time: endIso }).eq('id', editEntry.id);
         if (error) throw error;
         entryId = editEntry.id;
       } else {
-        const { data, error } = await supabase
-          .from('entries')
-          .insert({ trip_id: tripId, start_time: startIso, end_time: endIso })
-          .select('id')
-          .single();
+        const { data: d, error } = await supabase.from('entries').insert({ trip_id: tripId, start_time: startIso, end_time: endIso }).select('id').single();
         if (error) throw error;
-        entryId = data.id;
+        entryId = d.id;
       }
 
       const cat = allCategories.find(c => c.id === categoryId);
       const optionPayload: any = {
-        entry_id: entryId,
-        name: name.trim(),
-        website: website.trim() || null,
-        category: cat ? cat.id : null,
-        category_color: cat?.color ?? null,
-        location_name: locationName.trim() || null,
-        latitude: latitude,
-        longitude: longitude,
+        entry_id: entryId, name: name.trim(), website: website.trim() || null,
+        category: cat ? cat.id : null, category_color: cat?.color ?? null,
+        location_name: locationName.trim() || null, latitude, longitude,
         departure_location: isFlight ? (departureLocation.trim() || null) : isTransfer ? (transferFrom.trim() || null) : null,
         arrival_location: isFlight ? (arrivalLocation.trim() || null) : isTransfer ? (transferTo.trim() || null) : null,
-        departure_tz: isFlight ? departureTz : null,
-        arrival_tz: isFlight ? arrivalTz : null,
+        departure_tz: isFlight ? departureTz : null, arrival_tz: isFlight ? arrivalTz : null,
         departure_terminal: isFlight ? (departureTerminal.trim() || null) : null,
         arrival_terminal: isFlight ? (arrivalTerminal.trim() || null) : null,
         airport_checkin_hours: isFlight ? checkinHours : null,
@@ -648,134 +663,73 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
       };
 
       let optionId: string | null = null;
-
       if (isEditing && editOption) {
-        const { error } = await supabase
-          .from('entry_options')
-          .update(optionPayload)
-          .eq('id', editOption.id);
+        const { error } = await supabase.from('entry_options').update(optionPayload).eq('id', editOption.id);
         if (error) throw error;
         optionId = editOption.id;
       } else {
-        const { data: optData, error } = await supabase
-          .from('entry_options')
-          .insert(optionPayload)
-          .select('id')
-          .single();
+        const { data: optData, error } = await supabase.from('entry_options').insert(optionPayload).select('id').single();
         if (error) throw error;
         optionId = optData.id;
       }
 
       // Upload auto-fetched photos
       if (optionId && autoPhotos.length > 0 && !isEditing) {
-        const existingCount = 0;
         for (let i = 0; i < autoPhotos.length; i++) {
           try {
-            const photoUrl = autoPhotos[i];
-            const res = await fetch(photoUrl);
+            const res = await fetch(autoPhotos[i]);
             if (!res.ok) continue;
             const blob = await res.blob();
-            const ext = 'jpg';
-            const path = `${optionId}/${Date.now()}_${i}.${ext}`;
-            const { error: uploadErr } = await supabase.storage
-              .from('trip-images')
-              .upload(path, blob, { upsert: false });
-            if (uploadErr) { console.error('Photo upload:', uploadErr); continue; }
-            const { data: urlData } = supabase.storage
-              .from('trip-images')
-              .getPublicUrl(path);
-            await supabase.from('option_images').insert({
-              option_id: optionId,
-              image_url: urlData.publicUrl,
-              sort_order: existingCount + i,
-            });
-          } catch (err) {
-            console.error('Auto-photo upload failed:', err);
-          }
+            const path = `${optionId}/${Date.now()}_${i}.jpg`;
+            const { error: uploadErr } = await supabase.storage.from('trip-images').upload(path, blob, { upsert: false });
+            if (uploadErr) continue;
+            const { data: urlData } = supabase.storage.from('trip-images').getPublicUrl(path);
+            await supabase.from('option_images').insert({ option_id: optionId, image_url: urlData.publicUrl, sort_order: i });
+          } catch {}
         }
       }
 
       // Auto-create airport processing entries for new flights
       if (isFlight && !isEditing && checkinHours > 0) {
-        // Check-in entry: ends at flight departure, starts X hours before
         const checkinEnd = new Date(startIso);
         const checkinStart = new Date(checkinEnd.getTime() - checkinHours * 60 * 60 * 1000);
-        const { data: checkinEntry } = await supabase
-          .from('entries')
-          .insert({
-            trip_id: tripId,
-            start_time: checkinStart.toISOString(),
-            end_time: checkinEnd.toISOString(),
-            is_locked: true,
-            linked_flight_id: entryId,
-            linked_type: 'checkin',
-          } as any)
-          .select('id')
-          .single();
+        const { data: checkinEntry } = await supabase.from('entries')
+          .insert({ trip_id: tripId, start_time: checkinStart.toISOString(), end_time: checkinEnd.toISOString(), is_locked: true, linked_flight_id: entryId, linked_type: 'checkin' } as any)
+          .select('id').single();
         if (checkinEntry) {
-          await supabase.from('entry_options').insert({
-            entry_id: checkinEntry.id,
-            name: 'Airport Check-in',
-            category: 'airport_processing',
-            category_color: 'hsl(210, 50%, 60%)',
-            location_name: departureLocation.split(' - ')[0] || null,
-          } as any);
+          await supabase.from('entry_options').insert({ entry_id: checkinEntry.id, name: 'Airport Check-in', category: 'airport_processing', category_color: 'hsl(210, 50%, 60%)', location_name: departureLocation.split(' - ')[0] || null } as any);
         }
       }
-
       if (isFlight && !isEditing && checkoutMin > 0) {
-        // Checkout entry: starts at flight arrival, ends Y minutes after
         const checkoutStart = new Date(endIso);
         const checkoutEnd = new Date(checkoutStart.getTime() + checkoutMin * 60 * 1000);
-        const { data: checkoutEntry } = await supabase
-          .from('entries')
-          .insert({
-            trip_id: tripId,
-            start_time: checkoutStart.toISOString(),
-            end_time: checkoutEnd.toISOString(),
-            is_locked: true,
-            linked_flight_id: entryId,
-            linked_type: 'checkout',
-          } as any)
-          .select('id')
-          .single();
+        const { data: checkoutEntry } = await supabase.from('entries')
+          .insert({ trip_id: tripId, start_time: checkoutStart.toISOString(), end_time: checkoutEnd.toISOString(), is_locked: true, linked_flight_id: entryId, linked_type: 'checkout' } as any)
+          .select('id').single();
         if (checkoutEntry) {
-          await supabase.from('entry_options').insert({
-            entry_id: checkoutEntry.id,
-            name: 'Airport Checkout',
-            category: 'airport_processing',
-            category_color: 'hsl(210, 50%, 60%)',
-            location_name: arrivalLocation.split(' - ')[0] || null,
-          } as any);
+          await supabase.from('entry_options').insert({ entry_id: checkoutEntry.id, name: 'Airport Checkout', category: 'airport_processing', category_color: 'hsl(210, 50%, 60%)', location_name: arrivalLocation.split(' - ')[0] || null } as any);
         }
       }
 
-      // Auto-detect dates from flight on undated trip
       if (isFlight && isUndated && !isEditing && date) {
         await autoDetectTripDates(date, Number(selectedDay));
       }
 
-      onCreated();
+      onSaved();
       handleClose(false);
       toast({ title: isEditing ? 'Entry updated!' : 'Entry created!' });
 
-      // Prompt return flight for new flights
       if (isFlight && !isEditing && !isReturnFlight) {
         setReturnFlightData({
-          departureLocation: arrivalLocation,
-          arrivalLocation: departureLocation,
-          departureTz: arrivalTz,
-          arrivalTz: departureTz,
-          departureTerminal: '',
-          arrivalTerminal: '',
+          departureLocation: arrivalLocation, arrivalLocation: departureLocation,
+          departureTz: arrivalTz, arrivalTz: departureTz,
+          departureTerminal: '', arrivalTerminal: '',
         });
         setShowReturnPrompt(true);
       }
     } catch (err: any) {
       toast({ title: 'Failed to save entry', description: err.message, variant: 'destructive' });
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const handleReturnFlightConfirm = () => {
@@ -790,32 +744,22 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setArrivalTz(returnFlightData.arrivalTz);
     setDepartureTerminal('');
     setArrivalTerminal('');
-    setWebsite('');
-    setLocationName('');
-    setTransferFrom('');
-    setTransferTo('');
-    setDate('');
-    setSelectedDay('0');
+    setWebsite(''); setLocationName(''); setTransferFrom(''); setTransferTo('');
+    setDate(''); setSelectedDay('0');
     const cat = PREDEFINED_CATEGORIES.find(c => c.id === 'flight');
     if (cat) {
       setStartTime(`${String(cat.defaultStartHour).padStart(2, '0')}:${String(cat.defaultStartMin).padStart(2, '0')}`);
       setDurationMin(cat.defaultDurationMin);
       const endTotalMin = cat.defaultStartHour * 60 + cat.defaultStartMin + cat.defaultDurationMin;
-      const endH = Math.floor(endTotalMin / 60) % 24;
-      const endM = endTotalMin % 60;
-      setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
+      setEndTime(`${String(Math.floor(endTotalMin / 60) % 24).padStart(2, '0')}:${String(endTotalMin % 60).padStart(2, '0')}`);
     }
     setStep('details');
     onOpenChange(true);
     setReturnFlightData(null);
   };
 
-  const handleReturnFlightDecline = () => {
-    setShowReturnPrompt(false);
-    setReturnFlightData(null);
-  };
+  const handleReturnFlightDecline = () => { setShowReturnPrompt(false); setReturnFlightData(null); };
 
-  // Recalculate end time when start time or duration changes (non-flight)
   const handleStartTimeChange = (newStart: string) => {
     setStartTime(newStart);
     const [h, m] = newStart.split(':').map(Number);
@@ -825,23 +769,262 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
   };
 
-  // Get timezone abbreviation for display
-  const getTzAbbr = (tz: string): string => {
+  // ─── View mode helpers ───
+
+  const handleToggleLock = async () => {
+    if (!entry) return;
+    setToggling(true);
     try {
-      const parts = new Intl.DateTimeFormat('en-GB', {
-        timeZone: tz,
-        timeZoneName: 'short',
-      }).formatToParts(new Date());
-      return parts.find(p => p.type === 'timeZoneName')?.value ?? tz;
-    } catch {
-      return tz;
-    }
+      const { error } = await supabase.from('entries').update({ is_locked: !entry.is_locked } as any).eq('id', entry.id);
+      if (error) throw error;
+      toast({ title: entry.is_locked ? 'Entry unlocked' : 'Entry locked' });
+      onSaved();
+    } catch (err: any) {
+      toast({ title: 'Failed to toggle lock', description: err.message, variant: 'destructive' });
+    } finally { setToggling(false); }
   };
+
+  const handleInlineSaveOption = async (field: string, value: string) => {
+    if (!option) return;
+    const { error } = await supabase.from('entry_options').update({ [field]: value || null } as any).eq('id', option.id);
+    if (error) { toast({ title: 'Failed to save', variant: 'destructive' }); return; }
+    onSaved();
+  };
+
+  const handleInlineSaveEntry = async (field: string, value: string) => {
+    if (!entry) return;
+    const { error } = await supabase.from('entries').update({ [field]: value } as any).eq('id', entry.id);
+    if (error) { toast({ title: 'Failed to save', variant: 'destructive' }); return; }
+    onSaved();
+  };
+
+  // ─── Render ───
 
   const stepTitle = step === 'category'
     ? 'What are you planning?'
     : (isFlight ? '✈️ Flight Details' : isTransfer ? '🚐 Transfer Details' : `${selectedCategory?.emoji ?? '📌'} Details`);
 
+  // ─── VIEW MODE ───
+  if (mode === 'view') {
+    if (!entry || !option) return null;
+
+    const distance = userLat != null && userLng != null && option.latitude != null && option.longitude != null
+      ? haversineKm(userLat, userLng, option.latitude, option.longitude) : null;
+    const hasVoted = userVotes.includes(option.id);
+    const images = option.images ?? [];
+    const isLocked = entry.is_locked;
+    const isFlightView = option.category === 'flight' && option.departure_tz && option.arrival_tz;
+    const flightDurationMin = isFlightView ? Math.round((new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 60000) : 0;
+    const flightHours = Math.floor(flightDurationMin / 60);
+    const flightMins = flightDurationMin % 60;
+
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+          <div className="space-y-4">
+            <DialogHeader className="text-left">
+              {option.category && (
+                <Badge
+                  className="w-fit gap-1 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+                  style={option.category_color ? { backgroundColor: option.category_color, color: '#fff' } : undefined}
+                >
+                  {isFlightView && <Plane className="h-3 w-3" />}
+                  {option.category}
+                </Badge>
+              )}
+              <DialogTitle className="font-display text-xl">
+                <InlineField
+                  value={option.name}
+                  canEdit={isEditor}
+                  onSave={async (v) => handleInlineSaveOption('name', v)}
+                  placeholder="Entry name"
+                />
+              </DialogTitle>
+            </DialogHeader>
+
+            {/* Flight layout */}
+            {isFlightView ? (
+              <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1 text-left space-y-0.5">
+                    <InlineField
+                      value={option.departure_location || 'Departure'}
+                      canEdit={isEditor}
+                      onSave={async (v) => handleInlineSaveOption('departure_location', v)}
+                      renderDisplay={(val) => <p className="text-sm font-bold text-foreground">{val}</p>}
+                    />
+                    {option.departure_terminal && (
+                      <InlineField
+                        value={option.departure_terminal}
+                        canEdit={isEditor}
+                        onSave={async (v) => handleInlineSaveOption('departure_terminal', v)}
+                        renderDisplay={(val) => <p className="text-xs text-muted-foreground">{val}</p>}
+                        placeholder="Terminal"
+                      />
+                    )}
+                    <p className="text-lg font-semibold text-foreground">
+                      {formatTimeInTz(entry.start_time, option.departure_tz!)}
+                    </p>
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase">
+                      {getTzAbbr(option.departure_tz!)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-center gap-1 shrink-0">
+                    <Plane className="h-4 w-4 text-muted-foreground" />
+                    <div className="h-px w-12 bg-border" />
+                    <span className="text-[10px] text-muted-foreground">
+                      {flightHours > 0 ? `${flightHours}h ` : ''}{flightMins}m
+                    </span>
+                  </div>
+                  <div className="flex-1 text-right space-y-0.5">
+                    <InlineField
+                      value={option.arrival_location || 'Arrival'}
+                      canEdit={isEditor}
+                      onSave={async (v) => handleInlineSaveOption('arrival_location', v)}
+                      renderDisplay={(val) => <p className="text-sm font-bold text-foreground">{val}</p>}
+                    />
+                    {option.arrival_terminal && (
+                      <InlineField
+                        value={option.arrival_terminal}
+                        canEdit={isEditor}
+                        onSave={async (v) => handleInlineSaveOption('arrival_terminal', v)}
+                        renderDisplay={(val) => <p className="text-xs text-muted-foreground">{val}</p>}
+                        placeholder="Terminal"
+                      />
+                    )}
+                    <p className="text-lg font-semibold text-foreground">
+                      {formatTimeInTz(entry.end_time, option.arrival_tz!)}
+                    </p>
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase">
+                      {getTzAbbr(option.arrival_tz!)}
+                    </p>
+                  </div>
+                </div>
+                {isLocked && (
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Lock className="h-3 w-3" /> Locked
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* Generic time (inline-editable) */}
+                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <Clock className="h-4 w-4" />
+                  <span>{formatTimeProp?.(entry.start_time) ?? ''} — {formatTimeProp?.(entry.end_time) ?? ''}</span>
+                  {isLocked && <Lock className="ml-1 h-3.5 w-3.5 text-muted-foreground/60" />}
+                </div>
+              </>
+            )}
+
+            {/* Distance */}
+            {distance !== null && (
+              <p className="text-sm text-muted-foreground">
+                📍 {distance < 1 ? `${Math.round(distance * 1000)}m` : `${distance.toFixed(1)}km`} away
+              </p>
+            )}
+
+            {/* Website */}
+            {(option.website || isEditor) && (
+              <InlineField
+                value={option.website || ''}
+                canEdit={isEditor}
+                onSave={async (v) => handleInlineSaveOption('website', v)}
+                renderDisplay={(val) =>
+                  val ? (
+                    <a href={val} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-sm text-primary hover:underline" onClick={e => e.stopPropagation()}>
+                      <ExternalLink className="h-3.5 w-3.5" /> Visit website
+                    </a>
+                  ) : <span className="text-sm text-muted-foreground italic">Add website</span>
+                }
+                placeholder="https://..."
+              />
+            )}
+
+            {/* Map */}
+            {option.latitude != null && option.longitude != null && (
+              <MapPreview latitude={option.latitude} longitude={option.longitude} locationName={option.location_name} />
+            )}
+
+            {/* Vote */}
+            {currentUser && (
+              <div className="flex items-center gap-3">
+                <VoteButton
+                  optionId={option.id}
+                  userId={currentUser.id}
+                  voteCount={option.vote_count ?? 0}
+                  hasVoted={hasVoted}
+                  locked={votingLocked ?? false}
+                  onVoteChange={onVoteChange ?? (() => {})}
+                />
+              </div>
+            )}
+
+            {/* Images */}
+            {images.length > 0 && (
+              <div className="pt-2">
+                <ImageGallery images={images} />
+              </div>
+            )}
+
+            {isEditor && (
+              <ImageUploader optionId={option.id} currentCount={images.length} onUploaded={onSaved} />
+            )}
+
+            {/* Editor actions */}
+            {isEditor && (
+              <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+                <Button variant="outline" size="sm" onClick={handleToggleLock} disabled={toggling}>
+                  {isLocked ? <><Unlock className="mr-1.5 h-3.5 w-3.5" /> Unlock</> : <><Lock className="mr-1.5 h-3.5 w-3.5" /> Lock</>}
+                </Button>
+
+                {onMoveToIdeas && (
+                  <Button variant="outline" size="sm" onClick={() => onMoveToIdeas(entry.id)}>
+                    <Lightbulb className="mr-1.5 h-3.5 w-3.5" /> Move to ideas
+                  </Button>
+                )}
+
+                <AlertDialog>
+                  <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(true)}>
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
+                  </Button>
+                </AlertDialog>
+              </div>
+            )}
+
+            {/* Delete confirmation */}
+            <AlertDialog open={deleting} onOpenChange={setDeleting}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
+                  <AlertDialogDescription>This will permanently delete the entry and all its options. This action cannot be undone.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    onClick={async () => {
+                      try {
+                        const { error } = await supabase.from('entries').delete().eq('id', entry.id);
+                        if (error) throw error;
+                        toast({ title: 'Entry deleted' });
+                        onOpenChange(false);
+                        onSaved();
+                      } catch (err: any) {
+                        toast({ title: 'Failed to delete', description: err.message, variant: 'destructive' });
+                      } finally { setDeleting(false); }
+                    }}
+                  >Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  // ─── CREATE MODE ───
   return (
     <>
       <Dialog open={open} onOpenChange={handleClose}>
@@ -884,21 +1067,9 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
               <div className="space-y-2">
                 <Label htmlFor="opt-name">Name *</Label>
                 {!isFlight && !isTransfer ? (
-                  <PlacesAutocomplete
-                    value={name}
-                    onChange={setName}
-                    onPlaceSelect={handlePlaceSelect}
-                    placeholder="e.g. Anne Frank House"
-                    autoFocus
-                  />
+                  <PlacesAutocomplete value={name} onChange={setName} onPlaceSelect={handlePlaceSelect} placeholder="e.g. Anne Frank House" autoFocus />
                 ) : (
-                  <Input
-                    id="opt-name"
-                    placeholder={isFlight ? 'e.g. BA1234' : 'e.g. Airport to Hotel'}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    autoFocus
-                  />
+                  <Input id="opt-name" placeholder={isFlight ? 'e.g. BA1234' : 'e.g. Airport to Hotel'} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
                 )}
               </div>
 
@@ -908,43 +1079,19 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
 
               {isFlight && (
                 <>
-                  {/* Upload booking button */}
                   <div className="flex items-center gap-2">
-                    <input
-                      ref={flightFileRef}
-                      type="file"
-                      accept=".pdf,image/*"
-                      className="hidden"
-                      onChange={handleFlightFileUpload}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => flightFileRef.current?.click()}
-                      disabled={flightParseLoading}
-                      className="text-xs"
-                    >
-                      {flightParseLoading ? (
-                        <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> Parsing...</>
-                      ) : (
-                        <><Upload className="mr-1.5 h-3 w-3" /> Upload booking</>
-                      )}
+                    <input ref={flightFileRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleFlightFileUpload} />
+                    <Button type="button" variant="outline" size="sm" onClick={() => flightFileRef.current?.click()} disabled={flightParseLoading} className="text-xs">
+                      {flightParseLoading ? <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> Parsing...</> : <><Upload className="mr-1.5 h-3 w-3" /> Upload booking</>}
                     </Button>
                     <span className="text-[10px] text-muted-foreground">PDF or image</span>
                   </div>
 
-                  {/* Multiple flights selector */}
                   {parsedFlights.length > 1 && (
                     <div className="space-y-1.5 rounded-lg border border-border/50 bg-muted/30 p-2">
                       <p className="text-xs font-medium text-muted-foreground">Select flight</p>
                       {parsedFlights.map((f, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => applyParsedFlight(f)}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted transition-colors text-left"
-                        >
+                        <button key={i} type="button" onClick={() => applyParsedFlight(f)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted transition-colors text-left">
                           <span className="font-medium">{f.flight_number || `Flight ${i + 1}`}</span>
                           <span className="text-muted-foreground">{f.departure_airport} → {f.arrival_airport}</span>
                           {f.date && <span className="ml-auto text-muted-foreground">{f.date}</span>}
@@ -956,81 +1103,40 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                   <div className="space-y-3">
                     <div className="space-y-2">
                       <Label>Departure Airport</Label>
-                      <AirportPicker
-                        value={departureLocation}
-                        onChange={handleDepartureAirportChange}
-                        placeholder="Search departure airport..."
-                      />
-                      {departureTz && (
-                        <p className="text-xs text-muted-foreground">
-                          Timezone: {getTzAbbr(departureTz)}
-                        </p>
-                      )}
+                      <AirportPicker value={departureLocation} onChange={handleDepartureAirportChange} placeholder="Search departure airport..." />
+                      {departureTz && <p className="text-xs text-muted-foreground">Timezone: {getTzAbbr(departureTz)}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label>Departure Terminal</Label>
-                      <Input
-                        placeholder="e.g. Terminal 5, T2"
-                        value={departureTerminal}
-                        onChange={(e) => setDepartureTerminal(e.target.value)}
-                      />
+                      <Input placeholder="e.g. Terminal 5, T2" value={departureTerminal} onChange={(e) => setDepartureTerminal(e.target.value)} />
                     </div>
                   </div>
 
                   <div className="space-y-3">
                     <div className="space-y-2">
                       <Label>Arrival Airport</Label>
-                      <AirportPicker
-                        value={arrivalLocation}
-                        onChange={handleArrivalAirportChange}
-                        placeholder="Search arrival airport..."
-                      />
-                      {arrivalTz && (
-                        <p className="text-xs text-muted-foreground">
-                          Timezone: {getTzAbbr(arrivalTz)}
-                        </p>
-                      )}
+                      <AirportPicker value={arrivalLocation} onChange={handleArrivalAirportChange} placeholder="Search arrival airport..." />
+                      {arrivalTz && <p className="text-xs text-muted-foreground">Timezone: {getTzAbbr(arrivalTz)}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label>Arrival Terminal</Label>
-                      <Input
-                        placeholder="e.g. Terminal 1, T3"
-                        value={arrivalTerminal}
-                        onChange={(e) => setArrivalTerminal(e.target.value)}
-                      />
+                      <Input placeholder="e.g. Terminal 1, T3" value={arrivalTerminal} onChange={(e) => setArrivalTerminal(e.target.value)} />
                     </div>
                   </div>
 
-                  {/* Airport processing times */}
                   <div className="space-y-3 rounded-lg border border-border/50 bg-muted/30 p-3">
                     <p className="text-xs font-medium text-muted-foreground">Airport Processing</p>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <Label className="text-xs">Arrive early (hours)</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={6}
-                          step={0.5}
-                          value={checkinHours}
-                          onChange={(e) => setCheckinHours(Math.max(0, Number(e.target.value) || 0))}
-                        />
+                        <Input type="number" min={0} max={6} step={0.5} value={checkinHours} onChange={(e) => setCheckinHours(Math.max(0, Number(e.target.value) || 0))} />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Checkout (minutes)</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={120}
-                          step={15}
-                          value={checkoutMin}
-                          onChange={(e) => setCheckoutMin(Math.max(0, Number(e.target.value) || 0))}
-                        />
+                        <Input type="number" min={0} max={120} step={15} value={checkoutMin} onChange={(e) => setCheckoutMin(Math.max(0, Number(e.target.value) || 0))} />
                       </div>
                     </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      Auto-creates check-in &amp; checkout blocks on the timeline
-                    </p>
+                    <p className="text-[10px] text-muted-foreground">Auto-creates check-in &amp; checkout blocks on the timeline</p>
                   </div>
                 </>
               )}
@@ -1040,23 +1146,14 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <Label>From</Label>
-                      <Input
-                        placeholder="e.g. Heathrow Airport"
-                        value={transferFrom}
-                        onChange={(e) => setTransferFrom(e.target.value)}
-                      />
+                      <Input placeholder="e.g. Heathrow Airport" value={transferFrom} onChange={(e) => setTransferFrom(e.target.value)} />
                     </div>
                     <div className="space-y-2">
                       <Label>To</Label>
-                      <Input
-                        placeholder="e.g. Hotel Krasnapolsky"
-                        value={transferTo}
-                        onChange={(e) => setTransferTo(e.target.value)}
-                      />
+                      <Input placeholder="e.g. Hotel Krasnapolsky" value={transferTo} onChange={(e) => setTransferTo(e.target.value)} />
                     </div>
                   </div>
 
-                  {/* Inline route comparison (when auto-fetched from transport gap) */}
                   {transportContext && (transportLoading || transportResults.length > 0) ? (
                     <div className="space-y-2">
                       <Label className="text-xs font-semibold text-muted-foreground">Routes</Label>
@@ -1073,29 +1170,17 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                             const modeEmoji: Record<string, string> = { walk: '🚶', transit: '🚌', drive: '🚗', bicycle: '🚲' };
                             const modeLabel: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', bicycle: 'Cycle' };
                             const formatDur = (min: number) => {
-                              const h = Math.floor(min / 60);
-                              const m = min % 60;
-                              if (h === 0) return `${m}m`;
-                              if (m === 0) return `${h}h`;
-                              return `${h}h ${m}m`;
+                              const h = Math.floor(min / 60); const m = min % 60;
+                              if (h === 0) return `${m}m`; if (m === 0) return `${h}h`; return `${h}h ${m}m`;
                             };
                             return (
-                              <button
-                                key={r.mode}
-                                type="button"
-                                onClick={() => handleSelectTransportMode(r)}
-                                className={cn(
-                                  'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors',
-                                  transferMode === r.mode
-                                    ? 'bg-primary/10 text-primary font-medium'
-                                    : 'hover:bg-muted text-foreground'
-                                )}
-                              >
+                              <button key={r.mode} type="button" onClick={() => handleSelectTransportMode(r)}
+                                className={cn('flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors',
+                                  transferMode === r.mode ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground'
+                                )}>
                                 <span className="text-base">{modeEmoji[r.mode] ?? '🚌'}</span>
                                 <span className="flex-1 text-left capitalize">{modeLabel[r.mode] ?? r.mode}</span>
-                                <span className="text-xs text-muted-foreground">
-                                  {formatDur(r.duration_min)} · {r.distance_km < 1 ? `${Math.round(r.distance_km * 1000)}m` : `${r.distance_km.toFixed(1)}km`}
-                                </span>
+                                <span className="text-xs text-muted-foreground">{formatDur(r.duration_min)} · {r.distance_km < 1 ? `${Math.round(r.distance_km * 1000)}m` : `${r.distance_km.toFixed(1)}km`}</span>
                                 {transferMode === r.mode && <Check className="h-3.5 w-3.5 text-primary" />}
                               </button>
                             );
@@ -1104,24 +1189,16 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                       )}
                     </div>
                   ) : (
-                    /* Manual mode picker (when not from transport gap) */
                     <div className="space-y-2">
                       <Label>Travel mode</Label>
                       <div className="grid grid-cols-2 gap-2">
-                        {TRAVEL_MODES.map((mode) => (
-                          <button
-                            key={mode.id}
-                            type="button"
-                            onClick={() => setTransferMode(mode.id)}
-                            className={cn(
-                              'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-all',
-                              transferMode === mode.id
-                                ? 'border-primary bg-primary/10 text-primary font-medium'
-                                : 'border-border bg-background text-muted-foreground hover:border-primary/40'
-                            )}
-                          >
-                            <span className="text-base">{mode.emoji}</span>
-                            <span>{mode.label}</span>
+                        {TRAVEL_MODES.map((m) => (
+                          <button key={m.id} type="button" onClick={() => setTransferMode(m.id)}
+                            className={cn('flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-all',
+                              transferMode === m.id ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border bg-background text-muted-foreground hover:border-primary/40'
+                            )}>
+                            <span className="text-base">{m.emoji}</span>
+                            <span>{m.label}</span>
                           </button>
                         ))}
                       </div>
@@ -1132,32 +1209,20 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
 
               <div className="space-y-2">
                 <Label htmlFor="opt-website">Website</Label>
-                <Input
-                  id="opt-website"
-                  type="url"
-                  placeholder="https://..."
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                />
+                <Input id="opt-website" type="url" placeholder="https://..." value={website} onChange={(e) => setWebsite(e.target.value)} />
               </div>
 
               {!isFlight && !isTransfer && (
                 <div className="space-y-2">
                   <Label>Location Name</Label>
-                  <Input
-                    placeholder="e.g. Dam Square"
-                    value={locationName}
-                    onChange={(e) => setLocationName(e.target.value)}
-                  />
+                  <Input placeholder="e.g. Dam Square" value={locationName} onChange={(e) => setLocationName(e.target.value)} />
                 </div>
               )}
 
-              {/* When section */}
               <div className="border-t border-border/50 pt-4 mt-2">
                 <Label className="text-sm font-semibold text-muted-foreground">When</Label>
               </div>
 
-              {/* Day / date picker */}
               <div className="space-y-2">
                 {isUndated ? (
                   <>
@@ -1172,9 +1237,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                     </Select>
                     {isFlight && (
                       <div className="mt-2 space-y-1">
-                        <Label htmlFor="flight-real-date" className="text-xs text-muted-foreground">
-                          Actual flight date (optional — sets trip dates automatically)
-                        </Label>
+                        <Label htmlFor="flight-real-date" className="text-xs text-muted-foreground">Actual flight date (optional — sets trip dates automatically)</Label>
                         <Input id="flight-real-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
                       </div>
                     )}
@@ -1187,7 +1250,6 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                 )}
               </div>
 
-              {/* Time inputs */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label>Time</Label>
@@ -1200,58 +1262,33 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">
-                      {isFlight ? `Depart (${getTzAbbr(departureTz)})` : 'Start'}
-                    </Label>
-                    <Input
-                      type="time"
-                      value={startTime}
-                      onChange={(e) => isFlight ? handleFlightStartChange(e.target.value) : handleStartTimeChange(e.target.value)}
-                    />
+                    <Label className="text-xs text-muted-foreground">{isFlight ? `Depart (${getTzAbbr(departureTz)})` : 'Start'}</Label>
+                    <Input type="time" value={startTime} onChange={(e) => isFlight ? handleFlightStartChange(e.target.value) : handleStartTimeChange(e.target.value)} />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">
-                      {isFlight ? `Arrive (${getTzAbbr(arrivalTz)})` : 'End'}
-                    </Label>
-                    <Input
-                      type="time"
-                      value={endTime}
-                      onChange={(e) => isFlight ? handleFlightEndChange(e.target.value) : setEndTime(e.target.value)}
-                    />
+                    <Label className="text-xs text-muted-foreground">{isFlight ? `Arrive (${getTzAbbr(arrivalTz)})` : 'End'}</Label>
+                    <Input type="time" value={endTime} onChange={(e) => isFlight ? handleFlightEndChange(e.target.value) : setEndTime(e.target.value)} />
                   </div>
                 </div>
               </div>
 
-              {/* Duration override (non-flight only) */}
               {!isFlight && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="flex-1 space-y-1">
                       <Label>Duration (minutes)</Label>
-                      <Input
-                        type="number"
-                        min={15}
-                        step={15}
-                        value={durationMin}
+                      <Input type="number" min={15} step={15} value={durationMin}
                         onChange={(e) => {
                           const d = parseInt(e.target.value) || 60;
                           setDurationMin(d);
                           const [h, m] = startTime.split(':').map(Number);
                           const endTotalMin = h * 60 + m + d;
-                          const endH = Math.floor(endTotalMin / 60) % 24;
-                          const endM = endTotalMin % 60;
-                          setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
+                          setEndTime(`${String(Math.floor(endTotalMin / 60) % 24).padStart(2, '0')}:${String(endTotalMin % 60).padStart(2, '0')}`);
                         }}
                       />
                     </div>
                     {isTransfer && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-6"
-                        onClick={calcTransferDuration}
-                        disabled={calcLoading}
-                      >
+                      <Button variant="outline" size="sm" className="mt-6" onClick={calcTransferDuration} disabled={calcLoading}>
                         {calcLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Calculate'}
                       </Button>
                     )}
@@ -1261,16 +1298,8 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
 
               <DialogFooter className="gap-2">
                 <Button variant="outline" onClick={() => setStep('category')}>Back</Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => handleSaveAsIdea()}
-                  disabled={saving}
-                >
-                  💡 Ideas
-                </Button>
-                <Button onClick={handleSave} disabled={saving}>
-                  {saving ? 'Saving…' : (isEditing ? 'Update Entry' : 'Create Entry')}
-                </Button>
+                <Button variant="secondary" onClick={() => handleSaveAsIdea()} disabled={saving}>💡 Ideas</Button>
+                <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : (isEditing ? 'Update Entry' : 'Create Entry')}</Button>
               </DialogFooter>
             </div>
           )}
@@ -1282,9 +1311,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Add return flight? ✈️</AlertDialogTitle>
-            <AlertDialogDescription>
-              Would you like to add a return flight with reversed airports and timezones?
-            </AlertDialogDescription>
+            <AlertDialogDescription>Would you like to add a return flight with reversed airports and timezones?</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={handleReturnFlightDecline}>No thanks</AlertDialogCancel>
@@ -1296,4 +1323,4 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
   );
 };
 
-export default EntryForm;
+export default EntrySheet;

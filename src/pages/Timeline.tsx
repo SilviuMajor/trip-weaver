@@ -16,8 +16,7 @@ import { analyzeConflict, generateRecommendations } from '@/lib/conflictEngine';
 import { toast } from '@/hooks/use-toast';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
 import CalendarDay from '@/components/timeline/CalendarDay';
-import EntryOverlay from '@/components/timeline/EntryOverlay';
-import EntryForm from '@/components/timeline/EntryForm';
+import EntrySheet from '@/components/timeline/EntrySheet';
 import CategorySidebar from '@/components/timeline/CategorySidebar';
 import LivePanel from '@/components/timeline/LivePanel';
 import ConflictResolver from '@/components/timeline/ConflictResolver';
@@ -51,15 +50,11 @@ const Timeline = () => {
     });
   }, [tripTimezone]);
 
-  // Overlay state
-  const [overlayEntry, setOverlayEntry] = useState<EntryWithOptions | null>(null);
-  const [overlayOption, setOverlayOption] = useState<EntryOption | null>(null);
-  const [overlayOpen, setOverlayOpen] = useState(false);
-
-  // Entry form state
-  const [entryFormOpen, setEntryFormOpen] = useState(false);
-  const [editEntry, setEditEntry] = useState<EntryWithOptions | null>(null);
-  const [editOption, setEditOption] = useState<EntryOption | null>(null);
+  // Unified sheet state
+  const [sheetMode, setSheetMode] = useState<'create' | 'view' | null>(null);
+  const [sheetEntry, setSheetEntry] = useState<EntryWithOptions | null>(null);
+  const [sheetOption, setSheetOption] = useState<EntryOption | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [prefillStartTime, setPrefillStartTime] = useState<string | undefined>();
   const [prefillEndTime, setPrefillEndTime] = useState<string | undefined>();
   const [prefillCategory, setPrefillCategory] = useState<string | undefined>();
@@ -372,9 +367,10 @@ const Timeline = () => {
   };
 
   const handleCardTap = (entry: EntryWithOptions, option: EntryOption) => {
-    setOverlayEntry(entry);
-    setOverlayOption(option);
-    setOverlayOpen(true);
+    setSheetMode('view');
+    setSheetEntry(entry);
+    setSheetOption(option);
+    setSheetOpen(true);
   };
 
   // Transport context for gap button
@@ -384,7 +380,10 @@ const Timeline = () => {
     setPrefillStartTime(prefillTime);
     setPrefillEndTime(undefined);
     setTransportContext(null);
-    setEntryFormOpen(true);
+    setSheetMode('create');
+    setSheetEntry(null);
+    setSheetOption(null);
+    setSheetOpen(true);
   };
 
   const handleAddTransport = (fromEntryId: string, toEntryId: string, prefillTime: string) => {
@@ -401,13 +400,19 @@ const Timeline = () => {
     setPrefillStartTime(prefillTime);
     setPrefillEndTime(undefined);
     setPrefillCategory('transfer');
-    setEntryFormOpen(true);
+    setSheetMode('create');
+    setSheetEntry(null);
+    setSheetOption(null);
+    setSheetOpen(true);
   };
 
   const handleDragSlot = (startTime: Date, endTime: Date) => {
     setPrefillStartTime(startTime.toISOString());
     setPrefillEndTime(endTime.toISOString());
-    setEntryFormOpen(true);
+    setSheetMode('create');
+    setSheetEntry(null);
+    setSheetOption(null);
+    setSheetOpen(true);
   };
 
   const handleEntryTimeChange = async (entryId: string, newStartIso: string, newEndIso: string) => {
@@ -601,7 +606,7 @@ const Timeline = () => {
       toast({ title: 'Failed to move', description: error.message, variant: 'destructive' });
       return;
     }
-    setOverlayOpen(false);
+    setSheetOpen(false);
     toast({ title: 'Moved to ideas panel 💡' });
     await fetchData();
   };
@@ -814,7 +819,11 @@ const Timeline = () => {
           setPrefillStartTime(undefined);
           setPrefillEndTime(undefined);
           setPrefillCategory(undefined);
-          setEntryFormOpen(true);
+          setTransportContext(null);
+          setSheetMode('create');
+          setSheetEntry(null);
+          setSheetOption(null);
+          setSheetOpen(true);
         }}
         onDataRefresh={fetchData}
         onToggleIdeas={() => setSidebarOpen(prev => !prev)}
@@ -908,7 +917,10 @@ const Timeline = () => {
                   setPrefillStartTime(undefined);
                   setPrefillEndTime(undefined);
                   setPrefillCategory(catId);
-                  setEntryFormOpen(true);
+                  setSheetMode('create');
+                  setSheetEntry(null);
+                  setSheetOption(null);
+                  setSheetOpen(true);
                 }}
                 onDuplicate={handleDuplicate}
                 onInsert={handleInsert}
@@ -973,7 +985,10 @@ const Timeline = () => {
                   setPrefillStartTime(undefined);
                   setPrefillEndTime(undefined);
                   setPrefillCategory(catId);
-                  setEntryFormOpen(true);
+                  setSheetMode('create');
+                  setSheetEntry(null);
+                  setSheetOption(null);
+                  setSheetOpen(true);
                 }}
                 onDuplicate={handleDuplicate}
                 onInsert={handleInsert}
@@ -981,34 +996,15 @@ const Timeline = () => {
             </>
           )}
 
-          <EntryOverlay
-            entry={overlayEntry}
-            option={overlayOption}
-            open={overlayOpen}
-            onOpenChange={setOverlayOpen}
-            formatTime={formatTime}
-            userLat={userLat}
-            userLng={userLng}
-            votingLocked={trip.voting_locked}
-            userVotes={userVotes}
-            onVoteChange={fetchData}
-            onImageUploaded={fetchData}
-            onEdit={(entry, option) => {
-              setEditEntry(entry);
-              setEditOption(option);
-              setEntryFormOpen(true);
-            }}
-            onDeleted={fetchData}
-            onMoveToIdeas={handleMoveToIdeas}
-          />
-
-          <EntryForm
-            open={entryFormOpen}
+          <EntrySheet
+            mode={sheetMode ?? 'create'}
+            open={sheetOpen}
             onOpenChange={(open) => {
-              setEntryFormOpen(open);
+              setSheetOpen(open);
               if (!open) {
-                setEditEntry(null);
-                setEditOption(null);
+                setSheetMode(null);
+                setSheetEntry(null);
+                setSheetOption(null);
                 setPrefillStartTime(undefined);
                 setPrefillEndTime(undefined);
                 setPrefillCategory(undefined);
@@ -1016,10 +1012,19 @@ const Timeline = () => {
               }
             }}
             tripId={trip.id}
-            onCreated={fetchData}
+            onSaved={fetchData}
             trip={trip}
-            editEntry={editEntry}
-            editOption={editOption}
+            // View mode props
+            entry={sheetEntry}
+            option={sheetOption}
+            formatTime={formatTime}
+            userLat={userLat}
+            userLng={userLng}
+            votingLocked={trip.voting_locked}
+            userVotes={userVotes}
+            onVoteChange={fetchData}
+            onMoveToIdeas={handleMoveToIdeas}
+            // Create mode props
             prefillStartTime={prefillStartTime}
             prefillEndTime={prefillEndTime}
             prefillCategory={prefillCategory}
