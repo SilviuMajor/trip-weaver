@@ -520,12 +520,31 @@ const CalendarDay = ({
                           />
                         )}
 
-                        {flightGroup ? (
+                        {flightGroup ? (() => {
+                          // Compute proportional fractions for each section
+                          const depTz = primaryOption.departure_tz || tripTimezone;
+                          const arrTz = primaryOption.arrival_tz || tripTimezone;
+                          const totalDuration = groupEndHour - groupStartHour;
+                          const checkinDuration = flightGroup.checkin
+                            ? getHourInTimezone(flightGroup.checkin.end_time, depTz) - getHourInTimezone(flightGroup.checkin.start_time, depTz)
+                            : 0;
+                          const flightDuration = entryEndHour - entryStartHour;
+                          const checkoutDuration = flightGroup.checkout
+                            ? getHourInTimezone(flightGroup.checkout.end_time, arrTz) - getHourInTimezone(flightGroup.checkout.start_time, arrTz)
+                            : 0;
+                          const ciFrac = totalDuration > 0 ? checkinDuration / totalDuration : 0.25;
+                          const flFrac = totalDuration > 0 ? flightDuration / totalDuration : 0.5;
+                          const coFrac = totalDuration > 0 ? checkoutDuration / totalDuration : 0.25;
+
+                          return (
                           <FlightGroupCard
                             flightOption={primaryOption}
                             flightEntry={entry}
                             checkinEntry={flightGroup.checkin}
                             checkoutEntry={flightGroup.checkout}
+                            checkinFraction={ciFrac}
+                            flightFraction={flFrac}
+                            checkoutFraction={coFrac}
                             isPast={entryPast}
                             isDragging={isDragged}
                             isLocked={isLocked}
@@ -543,7 +562,8 @@ const CalendarDay = ({
                             onTouchDragMove={onTouchMove}
                             onTouchDragEnd={onTouchEnd}
                           />
-                        ) : (
+                          );
+                        })() : (
                           <EntryCard
                             isCompact={isCompact}
                             option={primaryOption}

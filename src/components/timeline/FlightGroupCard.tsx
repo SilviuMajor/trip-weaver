@@ -9,6 +9,9 @@ interface FlightGroupCardProps {
   flightEntry: EntryWithOptions;
   checkinEntry?: EntryWithOptions;
   checkoutEntry?: EntryWithOptions;
+  checkinFraction?: number;
+  flightFraction?: number;
+  checkoutFraction?: number;
   isPast: boolean;
   isDragging?: boolean;
   isLocked?: boolean;
@@ -21,20 +24,25 @@ interface FlightGroupCardProps {
   onTouchDragEnd?: () => void;
 }
 
-const formatTimeInTz = (isoString: string, tz: string | null): string => {
+const formatTimeOnly = (isoString: string, tz: string | null): string => {
   if (!tz) return '';
   const date = new Date(isoString);
-  const time = date.toLocaleTimeString('en-GB', {
+  return date.toLocaleTimeString('en-GB', {
     timeZone: tz,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
   });
-  const tzAbbr = new Intl.DateTimeFormat('en-GB', {
-    timeZone: tz,
-    timeZoneName: 'short',
-  }).formatToParts(date).find(p => p.type === 'timeZoneName')?.value ?? '';
-  return `${time} ${tzAbbr}`;
+};
+
+const formatDuration = (startIso: string, endIso: string): string => {
+  const ms = new Date(endIso).getTime() - new Date(startIso).getTime();
+  const totalMin = Math.round(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
 };
 
 const FlightGroupCard = ({
@@ -42,6 +50,9 @@ const FlightGroupCard = ({
   flightEntry,
   checkinEntry,
   checkoutEntry,
+  checkinFraction = 0.25,
+  flightFraction = 0.5,
+  checkoutFraction = 0.25,
   isPast,
   isDragging,
   isLocked,
@@ -64,6 +75,7 @@ const FlightGroupCard = ({
 
   const depCode = flightOption.departure_location?.split(' - ')[0] ?? '';
   const arrCode = flightOption.arrival_location?.split(' - ')[0] ?? '';
+  const flightDuration = formatDuration(flightEntry.start_time, flightEntry.end_time);
 
   return (
     <motion.div
@@ -86,23 +98,28 @@ const FlightGroupCard = ({
       {/* Check-in section */}
       {checkinEntry && (
         <div
-          className="flex items-center gap-2 px-3 py-1.5 text-[10px]"
-          style={{ background: `${catColor}0A`, borderBottom: `2px solid ${catColor}30` }}
+          className="flex items-center gap-2 px-3 text-[11px] min-h-0 overflow-hidden"
+          style={{ flex: checkinFraction, background: `${catColor}0A` }}
         >
           <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: catColor }} />
-          <span className="font-semibold text-muted-foreground/70">Check-in</span>
-          <span className="text-muted-foreground/50">
+          <span className="font-semibold text-muted-foreground/70 shrink-0">Check-in</span>
+          <span className="text-muted-foreground/50 truncate">
             {depCode}{flightOption.departure_terminal ? ` T${flightOption.departure_terminal}` : ''}
           </span>
-          <span className="ml-auto text-muted-foreground/50 flex items-center gap-1">
+          <span className="ml-auto text-muted-foreground/50 flex items-center gap-1 shrink-0">
             <Clock className="h-2.5 w-2.5" />
-            {formatTimeInTz(checkinEntry.start_time, flightOption.departure_tz)} – {formatTimeInTz(checkinEntry.end_time, flightOption.departure_tz)}
+            {formatTimeOnly(checkinEntry.start_time, flightOption.departure_tz)} – {formatTimeOnly(checkinEntry.end_time, flightOption.departure_tz)}
           </span>
         </div>
       )}
 
+      {/* Divider: check-in → flight */}
+      {checkinEntry && (
+        <div className="h-[2px] shrink-0" style={{ backgroundColor: `${catColor}66` }} />
+      )}
+
       {/* Main flight section */}
-      <div className="relative flex-1 min-h-0">
+      <div className="relative min-h-0 overflow-hidden" style={{ flex: flightFraction }}>
         {firstImage ? (
           <div className="absolute inset-0">
             <img src={firstImage} alt={flightOption.name} className="h-full w-full object-cover" />
@@ -112,52 +129,63 @@ const FlightGroupCard = ({
           <div className="absolute inset-0" style={{ background: `${catColor}22` }} />
         )}
 
-        <div className={cn('relative z-10 p-4', firstImage ? 'text-white' : 'text-foreground')}>
+        <div className={cn('relative z-10 p-3 h-full flex flex-col justify-center', firstImage ? 'text-white' : 'text-foreground')}>
           {/* Category badge */}
           <span
-            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold mb-2"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold mb-1.5 w-fit"
             style={{ backgroundColor: catColor, color: '#fff' }}
           >
             <Plane className="h-3 w-3" /> Flight
           </span>
 
           {/* Flight name */}
-          <h3 className="mb-1.5 font-display text-lg font-bold leading-tight">
+          <h3 className="mb-1 font-display text-base font-bold leading-tight truncate">
             {flightOption.name}
           </h3>
 
-          {/* Route with times */}
+          {/* Route with times + duration */}
           <div className={cn(
-            'flex items-center gap-2 text-sm',
+            'flex items-center gap-2 text-xs flex-wrap',
             firstImage ? 'text-white/80' : 'text-muted-foreground'
           )}>
-            <span>
+            <span className="shrink-0">
               {depCode}{flightOption.departure_terminal ? ` T${flightOption.departure_terminal}` : ''}{' '}
-              {formatTimeInTz(flightEntry.start_time, flightOption.departure_tz)}
+              {formatTimeOnly(flightEntry.start_time, flightOption.departure_tz)}
             </span>
-            <ArrowRight className="h-3.5 w-3.5 shrink-0" />
-            <span>
+            <ArrowRight className="h-3 w-3 shrink-0" />
+            <span className="shrink-0">
               {arrCode}{flightOption.arrival_terminal ? ` T${flightOption.arrival_terminal}` : ''}{' '}
-              {formatTimeInTz(flightEntry.end_time, flightOption.arrival_tz)}
+              {formatTimeOnly(flightEntry.end_time, flightOption.arrival_tz)}
+            </span>
+            <span className={cn(
+              'ml-auto text-[10px] font-medium shrink-0',
+              firstImage ? 'text-white/60' : 'text-muted-foreground/60'
+            )}>
+              {flightDuration}
             </span>
           </div>
         </div>
       </div>
 
+      {/* Divider: flight → checkout */}
+      {checkoutEntry && (
+        <div className="h-[2px] shrink-0" style={{ backgroundColor: `${catColor}66` }} />
+      )}
+
       {/* Checkout section */}
       {checkoutEntry && (
         <div
-          className="flex items-center gap-2 px-3 py-1.5 text-[10px]"
-          style={{ background: `${catColor}0A`, borderTop: `2px solid ${catColor}30` }}
+          className="flex items-center gap-2 px-3 text-[11px] min-h-0 overflow-hidden"
+          style={{ flex: checkoutFraction, background: `${catColor}0A` }}
         >
           <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: catColor }} />
-          <span className="font-semibold text-muted-foreground/70">Checkout</span>
-          <span className="text-muted-foreground/50">
+          <span className="font-semibold text-muted-foreground/70 shrink-0">Checkout</span>
+          <span className="text-muted-foreground/50 truncate">
             {arrCode}{flightOption.arrival_terminal ? ` T${flightOption.arrival_terminal}` : ''}
           </span>
-          <span className="ml-auto text-muted-foreground/50 flex items-center gap-1">
+          <span className="ml-auto text-muted-foreground/50 flex items-center gap-1 shrink-0">
             <Clock className="h-2.5 w-2.5" />
-            {formatTimeInTz(checkoutEntry.start_time, flightOption.arrival_tz)} – {formatTimeInTz(checkoutEntry.end_time, flightOption.arrival_tz)}
+            {formatTimeOnly(checkoutEntry.start_time, flightOption.arrival_tz)} – {formatTimeOnly(checkoutEntry.end_time, flightOption.arrival_tz)}
           </span>
         </div>
       )}
