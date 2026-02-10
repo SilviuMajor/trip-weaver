@@ -811,6 +811,46 @@ const CalendarDay = ({
                       </div>
                     </div>
 
+                    {/* SNAP button below transport cards */}
+                    {primaryOption.category === 'transfer' && (() => {
+                      // Find the next non-linked entry in sortedEntries
+                      const nextVisible = sortedEntries.find((e, i) => {
+                        if (i <= index) return false;
+                        if (linkedEntryIds.has(e.id)) return false;
+                        return true;
+                      });
+                      if (!nextVisible || nextVisible.is_locked) return null;
+                      const gapMs = new Date(nextVisible.start_time).getTime() - new Date(entry.end_time).getTime();
+                      if (gapMs <= 0) return null;
+
+                      const handleSnapNext = async (e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        const transportEndMs = new Date(entry.end_time).getTime();
+                        const nextStartMs = new Date(nextVisible.start_time).getTime();
+                        const nextEndMs = new Date(nextVisible.end_time).getTime();
+                        const duration = nextEndMs - nextStartMs;
+                        const newStart = new Date(transportEndMs).toISOString();
+                        const newEnd = new Date(transportEndMs + duration).toISOString();
+
+                        const { supabase } = await import('@/integrations/supabase/client');
+                        await supabase.from('entries')
+                          .update({ start_time: newStart, end_time: newEnd })
+                          .eq('id', nextVisible.id);
+                        onVoteChange();
+                        toast.success('Snapped next event into place');
+                      };
+
+                      return (
+                        <button
+                          onClick={handleSnapNext}
+                          className="absolute z-20 left-1/2 -translate-x-1/2 rounded-full bg-orange-100 dark:bg-orange-900/30 px-3 py-0.5 text-[10px] font-bold text-orange-600 dark:text-orange-300 border border-orange-200 dark:border-orange-800/40 hover:bg-orange-200 dark:hover:bg-orange-800/40 transition-colors"
+                          style={{ top: height + 2 }}
+                        >
+                          SNAP
+                        </button>
+                      );
+                    })()}
+
                     {/* Travel segment connector */}
                     {showTravelSeg && (
                       <div

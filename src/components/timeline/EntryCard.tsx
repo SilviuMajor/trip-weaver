@@ -864,7 +864,7 @@ const EntryCard = ({
               )}>
                 {durationLabel}
               </span>
-              {userId && totalOptions > 1 && (
+              {userId && totalOptions > 1 && option.category !== 'transfer' && option.category !== 'flight' && (
                 <VoteButton
                   optionId={option.id}
                   userId={userId}
