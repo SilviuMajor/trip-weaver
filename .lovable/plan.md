@@ -1,129 +1,95 @@
 
 
-# Category Sidebar + Duplicate Entry
+# Sticky Day Headers, Gradient Alignment, and Short Card Titles
 
-## Overview
+## Problem Summary
 
-Replace the current "Ideas" sidebar with a comprehensive **Category Sidebar** that shows ALL entries (both scheduled and unscheduled) grouped by category. Each category section has an "Add" button, entries show a status tag ("Day 2", "Idea"), and entries can be duplicated and dragged onto the timeline multiple times. A usage count tracks how many times each entry has been placed.
+1. **Day headers don't replace each other** -- Each day header has `sticky top: 0`, but because each `CalendarDay` is its own container, the sticky headers don't push the previous day's header off screen. They stack or overlap instead.
 
----
+2. **Gradient line and time labels misaligned between days** -- The sun gradient line is positioned at `left: -6` relative to the grid container, but the grid container itself has different left margins (`ml-14` vs `ml-20`) depending on whether the day has flights. This causes the gradient to jump position between days.
 
-## 1. Duplicate (Copy) Entry
-
-### How it works
-- Each entry card in the sidebar gets a "Copy" button (duplicate icon)
-- Clicking it creates a new `entries` row + `entry_options` row with the same data (name, category, website, location, coordinates, photos) but `is_scheduled = false`
-- The copy appears in the sidebar immediately as a new unscheduled entry
-- The user can then drag it onto any day/time
-
-### Drag-to-place behavior change
-- Currently, dragging an idea onto the timeline **moves** it (sets `is_scheduled = true`)
-- New behavior: dragging from the sidebar **creates a placement** but the entry stays in the sidebar
-- A `placement_count` is tracked visually -- showing how many times an entry has been placed on the timeline
-- The sidebar entry shows "Used x2" or similar when placed multiple times
-
-**Implementation note**: Since the current data model ties one entry to one time slot, duplicating will create a new entry row each time. The sidebar card will have a "Copy" action that clones the entry + option + images. The original stays put.
+3. **Short cards (under 1 hour) clip titles** -- Cards under ~37 minutes get a compact layout (`isCompact` when height < 50px), but cards between 50px-80px (37-60 min) use the full layout which has too much padding and content to fit, causing overflow/clipping.
 
 ---
 
-## 2. New Category Sidebar (replaces IdeasPanel)
+## Changes
 
-### Structure
+### 1. Sticky Day Headers That Replace Each Other
 
-All predefined categories are always visible, each as a section:
+**File: `src/components/timeline/CalendarDay.tsx`**
 
-```text
-------------------------------
-| Flights                 [+] |
-|   Entry A       Day 1       |
-|   Entry B       Idea        |
-|                              |
-| Hotels                  [+] |
-|   Entry C       Day 1-3     |
-|                              |
-| Breakfast               [+] |
-|   (empty)                   |
-|                              |
-| Lunch                   [+] |
-|   Entry D       Day 2       |
-|   Entry E       Idea        |
-| ...                          |
-------------------------------
-```
+The day header currently uses `sticky` with `top: 0`. The issue is that sticky positioning works relative to the scroll container, and each day's content area is tall enough that the header stays pinned. However, because the headers all stick to `top: 0`, they overlap rather than pushing each other away.
 
-### Key features
-- **All categories shown** (Flights, Hotels, Breakfast, Lunch, Dinner, Drinks, Activities, Sightseeing, Shopping, Transfers, Home, Airport) even when empty
-- **Custom categories** from `trip.category_presets` also shown
-- **"+" button** next to each category header opens the EntryForm pre-filled with that category
-- **Status tag** on each entry card:
-  - Scheduled entries show "Day X" (e.g., "Day 2")
-  - Unscheduled entries show "Idea"
-- **Copy button** on each card to duplicate the entry
-- **Draggable cards** -- drag from sidebar onto timeline to place
-- **Entry count** per category shown in the header (e.g., "Hotels (2)")
+The fix: The headers already work correctly as sticky elements -- the real issue is the `top` value. The `TimelineHeader` is fixed/sticky at the top, so day headers need to stick just below it. Currently `style={{ top: 0 }}` means they sit behind the main header or overlap each other.
 
-### Data source
-- Uses ALL entries (`entries` table for the trip), not just unscheduled ones
-- Groups by `entry_options[0].category`
-- Entries without a matching predefined category go into an "Other" section at the bottom
+The solution is to keep `top: 0` (which is correct for the scroll container) but ensure the scroll container itself starts below the TimelineHeader. Looking at the Timeline layout, the `<main>` tag at line 618 is the scroll container (`overflow-y-auto`). The day headers with `sticky top: 0` inside this scrollable container should naturally replace each other as you scroll -- each new day's header pushes the previous one up.
 
----
+After reviewing more carefully: the sticky headers DO work within the scrollable `<main>`. The real fix needed is that the `top` value should account for any offset. Since the `<main>` is the scroll container and starts below the TimelineHeader, `top: 0` is correct. But if the headers aren't replacing each other, it's likely because the day containers don't have enough content height. With 24h x 80px/hr = 1920px per day, this should be fine.
 
-## 3. Files to Change
+The actual fix: ensure all day containers (even empty ones) produce enough height so the sticky header mechanics work. For empty days, the content is just a small "No plans yet" div, which means the header leaves the viewport quickly. We should give empty days a minimum height so the sticky header stays visible longer and transitions smoothly.
 
-### New file: `src/components/timeline/CategorySidebar.tsx`
-Replaces `IdeasPanel`. Contains:
-- Props: `open`, `onOpenChange`, `entries` (ALL entries), `trip`, `onDragStart`, `onCardTap`, `onAddEntry(categoryId)`, `onDuplicate(entry)`
-- Renders a scrollable list of category sections
-- Each section: header with emoji + name + count + "+" button, then entry cards
-- Each card: name, location snippet, status tag ("Day X" or "Idea"), copy button, draggable
+Additionally, we should make the `top` value consistent -- currently it's `0` via inline style. We'll keep it at 0 since the `<main>` scroll container is the reference.
 
-### Modified: `src/components/timeline/IdeaCard.tsx` -> rename/evolve to `SidebarEntryCard.tsx`
-- Add status tag (scheduled day or "Idea")
-- Add copy/duplicate button
-- Keep drag handle and click-to-open behavior
+### 2. Consistent Gradient Line Position
 
-### Modified: `src/pages/Timeline.tsx`
-- Replace `IdeasPanel` import with `CategorySidebar`
-- Pass ALL entries (not just unscheduled) to the sidebar
-- Add `onDuplicate` handler that clones an entry + option + images in the database
-- Update the `onAddEntry` handler to pre-select category in EntryForm
-- Mobile FAB icon changes from lightbulb to a list/menu icon
-- Badge count on FAB shows total unscheduled count
+**File: `src/components/timeline/CalendarDay.tsx`**
 
-### Modified: `src/components/timeline/EntryForm.tsx`
-- Accept an optional `prefillCategory` prop so the "+" button in the sidebar can skip the category step
-- When `prefillCategory` is set, start on the "details" step with category pre-selected
+Currently the grid container uses `ml-14` (no flights) or `ml-20` (with flights), which shifts everything including the gradient line. The gradient line is at `left: -6` relative to the grid.
 
-### Deleted: `src/components/timeline/IdeasPanel.tsx`
-- Fully replaced by CategorySidebar
+Fix: Use a consistent left margin for ALL days (always `ml-20`), and adjust the time label/weather positioning for non-flight days to center within the wider gutter. This ensures the gradient line and grid are always at the same horizontal position.
+
+### 3. Better Short Card Rendering
+
+**File: `src/components/timeline/EntryCard.tsx`**
+
+Currently:
+- `isCompact` (< 50px / ~37 min): single-line layout with emoji + name + time -- works but very tight
+- Normal layout (>= 50px): full card with category badge, title, time row, distance/votes -- too much for sub-hour
+
+Add a **medium** layout for cards between 50px and 80px (37-60 min). This layout:
+- Removes the category badge row (saves ~24px)
+- Shows title and time on two tight lines
+- Keeps the left border color indicator
+- Reduces padding from `p-4` to `p-2`
+
+Also improve the compact layout:
+- Ensure the name has `min-w-0` and `flex-1` so it can truncate properly
+- Make the time text slightly smaller to give more room to the title
+
+**File: `src/components/timeline/CalendarDay.tsx`**
+
+Update the compact threshold: 
+- `isCompact` when height < 40px (very short)
+- New `isMedium` when height >= 40px and < 80px (sub-hour)
+- Pass both flags to EntryCard
 
 ---
 
-## 4. Duplicate Entry Logic (in Timeline.tsx)
+## Technical Details
 
-```text
-handleDuplicate(entry):
-  1. Insert new row in `entries` table (same trip_id, is_scheduled=false, placeholder times)
-  2. For each option in entry.options:
-     - Insert new row in `entry_options` with same fields, pointing to new entry_id
-     - Copy all `option_images` rows for that option
-  3. Refresh data
-  4. Show toast: "Entry duplicated"
-```
+### CalendarDay.tsx changes:
 
----
+1. **Line 243-246**: Keep sticky header with `top: 0` (correct for scroll container)
+2. **Line 307-325**: Add `min-h-[200px]` to empty day containers so sticky headers transition smoothly
+3. **Line 328**: Change from conditional `ml-20`/`ml-14` to always `ml-20` for consistent gutter width
+4. **Line 433**: Update compact/medium logic:
+   ```
+   const isCompact = height < 40 && !flightGroup;
+   const isMedium = height >= 40 && height < 80 && !flightGroup;
+   ```
+5. **Line 664**: Gradient line `left` stays at `-6` (now consistent since margin is always `ml-20`)
+6. **Line 671**: Weather column positioning uses consistent gutter width
 
-## 5. Summary
+### EntryCard.tsx changes:
 
-| File | Action |
-|------|--------|
-| `src/components/timeline/CategorySidebar.tsx` | New -- category-grouped sidebar with all entries |
-| `src/components/timeline/SidebarEntryCard.tsx` | New -- individual entry card with status tag + copy button |
-| `src/pages/Timeline.tsx` | Update -- swap IdeasPanel for CategorySidebar, add duplicate handler, pass prefillCategory |
-| `src/components/timeline/EntryForm.tsx` | Update -- accept `prefillCategory` prop to skip category step |
-| `src/components/timeline/IdeasPanel.tsx` | Delete -- replaced by CategorySidebar |
-| `src/components/timeline/IdeaCard.tsx` | Delete -- replaced by SidebarEntryCard |
+1. Add `isMedium` prop
+2. Add medium layout between compact and full:
+   - Two lines: title + time, reduced padding
+   - No category badge, no distance/votes
+   - Keep left border color accent
+3. Adjust compact layout: ensure title gets `flex-1 min-w-0` for proper truncation
 
-No database changes needed -- all existing columns support this.
+### Timeline.tsx changes:
+
+None -- all changes are in the child components.
 
