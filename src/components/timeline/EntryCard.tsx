@@ -176,6 +176,160 @@ const EntryCard = ({
     ? Math.min(1, (overlapMinutes * 60000) / totalMs)
     : 0;
 
+  // ─── Transport mode detection ───
+  const detectTransportMode = (name: string) => {
+    const lower = name.toLowerCase();
+    if (lower.startsWith('walk')) return { emoji: '🚶', label: 'Walking' };
+    if (lower.startsWith('transit')) return { emoji: '🚌', label: 'Transit' };
+    if (lower.startsWith('drive')) return { emoji: '🚗', label: 'Driving' };
+    if (lower.startsWith('cycle')) return { emoji: '🚲', label: 'Cycling' };
+    return { emoji: '🚆', label: 'Transport' };
+  };
+
+  // ─── Transport connector card (all variants) ───
+  if (isTransfer) {
+    const mode = detectTransportMode(option.name);
+    const blockMin = Math.round(totalMs / 60000);
+    const contingency = blockMin > 0 && blockMin % 5 === 0 ? Math.min(4, blockMin - 1) : 0;
+    // For compact: emoji + duration only
+    if (isCompact) {
+      return (
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
+          onClick={onClick}
+          onMouseDown={onDragStart}
+          onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
+          className={cn(
+            'group relative flex items-center gap-1.5 overflow-hidden rounded-lg border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md',
+            isEntryPast && 'opacity-50 grayscale-[30%]',
+            isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            cardSizeClass
+          )}
+          style={{ borderLeftColor: catColor, background: `${catColor}0a` }}
+        >
+          <div className="flex w-full items-center gap-1.5 px-2 py-0.5">
+            <span className="text-xs shrink-0">{mode.emoji}</span>
+            <span className="text-[10px] font-semibold text-muted-foreground">{durationLabel}</span>
+          </div>
+        </motion.div>
+      );
+    }
+    // For medium: emoji + truncated name + duration
+    if (isMedium) {
+      return (
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
+          onClick={onClick}
+          onMouseDown={onDragStart}
+          onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
+          className={cn(
+            'group relative flex items-center overflow-hidden rounded-lg border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md',
+            isEntryPast && 'opacity-50 grayscale-[30%]',
+            isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            cardSizeClass
+          )}
+          style={{ borderLeftColor: catColor, background: `${catColor}0a` }}
+        >
+          <div className="flex w-full items-center gap-2 px-2.5 py-1">
+            <span className="text-sm shrink-0">{mode.emoji}</span>
+            <span className="truncate text-xs font-medium text-foreground flex-1 min-w-0">{option.name}</span>
+            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">{durationLabel}</span>
+          </div>
+        </motion.div>
+      );
+    }
+    // For condensed: two lines
+    if (isCondensed) {
+      return (
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
+          onClick={onClick}
+          onMouseDown={onDragStart}
+          onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
+          className={cn(
+            'group relative overflow-hidden rounded-xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md',
+            isEntryPast && 'opacity-50 grayscale-[30%]',
+            isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            cardSizeClass
+          )}
+          style={{ borderLeftColor: catColor, background: `${catColor}0a` }}
+        >
+          <div className="flex h-full flex-col justify-center gap-1 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <span className="text-base shrink-0">{mode.emoji}</span>
+              <span className="truncate text-sm font-semibold text-foreground">{option.name}</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="font-bold">{durationLabel}</span>
+              <span className="h-px flex-1 bg-border/50" />
+              <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
+            </div>
+          </div>
+        </motion.div>
+      );
+    }
+    // Full transport card
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}
+        onClick={onClick}
+        onMouseDown={onDragStart}
+        onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
+        className={cn(
+          'group relative overflow-hidden rounded-2xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md',
+          isEntryPast && 'opacity-50 grayscale-[30%]',
+          isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+          isLocked && 'border-r border-t border-b border-dashed border-muted-foreground/40',
+          cardSizeClass
+        )}
+        style={{ borderLeftColor: catColor, background: `${catColor}0a` }}
+      >
+        <div className="relative z-10 p-3 space-y-2">
+          {/* Header row */}
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl shrink-0">{mode.emoji}</span>
+            <div className="flex-1 min-w-0">
+              <h3 className="truncate text-sm font-bold text-foreground">{option.name}</h3>
+              {(option.departure_location || option.arrival_location) && (
+                <p className="truncate text-[11px] text-muted-foreground">
+                  {option.departure_location} → {option.arrival_location}
+                </p>
+              )}
+            </div>
+            <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">{durationLabel}</span>
+          </div>
+
+          {/* Dashed connector line */}
+          <div className="flex items-center gap-2 px-1">
+            <div className="flex-1 border-t-2 border-dashed" style={{ borderColor: `${catColor}40` }} />
+          </div>
+
+          {/* Time + lock */}
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              <Clock className="h-3 w-3" />
+              <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
+            </div>
+            {isLocked && <Lock className="h-3 w-3 text-muted-foreground/60" />}
+          </div>
+
+          {/* Mini route map */}
+          {(option as any).route_polyline && (
+            <div className="mt-1">
+              <RouteMapPreview
+                polyline={(option as any).route_polyline}
+                fromAddress={option.departure_location || ''}
+                toAddress={option.arrival_location || ''}
+                travelMode={mode.label.toLowerCase()}
+                size="mini"
+              />
+            </div>
+          )}
+        </div>
+      </motion.div>
+    );
+  }
+
   // Medium layout for sub-hour entries (40-80px)
   if (isMedium) {
     return (

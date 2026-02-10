@@ -934,44 +934,85 @@ const EntrySheet = ({
               </div>
             ) : option.category === 'transfer' ? (
               <>
-                {/* Transfer FROM → TO */}
-                {(option.departure_location || option.arrival_location) && (
-                  <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="font-medium">{option.departure_location || '—'}</span>
-                      <span className="text-muted-foreground">→</span>
-                      <span className="font-medium">{option.arrival_location || '—'}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Clock className="h-3.5 w-3.5" />
-                      <span>{formatTimeProp?.(entry.start_time) ?? ''} — {formatTimeProp?.(entry.end_time) ?? ''}</span>
-                      {(() => {
-                        const totalMin = Math.round((new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 60000);
-                        const h = Math.floor(totalMin / 60);
-                        const m = totalMin % 60;
-                        const label = h > 0 ? `${h}h ${m > 0 ? `${m}m` : ''}` : `${m}m`;
-                        return <span className="font-semibold ml-1">{label}</span>;
-                      })()}
-                    </div>
-                  </div>
-                )}
+                {/* Transport mode-centric header */}
+                {(() => {
+                  const lower = option.name.toLowerCase();
+                  let modeEmoji = '🚆', modeLabel = 'Transport';
+                  if (lower.startsWith('walk')) { modeEmoji = '🚶'; modeLabel = 'Walking'; }
+                  else if (lower.startsWith('transit')) { modeEmoji = '🚌'; modeLabel = 'Transit'; }
+                  else if (lower.startsWith('drive')) { modeEmoji = '🚗'; modeLabel = 'Driving'; }
+                  else if (lower.startsWith('cycle')) { modeEmoji = '🚲'; modeLabel = 'Cycling'; }
 
-                {/* Route map for transfer view */}
-                {(option as any).route_polyline && (
-                  <RouteMapPreview
-                    polyline={(option as any).route_polyline}
-                    fromAddress={option.departure_location || ''}
-                    toAddress={option.arrival_location || ''}
-                    travelMode={transferMode || 'transit'}
-                    size="full"
-                  />
-                )}
+                  const totalMin = Math.round((new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 60000);
+                  const h = Math.floor(totalMin / 60);
+                  const m = totalMin % 60;
+                  const durationStr = h > 0 ? `${h}h ${m > 0 ? `${m}m` : ''}` : `${m}m`;
 
-                {isLocked && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Lock className="h-3 w-3" /> Locked
-                  </div>
-                )}
+                  // Contingency: block is rounded to 5min, real is < block
+                  const blockDur = totalMin;
+                  const realDur = Math.floor(blockDur / 5) * 5 === blockDur ? blockDur : blockDur;
+                  const contingency = blockDur % 5 === 0 && blockDur > 0 ? blockDur - (blockDur - (blockDur % 5 || 5)) : 0;
+
+                  return (
+                    <div className="space-y-4">
+                      {/* Mode header */}
+                      <div className="flex items-center gap-3">
+                        <span className="text-3xl">{modeEmoji}</span>
+                        <div>
+                          <p className="text-lg font-bold text-foreground">{modeLabel}</p>
+                          <p className="text-sm text-muted-foreground">{option.name}</p>
+                        </div>
+                      </div>
+
+                      {/* From / To */}
+                      {(option.departure_location || option.arrival_location) && (
+                        <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
+                          <div className="space-y-1.5">
+                            <div className="flex items-start gap-2">
+                              <span className="text-xs font-semibold text-muted-foreground w-10 shrink-0 pt-0.5">From</span>
+                              <span className="text-sm font-medium text-foreground">{option.departure_location || '—'}</span>
+                            </div>
+                            <div className="flex items-start gap-2">
+                              <span className="text-xs font-semibold text-muted-foreground w-10 shrink-0 pt-0.5">To</span>
+                              <span className="text-sm font-medium text-foreground">{option.arrival_location || '—'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Duration & distance */}
+                      <div className="flex items-center gap-3">
+                        <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-bold text-primary">{durationStr}</span>
+                        {contingency > 0 && (
+                          <span className="text-xs text-muted-foreground">+{contingency}m contingency</span>
+                        )}
+                      </div>
+
+                      {/* Route map */}
+                      {(option as any).route_polyline && (
+                        <RouteMapPreview
+                          polyline={(option as any).route_polyline}
+                          fromAddress={option.departure_location || ''}
+                          toAddress={option.arrival_location || ''}
+                          travelMode={modeLabel.toLowerCase()}
+                          size="full"
+                        />
+                      )}
+
+                      {/* Time (de-emphasized) */}
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Clock className="h-3.5 w-3.5" />
+                        <span>{formatTimeProp?.(entry.start_time) ?? ''} — {formatTimeProp?.(entry.end_time) ?? ''}</span>
+                      </div>
+
+                      {isLocked && (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Lock className="h-3 w-3" /> Locked
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </>
             ) : (
               <>
@@ -991,8 +1032,8 @@ const EntrySheet = ({
               </p>
             )}
 
-            {/* Website */}
-            {(option.website || isEditor) && (
+            {/* Website (hidden for transport) */}
+            {option.category !== 'transfer' && (option.website || isEditor) && (
               <InlineField
                 value={option.website || ''}
                 canEdit={isEditor}
@@ -1335,6 +1376,7 @@ const EntrySheet = ({
                 </div>
               )}
 
+              {!(isTransfer && transportContext) && (<>
               <div className="border-t border-border/50 pt-4 mt-2">
                 <Label className="text-sm font-semibold text-muted-foreground">When</Label>
               </div>
@@ -1414,6 +1456,7 @@ const EntrySheet = ({
                   </div>
                 </div>
               )}
+              </>)}
 
               <DialogFooter className="gap-2">
                 <Button variant="outline" onClick={() => setStep('category')}>Back</Button>
