@@ -1,95 +1,129 @@
 
+# Insert Button + Smart Hotel Wizard
 
-# Sticky Day Headers, Gradient Alignment, and Short Card Titles
+## Overview
 
-## Problem Summary
-
-1. **Day headers don't replace each other** -- Each day header has `sticky top: 0`, but because each `CalendarDay` is its own container, the sticky headers don't push the previous day's header off screen. They stack or overlap instead.
-
-2. **Gradient line and time labels misaligned between days** -- The sun gradient line is positioned at `left: -6` relative to the grid container, but the grid container itself has different left margins (`ml-14` vs `ml-20`) depending on whether the day has flights. This causes the gradient to jump position between days.
-
-3. **Short cards (under 1 hour) clip titles** -- Cards under ~37 minutes get a compact layout (`isCompact` when height < 50px), but cards between 50px-80px (37-60 min) use the full layout which has too much padding and content to fit, causing overflow/clipping.
+Two features:
+1. **Insert button** on sidebar entry cards -- opens a "pick a day" dialog, then closes the sidebar and scrolls the timeline to that day with the entry ready for drag-placement.
+2. **Hotel Wizard** -- a multi-step dialog that launches when adding a hotel, asking which hotel (via Google Places), which nights, return/leave times, and whether there is a second hotel. Creates one entry per night automatically.
 
 ---
 
-## Changes
+## 1. Insert Button on Sidebar Cards
 
-### 1. Sticky Day Headers That Replace Each Other
+### Flow
+1. User taps "Insert" icon on any sidebar entry card
+2. A small popover/dialog appears: "Which day?" with a list of trip days (Day 1, Day 2, etc.)
+3. User picks a day
+4. Sidebar closes
+5. Timeline scrolls to that day
+6. The entry is duplicated as a new scheduled entry placed at a default time slot on that day
+7. User can then drag/resize it into the exact position
 
-**File: `src/components/timeline/CalendarDay.tsx`**
+### Implementation
 
-The day header currently uses `sticky` with `top: 0`. The issue is that sticky positioning works relative to the scroll container, and each day's content area is tall enough that the header stays pinned. However, because the headers all stick to `top: 0`, they overlap rather than pushing each other away.
+**SidebarEntryCard.tsx** -- Add an "Insert" button (ArrowRightToLine or LogIn icon) next to the existing Copy button. Fires `onInsert(entry)`.
 
-The fix: The headers already work correctly as sticky elements -- the real issue is the `top` value. The `TimelineHeader` is fixed/sticky at the top, so day headers need to stick just below it. Currently `style={{ top: 0 }}` means they sit behind the main header or overlap each other.
+**CategorySidebar.tsx** -- Accept new `onInsert` prop, pass it through to each card.
 
-The solution is to keep `top: 0` (which is correct for the scroll container) but ensure the scroll container itself starts below the TimelineHeader. Looking at the Timeline layout, the `<main>` tag at line 618 is the scroll container (`overflow-y-auto`). The day headers with `sticky top: 0` inside this scrollable container should naturally replace each other as you scroll -- each new day's header pushes the previous one up.
+**Timeline.tsx**:
+- Add `onInsert` handler that opens a small day-picker dialog
+- On day selection: create a duplicate entry at the category's default time on that day (scheduled), close sidebar, scroll to that day
+- New state: `insertDayPickerOpen`, `insertingEntry`
 
-After reviewing more carefully: the sticky headers DO work within the scrollable `<main>`. The real fix needed is that the `top` value should account for any offset. Since the `<main>` is the scroll container and starts below the TimelineHeader, `top: 0` is correct. But if the headers aren't replacing each other, it's likely because the day containers don't have enough content height. With 24h x 80px/hr = 1920px per day, this should be fine.
-
-The actual fix: ensure all day containers (even empty ones) produce enough height so the sticky header mechanics work. For empty days, the content is just a small "No plans yet" div, which means the header leaves the viewport quickly. We should give empty days a minimum height so the sticky header stays visible longer and transitions smoothly.
-
-Additionally, we should make the `top` value consistent -- currently it's `0` via inline style. We'll keep it at 0 since the `<main>` scroll container is the reference.
-
-### 2. Consistent Gradient Line Position
-
-**File: `src/components/timeline/CalendarDay.tsx`**
-
-Currently the grid container uses `ml-14` (no flights) or `ml-20` (with flights), which shifts everything including the gradient line. The gradient line is at `left: -6` relative to the grid.
-
-Fix: Use a consistent left margin for ALL days (always `ml-20`), and adjust the time label/weather positioning for non-flight days to center within the wider gutter. This ensures the gradient line and grid are always at the same horizontal position.
-
-### 3. Better Short Card Rendering
-
-**File: `src/components/timeline/EntryCard.tsx`**
-
-Currently:
-- `isCompact` (< 50px / ~37 min): single-line layout with emoji + name + time -- works but very tight
-- Normal layout (>= 50px): full card with category badge, title, time row, distance/votes -- too much for sub-hour
-
-Add a **medium** layout for cards between 50px and 80px (37-60 min). This layout:
-- Removes the category badge row (saves ~24px)
-- Shows title and time on two tight lines
-- Keeps the left border color indicator
-- Reduces padding from `p-4` to `p-2`
-
-Also improve the compact layout:
-- Ensure the name has `min-w-0` and `flex-1` so it can truncate properly
-- Make the time text slightly smaller to give more room to the title
-
-**File: `src/components/timeline/CalendarDay.tsx`**
-
-Update the compact threshold: 
-- `isCompact` when height < 40px (very short)
-- New `isMedium` when height >= 40px and < 80px (sub-hour)
-- Pass both flags to EntryCard
+**New component: `DayPickerDialog.tsx`** -- Simple dialog showing trip days as a list. Returns selected day index.
 
 ---
 
-## Technical Details
+## 2. Hotel Wizard
 
-### CalendarDay.tsx changes:
+### Flow
+When user clicks "+" on the Hotel category (or selects Hotel in the entry form), instead of the standard entry form, a dedicated multi-step wizard opens:
 
-1. **Line 243-246**: Keep sticky header with `top: 0` (correct for scroll container)
-2. **Line 307-325**: Add `min-h-[200px]` to empty day containers so sticky headers transition smoothly
-3. **Line 328**: Change from conditional `ml-20`/`ml-14` to always `ml-20` for consistent gutter width
-4. **Line 433**: Update compact/medium logic:
-   ```
-   const isCompact = height < 40 && !flightGroup;
-   const isMedium = height >= 40 && height < 80 && !flightGroup;
-   ```
-5. **Line 664**: Gradient line `left` stays at `-6` (now consistent since margin is always `ml-20`)
-6. **Line 671**: Weather column positioning uses consistent gutter width
+**Step 1 -- Pick Hotel**: Google Places autocomplete for hotel name. Auto-fills location, coordinates, images, website.
 
-### EntryCard.tsx changes:
+**Step 2 -- Select Nights**: Shows all trip days as checkboxes. User selects which nights they are staying (e.g., nights of Day 1, 2, 3 = check-in evening Day 1, check-out morning Day 4). Multi-select.
 
-1. Add `isMedium` prop
-2. Add medium layout between compact and full:
-   - Two lines: title + time, reduced padding
-   - No category badge, no distance/votes
-   - Keep left border color accent
-3. Adjust compact layout: ensure title gets `flex-1 min-w-0` for proper truncation
+**Step 3 -- Set Times**: Two time pickers:
+- "When do you usually get back in the evening?" (default: 22:00)
+- "When do you want to leave in the morning?" (default: 08:00)
 
-### Timeline.tsx changes:
+**Step 4 -- Another Hotel?**: "Do you have another hotel?" Yes/No. If yes, loops back to Step 1 for the second hotel (with remaining unselected nights pre-highlighted). If no, confirms and creates entries.
 
-None -- all changes are in the child components.
+### What Gets Created
+- One `entry` + `entry_option` per selected night
+- Each entry: `start_time` = evening return time on that day, `end_time` = morning leave time on the next day
+- `is_scheduled = true`, `category = 'hotel'`
+- All entries share the same hotel name, location, photos
+- Each entry's `scheduled_day` is set to the night's day index
 
+### Implementation
+
+**New component: `HotelWizard.tsx`**:
+- Props: `open`, `onOpenChange`, `tripId`, `trip`, `onCreated`
+- 4-step wizard dialog using the existing Dialog component
+- Step 1: PlacesAutocomplete for hotel search
+- Step 2: Checkbox grid of trip nights
+- Step 3: Two time inputs (evening return, morning leave)
+- Step 4: "Add another hotel?" prompt
+- On confirm: batch-inserts entries + options + images into the database
+
+**Modified: `Timeline.tsx`**:
+- When `onAddEntry('hotel')` is called from the sidebar, open HotelWizard instead of EntryForm
+- New state: `hotelWizardOpen`
+
+**Modified: `CategorySidebar.tsx`**:
+- No changes needed (already fires `onAddEntry(cat.id)`)
+
+---
+
+## 3. File Summary
+
+| File | Action |
+|------|--------|
+| `src/components/timeline/SidebarEntryCard.tsx` | Add "Insert" button next to Copy |
+| `src/components/timeline/CategorySidebar.tsx` | Pass through `onInsert` prop |
+| `src/components/timeline/DayPickerDialog.tsx` | New -- simple day selection dialog |
+| `src/components/timeline/HotelWizard.tsx` | New -- multi-step hotel setup wizard |
+| `src/pages/Timeline.tsx` | Add insert handler, day picker state, hotel wizard routing |
+
+No database changes needed.
+
+---
+
+## 4. Technical Details
+
+### DayPickerDialog.tsx
+- Props: `open`, `onOpenChange`, `days` (array of day labels like "Day 1 - Mon 14 Jul"), `onSelectDay(dayIndex: number)`
+- Simple Dialog with a scrollable list of day buttons
+- Each button shows the day label; clicking it fires the callback and closes
+
+### HotelWizard.tsx
+- Uses existing `PlacesAutocomplete` component for hotel search
+- Night selection: renders a grid of toggle buttons for each trip night (e.g., "Night of Day 1", "Night of Day 2")
+- Time pickers use standard HTML time inputs
+- "Another hotel?" step uses two large buttons (Yes / No)
+- On completion, batch creates entries via Supabase:
+  ```
+  For each selected night:
+    1. Calculate start_time = selected day + evening return time (in trip timezone)
+    2. Calculate end_time = next day + morning leave time (in trip timezone)
+    3. Insert entry (is_scheduled: true, scheduled_day: dayIndex)
+    4. Insert entry_option (name, category: 'hotel', location, coords, etc.)
+    5. Insert option_images for auto-fetched photos
+  ```
+- If "another hotel" is selected, wizard resets to Step 1 but keeps track of already-assigned nights (greys them out)
+
+### Insert Handler in Timeline.tsx
+```
+handleInsert(entry):
+  1. Open DayPickerDialog with trip days
+  2. On day selected:
+     a. Clone entry (same as handleDuplicate logic)
+     b. Set clone as is_scheduled: true
+     c. Set start_time/end_time to category defaults on selected day
+     d. Close sidebar
+     e. Scroll to that day in the timeline
+     f. Refresh data
+     g. Toast: "Entry placed on Day X"
+```
