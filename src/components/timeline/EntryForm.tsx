@@ -16,6 +16,7 @@ import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import { Loader2 } from 'lucide-react';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
+import PhotoStripPicker from './PhotoStripPicker';
 
 const REFERENCE_DATE = '2099-01-01';
 
@@ -41,7 +42,7 @@ interface EntryFormProps {
   prefillCategory?: string;
 }
 
-type Step = 'category' | 'details' | 'when';
+type Step = 'category' | 'details';
 
 const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, editOption, prefillStartTime, prefillEndTime, prefillCategory }: EntryFormProps) => {
   const [step, setStep] = useState<Step>('category');
@@ -260,13 +261,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
     setStep('details');
   };
 
-  const handleDetailsNext = () => {
-    if (!name.trim()) {
-      toast({ title: 'Name is required', variant: 'destructive' });
-      return;
-    }
-    setStep('when');
-  };
+  // handleDetailsNext removed -- when step is merged into details
 
   // Auto-calculate flight duration
   const calcFlightDuration = useCallback((sTime: string, eTime: string, dTz: string, aTz: string, dateStr: string) => {
@@ -686,9 +681,7 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
 
   const stepTitle = step === 'category'
     ? 'What are you planning?'
-    : step === 'details'
-      ? (isFlight ? '✈️ Flight Details' : isTransfer ? '🚐 Transfer Details' : `${selectedCategory?.emoji ?? '📌'} Details`)
-      : 'When?';
+    : (isFlight ? '✈️ Flight Details' : isTransfer ? '🚐 Transfer Details' : `${selectedCategory?.emoji ?? '📌'} Details`);
 
   return (
     <>
@@ -749,6 +742,10 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                   />
                 )}
               </div>
+
+              {autoPhotos.length > 0 && !isFlight && !isTransfer && (
+                <PhotoStripPicker photos={autoPhotos} onChange={setAutoPhotos} />
+              )}
 
               {isFlight && (
                 <>
@@ -899,15 +896,11 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
                 </div>
               )}
 
-              <DialogFooter className="gap-2">
-                <Button variant="outline" onClick={() => setStep('category')}>Back</Button>
-                <Button onClick={handleDetailsNext}>Next: When?</Button>
-              </DialogFooter>
-            </div>
-          )}
+              {/* When section */}
+              <div className="border-t border-border/50 pt-4 mt-2">
+                <Label className="text-sm font-semibold text-muted-foreground">When</Label>
+              </div>
 
-          {step === 'when' && (
-            <div className="space-y-4">
               {/* Day / date picker */}
               <div className="space-y-2">
                 {isUndated ? (
@@ -1011,13 +1004,13 @@ const EntryForm = ({ open, onOpenChange, tripId, onCreated, trip, editEntry, edi
               )}
 
               <DialogFooter className="gap-2">
-                <Button variant="outline" onClick={() => setStep('details')}>Back</Button>
+                <Button variant="outline" onClick={() => setStep('category')}>Back</Button>
                 <Button
                   variant="secondary"
                   onClick={() => handleSaveAsIdea()}
                   disabled={saving}
                 >
-                  💡 Add to Ideas
+                  💡 Ideas
                 </Button>
                 <Button onClick={handleSave} disabled={saving}>
                   {saving ? 'Saving…' : (isEditing ? 'Update Entry' : 'Create Entry')}
