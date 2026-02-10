@@ -815,6 +815,119 @@ const Timeline = () => {
     await fetchData();
   };
 
+  // Auto-generate transport between events
+  const [autoTransportLoading, setAutoTransportLoading] = useState(false);
+
+  const handleAutoGenerateTransport = async () => {
+    if (!tripId) return;
+    setAutoTransportLoading(true);
+    try {
+      toast({ title: 'Generating transport…', description: 'Calculating routes between your events' });
+
+      const { data, error } = await supabase.functions.invoke('auto-generate-transport', {
+        body: { tripId },
+      });
+      if (error) throw error;
+
+      // Refresh to get the new transport entries
+      await fetchData();
+
+      // If there are overlaps, run deterministic push algorithm
+      if (data?.overlaps?.length > 0) {
+        // Re-fetch latest entries after transport was added
+        const { data: freshEntries } = await supabase
+          .from('entries')
+          .select('*')
+          .eq('trip_id', tripId)
+          .eq('is_scheduled', true)
+          .order('start_time');
+
+        if (freshEntries && freshEntries.length > 0) {
+          const { data: freshOptions } = await supabase
+            .from('entry_options')
+            .select('entry_id, category')
+            .in('entry_id', freshEntries.map((e: any) => e.id));
+
+          const optMap = new Map<string, string>();
+          for (const o of (freshOptions ?? [])) {
+            if (!optMap.has(o.entry_id)) optMap.set(o.entry_id, o.category ?? '');
+          }
+
+          // Group by day
+          const dayGroupsForPush = new Map<string, any[]>();
+          for (const e of freshEntries) {
+            const dayStr = e.start_time.substring(0, 10);
+            if (!dayGroupsForPush.has(dayStr)) dayGroupsForPush.set(dayStr, []);
+            dayGroupsForPush.get(dayStr)!.push(e);
+          }
+
+          const updates: Array<{ id: string; start_time: string; end_time: string }> = [];
+
+          for (const [, dayEnts] of dayGroupsForPush) {
+            // Sort by start_time
+            dayEnts.sort((a: any, b: any) =>
+              new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+            );
+
+            // Cascade push
+            for (let i = 0; i < dayEnts.length - 1; i++) {
+              const currentEnd = new Date(dayEnts[i].end_time).getTime();
+              const nextStart = new Date(dayEnts[i + 1].start_time).getTime();
+
+              if (currentEnd > nextStart && !dayEnts[i + 1].is_locked) {
+                const overlapMs = currentEnd - nextStart;
+                const nextDuration = new Date(dayEnts[i + 1].end_time).getTime() - new Date(dayEnts[i + 1].start_time).getTime();
+
+                // Check if next entry is overnight (> 6 hours, likely hotel)
+                if (nextDuration > 6 * 3600000) {
+                  // Compress from start: move start_time forward, keep end_time
+                  dayEnts[i + 1].start_time = new Date(currentEnd).toISOString();
+                  updates.push({
+                    id: dayEnts[i + 1].id,
+                    start_time: dayEnts[i + 1].start_time,
+                    end_time: dayEnts[i + 1].end_time,
+                  });
+                } else {
+                  // Push: shift both start and end
+                  dayEnts[i + 1].start_time = new Date(new Date(dayEnts[i + 1].start_time).getTime() + overlapMs).toISOString();
+                  dayEnts[i + 1].end_time = new Date(new Date(dayEnts[i + 1].end_time).getTime() + overlapMs).toISOString();
+                  updates.push({
+                    id: dayEnts[i + 1].id,
+                    start_time: dayEnts[i + 1].start_time,
+                    end_time: dayEnts[i + 1].end_time,
+                  });
+                }
+              }
+            }
+          }
+
+          // Apply updates
+          for (const u of updates) {
+            await supabase
+              .from('entries')
+              .update({ start_time: u.start_time, end_time: u.end_time })
+              .eq('id', u.id);
+          }
+
+          if (updates.length > 0) {
+            await fetchData();
+          }
+
+          toast({
+            title: `Added ${data.created.length} transport entries`,
+            description: updates.length > 0 ? `Adjusted ${updates.length} events to resolve overlaps` : undefined,
+          });
+        }
+      } else {
+        toast({ title: `Added ${data?.created?.length ?? 0} transport entries` });
+      }
+    } catch (err: any) {
+      toast({ title: 'Failed to generate transport', description: err.message, variant: 'destructive' });
+    } finally {
+      setAutoTransportLoading(false);
+    }
+  };
+
   const days = getDays();
 
   if (!currentUser) return null;
@@ -837,6 +950,8 @@ const Timeline = () => {
         onDataRefresh={fetchData}
         onToggleIdeas={() => setSidebarOpen(prev => !prev)}
         onToggleLive={() => setLiveOpen(prev => !prev)}
+        onAutoGenerateTransport={handleAutoGenerateTransport}
+        autoTransportLoading={autoTransportLoading}
         liveOpen={liveOpen}
         ideasCount={unscheduledEntries.length}
         scheduledEntries={scheduledEntries}

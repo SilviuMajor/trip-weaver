@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { ArrowLeft, Save, Copy, X, Check, Plus, Trash2, CalendarIcon, Upload, ImageIcon, Lock, LockOpen } from 'lucide-react';
+import { ArrowLeft, Save, Copy, X, Check, Plus, Trash2, CalendarIcon, Upload, ImageIcon, Lock, LockOpen, Footprints } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { toast } from '@/hooks/use-toast';
@@ -46,6 +46,7 @@ const TripSettings = () => {
 
   const [trip, setTrip] = useState<Trip | null>(null);
   const [members, setMembers] = useState<TripUser[]>([]);
+  const [walkThreshold, setWalkThreshold] = useState(10);
   const [tripName, setTripName] = useState('');
   const [tripDestination, setTripDestination] = useState('');
   const [saving, setSaving] = useState(false);
@@ -86,6 +87,7 @@ const TripSettings = () => {
         setTripName(t.name);
         setTripDestination(t.destination ?? '');
         setTripEmoji(t.emoji ?? '');
+        setWalkThreshold((tripData as any).walk_threshold_min ?? 10);
       }
       setMembers((membersData ?? []) as unknown as TripUser[]);
       setLoading(false);
@@ -554,6 +556,45 @@ const TripSettings = () => {
               }}
               count={((trip?.category_presets as CategoryPreset[] | null) ?? []).length}
             />
+          </div>
+        </section>
+
+        {/* Transport Settings */}
+        <section className="space-y-3">
+          <Label className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            <Footprints className="mr-1.5 inline h-4 w-4" />
+            Transport Settings
+          </Label>
+          <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+            <div className="space-y-2">
+              <Label htmlFor="walk-threshold" className="text-sm font-medium">Auto-walk threshold</Label>
+              <p className="text-xs text-muted-foreground">
+                Distances under this walking time will automatically use walking mode when generating transport
+              </p>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="walk-threshold"
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={walkThreshold}
+                  onChange={(e) => setWalkThreshold(Number(e.target.value))}
+                  className="h-9 w-24"
+                />
+                <span className="text-sm text-muted-foreground">minutes</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 ml-auto"
+                  onClick={async () => {
+                    await supabase.from('trips').update({ walk_threshold_min: walkThreshold } as any).eq('id', tripId!);
+                    toast({ title: `Walk threshold set to ${walkThreshold} min` });
+                  }}
+                >
+                  <Save className="mr-1 h-3.5 w-3.5" />Save
+                </Button>
+              </div>
+            </div>
           </div>
         </section>
 

@@ -357,6 +357,7 @@ export type Database = {
           timezone: string
           updated_at: string
           voting_locked: boolean
+          walk_threshold_min: number
         }
         Insert: {
           category_presets?: Json | null
@@ -375,6 +376,7 @@ export type Database = {
           timezone?: string
           updated_at?: string
           voting_locked?: boolean
+          walk_threshold_min?: number
         }
         Update: {
           category_presets?: Json | null
@@ -393,6 +395,7 @@ export type Database = {
           timezone?: string
           updated_at?: string
           voting_locked?: boolean
+          walk_threshold_min?: number
         }
         Relationships: []
       }
