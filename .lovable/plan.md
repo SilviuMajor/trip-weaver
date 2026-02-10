@@ -1,141 +1,147 @@
 
+# Fix: Timeline Alignment, Cross-Day Consistency, and Dynamic Header
 
-# Fix: Flight Input, Header Gap, and Lock/Unlock Time Shift
+## Problems Identified
 
-## Issue 1: Can't input a flight on Monday Feb 23rd
+### 1. Layout vs Visual Position Mismatch (Within a Day)
+`CalendarDay.tsx` line 180-182 computes overlap layout using `tripTimezone` for ALL entries. But visual positioning (lines 391-411) uses per-entry resolved timezones (departure_tz, arrival_tz, or destination TZ for post-flight entries). The overlap engine places cards at one position; the visual renderer places them at another.
 
-**Root cause**: The trip runs Feb 21-23, so Feb 23rd is the last day. The EntryForm date input has no restrictions, but when pre-filling from a "+" button click, the `prefillStartTime` is passed as an ISO string. In `EntryForm` (line 147), the prefill sets `startTime` via `format(dt, 'HH:mm')` -- but it never sets the `date` field. Since `date` starts as `''`, clicking "Create Entry" triggers the validation "Please select a date" on line 399.
+**Fix**: Use the same per-entry TZ resolution in `layoutEntries` as in the visual positioning block. Extract a shared helper `resolveEntryTz(entry, dayFlights, activeTz, tripTimezone)` and call it in both places.
 
-**Fix**: When `prefillStartTime` is provided for a dated trip, also pre-fill the `date` field from it.
+### 2. Cross-Day Alignment (Days Don't Line Up)
+Entries are bucketed into days on line 230 and 346 of `Timeline.tsx` using `getDateInTimezone(entry.start_time, tripTimezone)`. But after a timezone-changing flight, the active TZ for rendering is the destination TZ. If the trip timezone is GMT but the destination is CET (+1), an entry at 23:30 GMT would show at 00:30 CET on the grid -- but it's bucketed into the GMT day, not the next CET day.
 
-## Issue 2: Header sticky gap
+**Fix**: In `getEntriesForDay` and the `dayTimezoneMap` builder, bucket entries using the **active timezone for that day** (from `dayTimezoneMap`) rather than always using `tripTimezone`. This requires a two-pass approach:
+1. First pass: build the timezone map from flights (already done)
+2. Second pass: bucket entries using each day's `activeTz`
 
-**Root cause**: The day header in `CalendarDay.tsx` line 215 uses `sticky top-[57px]`, assuming the `TimelineHeader` is exactly 57px tall. But the header contains a greeting line ("Hey, {name}") which makes it taller. The hardcoded `57px` doesn't match the actual header height, creating a visible gap between the main header and the day bar.
+For non-flight entries after a TZ change, use the destination TZ to determine which calendar day they fall on.
 
-**Fix**: Change `top-[57px]` to a value that matches the actual header height. The header has `py-3` (12px top + 12px bottom = 24px) plus content (title ~28px line-height + greeting ~16px) plus 1px border = roughly 69px. A cleaner approach: use a CSS variable or measure the header, but the simplest fix is to adjust to the correct pixel value. Based on the header structure (py-3 = 24px padding, ~24px content height with two lines, 1px border), the correct value is approximately `top-[53px]` (the header with single-line name + small greeting). We should verify and adjust. Alternatively, we can remove the gap by setting `top-[49px]` which accounts for py-3 (24px total) + single line content (~24px) + border (1px).
+### 3. Header Stickiness Gap
+The `TimelineHeader` is approximately 65-70px tall (varies with content), but the day bar uses `sticky top-[49px]`. 
 
-Actually the cleanest fix: make the header height consistent by measuring. The header `py-3` = 12+12 = 24px. The content inside is a flex row. The trip name is `text-lg leading-tight` (~24px) and the greeting is `text-xs` (~16px). Total inner = ~40px + 24px padding = ~64px + 1px border = ~65px. But this varies. The safest approach is to remove the hardcoded value and use `top-0` on the day header while nesting it inside a container that accounts for the main header via scroll margin or making both part of the same sticky context.
+**Fix**: 
+- Add a `ref` to `TimelineHeader`'s root element (use `React.forwardRef`)
+- In `Timeline.tsx`, measure the header height with `useEffect` + `getBoundingClientRect()`
+- Pass `headerHeight` as a prop to `CalendarDay`
+- Replace `top-[49px]` with `style={{ top: headerHeight }}`
 
-**Simplest reliable fix**: Set the TimelineHeader to a fixed height and match `top-[Xpx]` exactly, or better: wrap both in a way that the day header stacks below the main header using a shared sticky parent.
+### 4. Timezone Scope (Only Flights)
+Already the case in the data model -- only flight `entry_options` have `departure_tz` and `arrival_tz`. No changes needed to the form. The fix is ensuring all computation respects this: non-flight entries inherit timezone from their position relative to flights.
 
-## Issue 3: Lock/unlock adds 1 hour to arrival time
+## Implementation Details
 
-**Root cause**: This is the critical bug. When you click on a flight card (even without dragging), the mousedown handler fires `startDrag`, and on mouseup `commitDrag` fires `onCommit` which calls `handleDragCommit`. 
-
-In `handleDragCommit` (CalendarDay line 113-130), it converts BOTH start and end hours back to UTC using a single `commitTz`. But for flights:
-- `origStartHour` was computed using `departure_tz` 
-- `origEndHour` was computed using `arrival_tz`
-
-Yet `commitTz` = `dragTz` = `departure_tz`. So the arrival time (which was read in arrival_tz) gets written back using departure_tz. If there's a 1-hour difference between the two timezones, every click shifts the arrival by 1 hour.
-
-The lock toggle button is inside the card, so clicking it triggers the card's mousedown -> mouseup cycle, committing a "drag" with corrupted arrival time.
-
-**Fix**: For flight entries, `handleDragCommit` must convert start_time using departure_tz and end_time using arrival_tz separately, rather than using a single timezone for both.
-
-## Implementation Plan
-
-### File: `src/components/timeline/CalendarDay.tsx`
-
-**Fix drag commit for flights (Issue 3)**:
-- Modify `handleDragCommit` to detect if the entry is a flight (has departure_tz and arrival_tz)
-- If flight: convert `newStartHour` with `departure_tz` and `newEndHour` with `arrival_tz`
-- If not flight: use single `commitTz` as currently
-- Additionally: skip the commit entirely if `wasDraggedRef.current` is false (no actual movement occurred). This prevents "phantom" drag commits from simple clicks on lock buttons, card taps, etc.
-
-**Fix header gap (Issue 2)**:
-- Change `sticky top-[57px]` to `sticky top-[53px]` initially, and add an approach that's more robust: use a ref on the main header to measure its height dynamically.
-
-### File: `src/components/timeline/EntryForm.tsx`
-
-**Fix flight input date pre-fill (Issue 1)**:
-- In the `prefillStartTime` useEffect (lines 144-149), also set `date` from the prefilled time when the trip is dated.
-
-### File: `src/hooks/useDragResize.ts`
-
-**Prevent phantom commits (Issue 3 defense-in-depth)**:
-- In `commitDrag`, only call `onCommit` if `wasDraggedRef.current` is true (actual movement occurred). If no movement, just clean up drag state without committing.
-
-### File: `src/pages/Timeline.tsx`
-
-**No changes needed** - the header height fix will be in CalendarDay's sticky offset.
-
-## Technical Details
-
-### CalendarDay.tsx - handleDragCommit flight-aware conversion
+### New Helper: `resolveEntryTz`
+In `CalendarDay.tsx`, extract a function used by both layout and rendering:
 
 ```text
-Current (broken):
-  const commitTz = tz || activeTz || tripTimezone;
-  const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), commitTz);
-  const newEndIso = localToUTC(dateStr, toTimeStr(newEndHour), commitTz);
-
-Fixed:
-  const entry = sortedEntries.find(e => e.id === entryId);
-  const primaryOpt = entry?.options[0];
-  const isFlight = primaryOpt?.category === 'flight' && primaryOpt?.departure_tz && primaryOpt?.arrival_tz;
-
-  const startTz = isFlight ? primaryOpt.departure_tz! : (tz || activeTz || tripTimezone);
-  const endTz = isFlight ? primaryOpt.arrival_tz! : startTz;
-  
-  const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), startTz);
-  const newEndIso = localToUTC(dateStr, toTimeStr(newEndHour), endTz);
+function resolveEntryTz(
+  entry: EntryWithOptions,
+  dayFlights: FlightTzInfo[],
+  activeTz: string | undefined,
+  tripTimezone: string
+): { startTz: string; endTz: string } {
+  const opt = entry.options[0];
+  if (opt?.category === 'flight' && opt.departure_tz && opt.arrival_tz) {
+    return { startTz: opt.departure_tz, endTz: opt.arrival_tz };
+  }
+  let tz = activeTz || tripTimezone;
+  if (dayFlights.length > 0 && dayFlights[0].flightEndUtc) {
+    const entryMs = new Date(entry.start_time).getTime();
+    const flightEndMs = new Date(dayFlights[0].flightEndUtc).getTime();
+    tz = entryMs >= flightEndMs ? dayFlights[0].destinationTz : dayFlights[0].originTz;
+  }
+  return { startTz: tz, endTz: tz };
+}
 ```
 
-### useDragResize.ts - Skip phantom commits
-
+### CalendarDay.tsx -- Fix layoutEntries (line 180-185)
+Replace:
 ```text
-Current:
-  const commitDrag = useCallback(() => {
-    const state = dragStateRef.current;
-    if (state) {
-      onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz);
-    }
-    ...
-
-Fixed:
-  const commitDrag = useCallback(() => {
-    const state = dragStateRef.current;
-    if (state && wasDraggedRef.current) {
-      onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz);
-    }
-    ...
+const s = (getHourInTimezone(e.start_time, tripTimezone) - startHour) * 60;
+let en = (getHourInTimezone(e.end_time, tripTimezone) - startHour) * 60;
 ```
-
-This is the most important fix -- it prevents ANY click (lock toggle, card tap) from accidentally re-writing entry times.
-
-### EntryForm.tsx - Pre-fill date
-
+With:
 ```text
-Current (line 144-149):
-  useEffect(() => {
-    if (prefillStartTime && open && !editEntry) {
-      const dt = new Date(prefillStartTime);
-      setStartTime(format(dt, 'HH:mm'));
-    }
-  }, [prefillStartTime, open, editEntry]);
-
-Fixed:
-  useEffect(() => {
-    if (prefillStartTime && open && !editEntry) {
-      const dt = new Date(prefillStartTime);
-      setStartTime(format(dt, 'HH:mm'));
-      if (!isUndated) {
-        setDate(format(dt, 'yyyy-MM-dd'));
-      }
-    }
-  }, [prefillStartTime, open, editEntry, isUndated]);
+const { startTz, endTz } = resolveEntryTz(e, dayFlights, activeTz, tripTimezone);
+const s = (getHourInTimezone(e.start_time, startTz) - startHour) * 60;
+let en = (getHourInTimezone(e.end_time, endTz) - startHour) * 60;
 ```
 
-### CalendarDay.tsx - Header offset
+### Timeline.tsx -- Fix Entry Bucketing (line 343-348)
+Change `getEntriesForDay` to use the day's active timezone:
+```text
+const getEntriesForDay = (day: Date): EntryWithOptions[] => {
+  const dayStr = format(day, 'yyyy-MM-dd');
+  const tzInfo = dayTimezoneMap.get(dayStr);
+  const tz = tzInfo?.activeTz || tripTimezone;
+  return scheduledEntries.filter(entry => {
+    const entryDay = getDateInTimezone(entry.start_time, tz);
+    return entryDay === dayStr;
+  });
+};
+```
 
-Change line 215 from `top-[57px]` to `top-[53px]`. This will need visual verification and may need further tuning.
+Also fix the same in `dayTimezoneMap` builder (line 230) -- use a progressive TZ for bucketing:
+```text
+// After computing currentTz for the day, use it to bucket entries
+const dayEntries = scheduledEntries
+  .filter(entry => {
+    const entryDay = getDateInTimezone(entry.start_time, currentTz);
+    return entryDay === dayStr;
+  })
+```
 
-## Summary of Changes
+### Timeline.tsx + TimelineHeader.tsx -- Dynamic Header Height
+**TimelineHeader.tsx**: Convert to `forwardRef`:
+```text
+const TimelineHeader = React.forwardRef<HTMLElement, TimelineHeaderProps>(
+  ({ trip, tripId, ... }, ref) => {
+    return (
+      <header ref={ref} className="sticky top-0 z-30 ...">
+        ...
+      </header>
+    );
+  }
+);
+```
 
-| File | Change | Issue |
-|------|--------|-------|
-| `useDragResize.ts` | Skip commit when no actual drag movement | #3 (primary fix) |
-| `CalendarDay.tsx` | Flight-aware dual-TZ in handleDragCommit | #3 (safety net) |
-| `CalendarDay.tsx` | Adjust sticky top offset | #2 |
-| `EntryForm.tsx` | Pre-fill date from prefillStartTime | #1 |
+**Timeline.tsx**: Add measurement:
+```text
+const headerRef = useRef<HTMLElement>(null);
+const [headerHeight, setHeaderHeight] = useState(53);
 
+useEffect(() => {
+  if (!headerRef.current) return;
+  const ro = new ResizeObserver(([entry]) => {
+    setHeaderHeight(entry.contentRect.height + /* border */ 1);
+  });
+  ro.observe(headerRef.current);
+  return () => ro.disconnect();
+}, []);
+
+// Pass to TimelineHeader:
+<TimelineHeader ref={headerRef} ... />
+
+// Pass to CalendarDay:
+<CalendarDay headerHeight={headerHeight} ... />
+```
+
+**CalendarDay.tsx**: Accept `headerHeight` prop, replace `top-[49px]` with:
+```text
+style={{ top: headerHeight }}
+```
+
+## Files Summary
+
+| File | Changes |
+|------|---------|
+| `CalendarDay.tsx` | Add `resolveEntryTz` helper, fix `layoutEntries` to use it, fix visual positioning to use it, accept `headerHeight` prop, replace hardcoded sticky offset |
+| `Timeline.tsx` | Fix `getEntriesForDay` to use per-day active TZ, fix `dayTimezoneMap` entry bucketing, add header measurement via ResizeObserver, pass `headerHeight` to CalendarDay |
+| `TimelineHeader.tsx` | Convert to `forwardRef` to expose root element ref |
+
+## Implementation Order
+
+1. Extract `resolveEntryTz` helper and fix layout computation in CalendarDay
+2. Fix entry bucketing in Timeline.tsx to use active TZ per day
+3. Dynamic header height (forwardRef + ResizeObserver + prop)
