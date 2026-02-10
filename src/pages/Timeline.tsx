@@ -82,7 +82,10 @@ const Timeline = () => {
   useEffect(() => {
     if (!headerRef.current) return;
     const ro = new ResizeObserver(([entry]) => {
-      setHeaderHeight(entry.contentRect.height + 1);
+      const h = entry.borderBoxSize?.[0]?.blockSize
+        ?? headerRef.current?.getBoundingClientRect().height
+        ?? 53;
+      setHeaderHeight(h);
     });
     ro.observe(headerRef.current);
     return () => ro.disconnect();
