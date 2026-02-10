@@ -1,197 +1,180 @@
 
 
-# Fix Transport Gap Button + Flight Booking Upload
+# Implement Unified EntrySheet (Merge Create + View)
 
-## Overview
+## What's Missing
 
-Two changes:
+The plan to merge `EntryForm` (creation/editing Dialog) and `EntryOverlay` (read-only view Sheet) into a single unified component was approved but never implemented. Currently:
 
-1. **Transport gap button**: Skip the category picker and open directly into a transport-specific form with From/To auto-filled from adjacent entries and all route options auto-fetched
-2. **Flight booking upload**: Add a document upload option to the flight form that parses booking confirmations (PDF/image) using AI to extract flight details
+- **Clicking a card** opens `EntryOverlay` (a bottom Sheet) showing read-only details
+- **Clicking "Edit"** inside the overlay closes it, then opens `EntryForm` (a centered Dialog)
+- These are two completely separate 350+ line components with duplicated logic
 
----
+## What We're Building
 
-## 1. Transport Gap Button Fix
+A single `EntrySheet.tsx` component in a **centered Dialog** that handles both viewing and creating. When viewing an existing entry, editors can **inline-edit individual fields** (click a field to edit it in-place).
 
-### Current problem
-The "Transport" button in timeline gaps calls `onAddBetween(entry.end_time)` which opens the generic `EntryForm` at the category picker step. It does not pass adjacent entry context or skip to the transport layout.
+## Behavior
 
-### Solution
+### Creating a new entry
+- Step 1: Category picker grid (unchanged from current EntryForm)
+- Step 2: Centered dialog with all fields editable (name, website, location, photo strip, when section) -- identical to current EntryForm step 2
 
-**CalendarDay.tsx** -- Add a new `onAddTransport` callback:
+### Viewing an existing entry (card click)
+- Opens a centered Dialog (not bottom Sheet) showing the entry details
+- Non-editors see everything read-only
+- Editors see each field as display text; clicking a field makes just that field editable (input replaces text). Enter/blur saves immediately to the database
+- Map, images, votes, distance, lock/delete/move-to-ideas buttons all present
+- ImageUploader available for editors
 
-```
-onAddTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string) => void;
-```
+### What's preserved from EntryOverlay
+- Category badge with color
+- Flight departure/arrival layout with terminals and timezone abbreviations
+- Time display
+- Distance calculation
+- Website link
+- Map preview
+- Vote button
+- Image gallery + uploader
+- Lock/unlock toggle
+- Move to ideas
+- Delete with confirmation
 
-The transport gap button calls `onAddTransport(entry.id, nextEntry.id, entry.end_time)` instead of `onAddBetween(entry.end_time)`.
+### What's preserved from EntryForm
+- Category picker grid (step 1)
+- PlacesAutocomplete with auto-fill
+- PhotoStripPicker
+- Flight-specific: airport pickers, timezone, terminals, checkin/checkout, airport processing entries
+- Transfer-specific: from/to, inline route comparison (transport gap flow), manual mode picker
+- Day/date picker, time inputs, duration
+- Save as idea flow
+- Return flight prompt
+- Auto-detect trip dates from flights
+- Flight booking upload
+- Transport context auto-fill
 
-**Timeline.tsx** -- Add `handleAddTransport` handler + `transportContext` state:
+## File Changes
 
-- New state: `transportContext: { fromAddress: string; toAddress: string } | null`
-- Handler extracts `location_name` (or `arrival_location` for flights) from the "from" entry's primary option, and `location_name` (or `departure_location`) from the "to" entry's primary option
-- Sets `prefillCategory='transport'` so the category picker is skipped
-- Sets `prefillStartTime` from the gap time
-- Passes `transportContext` to EntryForm
+| File | Action | Description |
+|------|--------|-------------|
+| `src/components/timeline/EntrySheet.tsx` | **Create** | Unified component (~800 lines) combining all EntryForm + EntryOverlay functionality. Uses centered Dialog. Supports `mode: 'create' | 'view'`. View mode has inline per-field editing for editors. |
+| `src/components/timeline/EntryOverlay.tsx` | **Delete** | Fully replaced by EntrySheet |
+| `src/components/timeline/EntryForm.tsx` | **Delete** | Fully replaced by EntrySheet |
+| `src/pages/Timeline.tsx` | **Edit** | Replace dual state management (overlayEntry/overlayOpen + entryFormOpen/editEntry) with unified state: `sheetMode`, `sheetEntry`, `sheetOption`, `sheetOpen`. Card clicks set mode='view'. Add buttons set mode='create'. Pass all necessary props to single EntrySheet. |
 
-**EntryForm.tsx** -- Accept and use `transportContext`:
-
-- New prop: `transportContext?: { fromAddress: string; toAddress: string } | null`
-- When provided alongside `prefillCategory='transport'`:
-  - Auto-fill `transferFrom` and `transferTo`
-  - Auto-fetch all 4 route modes (walk/transit/cycle/drive) on mount using the existing multi-mode `google-directions` edge function
-  - Display results as an **inline route comparison list** (embedded version of TransportPicker UI) replacing the current manual "From / To / Mode grid / Calculate" layout
-  - Auto-select the fastest mode
-  - Auto-set `durationMin` and `endTime` from the selected route
-  - Auto-generate name: e.g. "Walk to Restaurant Y"
-  - User can tap a different mode to switch
-
-Route comparison inline UI:
-
-```
-From: Museum X           To: Restaurant Y
- 
-Routes:
- [x] Walk      12m  0.8km
- [ ] Transit    8m  1.2km  
- [ ] Drive      4m  1.1km
- [ ] Cycle      6m  0.9km
-
--------- When --------
-Start: 12:30    End: 12:42
-Duration: 12 min (auto)
-```
-
-When `transportContext` is NOT provided (manual transport creation from category picker), the current manual From/To/Mode layout remains unchanged.
-
----
-
-## 2. Flight Booking Document Upload
-
-### Behavior
-In the flight details form, add a "Upload booking" button that accepts PDF or image files. The document is sent to an AI edge function that extracts:
-- Flight number (name)
-- Departure/arrival airports (IATA codes)
-- Departure/arrival terminals
-- Departure/arrival times
-- Date
-
-Extracted data auto-fills the corresponding form fields. The user can review and correct before saving.
-
-### Implementation
-
-**New edge function: `supabase/functions/parse-flight-booking/index.ts`**
-
-- Accepts a base64-encoded file (PDF or image) in the request body
-- Uses Lovable AI (google/gemini-2.5-flash -- good at document understanding, cost-effective) to analyze the document
-- Prompt instructs the model to extract structured flight data
-- Returns JSON with extracted fields:
-  ```json
-  {
-    "flights": [{
-      "flight_number": "BA1234",
-      "departure_airport": "LHR",
-      "arrival_airport": "AMS", 
-      "departure_terminal": "T5",
-      "arrival_terminal": "T1",
-      "departure_time": "10:30",
-      "arrival_time": "13:00",
-      "date": "2025-03-15"
-    }]
-  }
-  ```
-
-**EntryForm.tsx** -- Add upload button to flight section:
-
-- After the "Name" field, add a small "Upload booking" button with a file input (accept: `.pdf, image/*`)
-- On file select:
-  - Read file as base64
-  - Show loading spinner
-  - Call `parse-flight-booking` edge function
-  - Auto-fill: name (flight number), departure/arrival airports (trigger existing airport picker lookup by IATA code), terminals, times, date
-  - Show toast: "Extracted flight details -- please review"
-- If multiple flights found in the document, show a selector to pick which flight to use
-
----
-
-## File Summary
-
-| File | Action | Changes |
-|------|--------|---------|
-| `src/components/timeline/CalendarDay.tsx` | Edit | Add `onAddTransport` prop; transport gap button uses it with adjacent entries |
-| `src/pages/Timeline.tsx` | Edit | Add `transportContext` state and `handleAddTransport`; pass context to EntryForm |
-| `src/components/timeline/EntryForm.tsx` | Edit | Accept `transportContext` prop; auto-fill from/to; auto-fetch all route modes inline; add flight booking upload button |
-| `supabase/functions/parse-flight-booking/index.ts` | Create | AI-powered flight booking document parser using Gemini |
-
-No database changes needed.
-
----
+No database changes. No edge function changes.
 
 ## Technical Details
 
-### Transport auto-fetch on mount (EntryForm.tsx)
+### Unified state in Timeline.tsx
 
-```typescript
-// New state
-const [transportResults, setTransportResults] = useState<{mode: string; duration_min: number; distance_km: number}[]>([]);
-const [transportLoading, setTransportLoading] = useState(false);
+Replace:
+- `overlayEntry`, `overlayOption`, `overlayOpen` (for EntryOverlay)
+- `entryFormOpen`, `editEntry`, `editOption` (for EntryForm)
 
-// Auto-fetch when transportContext provided
-useEffect(() => {
-  if (transportContext && categoryId === 'transport' && open) {
-    setTransferFrom(transportContext.fromAddress);
-    setTransferTo(transportContext.toAddress);
-    fetchAllRoutes(transportContext.fromAddress, transportContext.toAddress);
-  }
-}, [transportContext, categoryId, open]);
-
-const fetchAllRoutes = async (from: string, to: string) => {
-  setTransportLoading(true);
-  const { data, error } = await supabase.functions.invoke('google-directions', {
-    body: { fromAddress: from, toAddress: to, modes: ['walk', 'transit', 'drive', 'bicycle'] },
-  });
-  if (!error && data?.results) {
-    setTransportResults(data.results);
-    // Auto-select fastest
-    const fastest = data.results.reduce((a, b) => a.duration_min < b.duration_min ? a : b);
-    setTransferMode(fastest.mode);
-    setDurationMin(fastest.duration_min);
-    // Update end time
-    // Auto-generate name
-    setName(`${modeLabel(fastest.mode)} to ${to.split(',')[0]}`);
-  }
-  setTransportLoading(false);
-};
+With:
+```text
+sheetMode: 'create' | 'view' | null
+sheetEntry: EntryWithOptions | null    (populated for view mode)
+sheetOption: EntryOption | null        (populated for view mode)
+sheetOpen: boolean
 ```
 
-### Address extraction in Timeline.tsx
+Card click: `sheetMode='view'`, populate entry/option, open=true
+Add button: `sheetMode='create'`, entry/option=null, open=true
+"Edit" is no longer needed as a separate action -- fields are inline-editable
 
-```typescript
-const handleAddTransport = (fromEntryId: string, toEntryId: string, prefillTime: string) => {
-  const allE = /* current entries array */;
-  const fromEntry = allE.find(e => e.id === fromEntryId);
-  const toEntry = allE.find(e => e.id === toEntryId);
-  const fromOpt = fromEntry?.options[0];
-  const toOpt = toEntry?.options[0];
-  
-  // Use location_name for regular entries, arrival_location for flights
-  const fromAddr = fromOpt?.location_name || fromOpt?.arrival_location || '';
-  const toAddr = toOpt?.location_name || toOpt?.departure_location || '';
-  
-  setTransportContext({ fromAddress: fromAddr, toAddress: toAddr });
-  setPrefillStartTime(prefillTime);
-  setPrefillCategory('transport');
-  setEntryFormOpen(true);
-};
+### InlineField helper (inside EntrySheet)
+
+```text
+interface InlineFieldProps {
+  label: string;
+  value: string;
+  canEdit: boolean;
+  onSave: (newValue: string) => Promise<void>;
+  renderDisplay?: (val: string) => React.ReactNode;
+  renderInput?: (val: string, onChange: (v: string) => void) => React.ReactNode;
+}
 ```
 
-### Flight booking parser edge function
+- Default display: text span with subtle pencil icon on hover
+- Click to enter edit mode (shows Input, Enter saves, Escape cancels, blur saves)
+- On save: writes directly to Supabase (`entry_options` or `entries` table), then calls `onSaved()` to refresh
 
-Uses Lovable AI endpoint with Gemini 2.5 Flash for document understanding. The function:
-1. Receives base64 file + MIME type
-2. Sends to Gemini with a structured extraction prompt
-3. Parses the JSON response
-4. Returns extracted flight data
+### Editable fields (view mode, editors only)
+- Name (text input, or PlacesAutocomplete for non-flight/transfer)
+- Website (text input)
+- Location name (text input)
+- Time range: start and end (time inputs)
+- Flight: departure/arrival airports, terminals
+- Transfer: from/to, travel mode
 
-The prompt instructs the model to find flight numbers, IATA codes, terminals, times, and dates from booking confirmations, e-tickets, or itinerary screenshots.
+### Non-editable (display only)
+- Category badge (changing category has complex implications)
+- Map preview (auto-updates if location changes)
+- Distance
+- Vote button
+- Images (managed via gallery + uploader, not inline edit)
+
+### EntrySheet props
+
+```text
+interface EntrySheetProps {
+  mode: 'create' | 'view';
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  tripId: string;
+  trip?: Trip | null;
+  onSaved: () => void;
+
+  // View mode
+  entry?: EntryWithOptions | null;
+  option?: EntryOption | null;
+  formatTime?: (iso: string) => string;
+  userLat?: number | null;
+  userLng?: number | null;
+  votingLocked?: boolean;
+  userVotes?: string[];
+  onVoteChange?: () => void;
+  onMoveToIdeas?: (entryId: string) => void;
+
+  // Create mode
+  prefillStartTime?: string;
+  prefillEndTime?: string;
+  prefillCategory?: string;
+  transportContext?: { fromAddress: string; toAddress: string } | null;
+}
+```
+
+### View mode layout
+
+```text
++--------------------------------------------+
+| [Category badge]                            |
+|                                             |
+| Entry Name              [click to edit]     |
+|                                             |
+| 09:00 -- 11:00 (2h)    [click to edit]     |
+|                                             |
+| 1.2km away                                  |
+| Visit website           [click to edit]     |
+|                                             |
+| [====== Map Preview ======]                 |
+|                                             |
+| [Vote button]  5 votes                      |
+|                                             |
+| [photo1] [photo2] [photo3]                  |
+| [+ Upload photo]                            |
+|                                             |
+| ------------------------------------------- |
+| [Lock] [Move to Ideas] [Delete]             |
++--------------------------------------------+
+```
+
+### Create mode layout (unchanged from current EntryForm)
+
+```text
+Step 1: Category picker grid
+Step 2: Details + When (single scrollable page)
+```
 
