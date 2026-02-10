@@ -1,315 +1,189 @@
 
 
-# Comprehensive Timeline Enhancement Plan
+# Entries Bank Rework + Opacity & Filtering
 
 ## Overview
 
-This plan covers 5 interconnected features:
-
-1. **Duration label** on all timeline entry cards (bottom-right, bold)
-2. **Sidebar improvements** -- remove "No entries" text, give unscheduled entries default times, reduce opacity for scheduled entries, double card height
-3. **"LIVE" page** -- sidebar on desktop, tab on mobile, with placeholder content
-4. **Transport feature** -- "Add transport" / "Add event" button between entries, transport cards on the time grid, multi-mode API calculation with departure time forecasting
-5. **Overlap detection** -- red tint on overlapping portions of cards, auto-trigger conflict resolver
+Rework the "All Entries" sidebar into an **Entries Bank** -- showing only original entries (one per unique event), with usage count badges, flight restrictions, 70% opacity for scheduled items, and filter tabs.
 
 ---
 
-## 1. Duration Label on Entry Cards
+## 1. Bank Behavior: Show Only Originals with Count Badge
 
-Add a bold duration label (e.g. "2h 30m", "45m") to the bottom-right corner of every timeline entry card.
+### Concept
+
+- The bank shows each **unique entry** once (the original)
+- When an entry has been placed on the timeline (or duplicated onto it), a **count badge** appears on the card (e.g., "x2" if used twice)
+- Dragging from the bank always **creates a new copy** on the timeline
+- Flights are the exception: they cannot be duplicated (see section 2)
+
+### How to detect duplicates
+
+Entries are currently independent rows. To group "originals" and "copies", match entries by their first option's `name` + `category` combination within the same trip. This avoids needing a new DB column.
 
 ### Implementation
 
-**File: `src/components/timeline/EntryCard.tsx`**
+**File: `src/components/timeline/CategorySidebar.tsx`**
 
-- Add a helper function to compute duration from `startTime` and `endTime`:
-  ```
-  formatDuration(startIso, endIso) -> "2h 30m" | "45m" | "3h"
-  ```
-- Render the label in the bottom-right corner of all three card layouts (compact, medium, full):
-  - **Full card**: absolute positioned, bottom-right, bold text, semi-transparent background pill
-  - **Medium card**: inline at the end of the time row
-  - **Compact card**: after the time range text
+- Add deduplication logic in the `grouped` useMemo:
+  - For each category group, deduplicate entries by `option.name + option.category`
+  - Keep the first (oldest by `created_at`) as the "original"
+  - Count how many entries share the same name+category = usage count
+  - Track how many of those are `is_scheduled === true` = scheduled count
+- Pass `usageCount` and `scheduledCount` to each `SidebarEntryCard`
+
+**File: `src/components/timeline/SidebarEntryCard.tsx`**
+
+- Accept new props: `usageCount?: number`, `scheduledCount?: number`
+- When `usageCount > 1`, show a small badge (e.g., "x2") in the top-right corner of the card
 
 ---
 
-## 2. Sidebar Improvements
+## 2. Flight Restriction
 
-### 2a. Remove "No entries" label
+### Behavior
+
+- Flight entries **always appear** in the bank
+- Once scheduled, their card shows at 70% opacity (like other scheduled entries)
+- They are **NOT draggable** and the duplicate/insert buttons are hidden
+- Tapping a flight card opens the entry overlay (existing `onCardTap` behavior) so users can view/edit details
+- The drag handle icon is hidden for flights
+
+### Implementation
+
+**File: `src/components/timeline/SidebarEntryCard.tsx`**
+
+- Accept new prop: `isFlight?: boolean`
+- When `isFlight && isScheduled`:
+  - Set `draggable={false}`, hide `GripVertical`, hide duplicate/insert buttons
+  - Show a small "Scheduled" label or checkmark instead of action buttons
+  - Card is still clickable (opens overlay)
 
 **File: `src/components/timeline/CategorySidebar.tsx`**
 
-- Remove the `<p className="text-[10px]...">No entries</p>` fallback (line 150-151). Show nothing when a category is empty.
-
-### 2b. Default time for unscheduled entries
-
-**File: `src/pages/Timeline.tsx`** (in the sidebar entry rendering logic and data model)
-
-- When entries have `is_scheduled === false`, they currently have whatever start/end time they were created with. No change needed to DB -- they already have times. The sidebar cards will use these times to show durations.
-
-### 2c. Reduce opacity for scheduled entries in sidebar
-
-**File: `src/components/timeline/SidebarEntryCard.tsx`**
-
-- If `entry.is_scheduled === true`, apply `opacity-50` to the entire card wrapper. This visually differentiates entries already on the timeline.
-
-### 2d. Double card height
-
-**File: `src/components/timeline/SidebarEntryCard.tsx`**
-
-- Change the card height from `h-[72px]` (when image) to `h-[144px]`
-- For non-image cards, increase padding and add more vertical space (min-height ~144px)
-- Show the duration label on sidebar cards too
+- When rendering flight entries, pass `isFlight={true}` to `SidebarEntryCard`
+- Do NOT pass `onDuplicate` or `onInsert` for flight entries
 
 ---
 
-## 3. "LIVE" Page
+## 3. Opacity Change: 50% to 70%
 
-A panel to the LEFT of the calendar timeline with a placeholder.
+### Implementation
 
-### Desktop: Sidebar panel
+**File: `src/components/timeline/SidebarEntryCard.tsx`**
+
+- Change `isScheduled && 'opacity-50'` to `isScheduled && 'opacity-70'`
+- Since Tailwind doesn't have `opacity-70` by default, use inline style: `style={{ opacity: isScheduled ? 0.7 : 1 }}`
+
+---
+
+## 4. Filter Tabs
+
+### Behavior
+
+Three tabs at the top of the bank, below the header:
+- **All** -- shows every entry (default)
+- **Ideas** -- shows only unscheduled entries (`is_scheduled === false`)
+- **Scheduled** -- shows only scheduled entries
+
+The active tab is highlighted. Category sections that have no entries in the current filter are hidden entirely (no empty sections).
+
+### Implementation
+
+**File: `src/components/timeline/CategorySidebar.tsx`**
+
+- Add state: `activeFilter: 'all' | 'ideas' | 'scheduled'` (default: `'all'`)
+- Render 3 tab buttons below the header
+- Apply filter before grouping by category:
+  - `'all'`: show all entries
+  - `'ideas'`: filter to `is_scheduled === false`
+  - `'scheduled'`: filter to `is_scheduled !== false`
+- Hide category sections with 0 entries after filtering
+
+---
+
+## 5. Drag from Bank Creates Copy (not move)
+
+### Current behavior
+
+Currently dragging from sidebar sets the entry ID in dataTransfer, and `handleDropOnTimeline` updates that entry's `is_scheduled` to `true`. This **moves** the entry.
+
+### New behavior
+
+Dragging from the bank should **create a copy** (like the existing `handleDuplicate` + schedule logic), not move the original. The original stays in the bank.
+
+Exception: if the entry is currently unscheduled and has never been used, the first drag should move it (schedule it). Subsequent drags create copies.
+
+For flights: dragging is disabled entirely, so this doesn't apply.
+
+### Implementation
 
 **File: `src/pages/Timeline.tsx`**
 
-- Add a new state: `liveOpen` (boolean, default false)
-- Add a toggle button in `TimelineHeader` labeled "LIVE"
-- Render a left sidebar (similar structure to the right CategorySidebar) when `liveOpen` is true
-- The sidebar contains a centered placeholder: "Coming soon" with a radio/broadcast icon
-
-**New file: `src/components/timeline/LivePanel.tsx`**
-
-- Props: `open`, `onOpenChange`
-- Desktop: renders as a `div` with `w-[320px]` on the left side
-- Mobile: renders as a `Sheet` sliding from the left
-- Content: placeholder centered text + icon
-
-### Mobile: Sheet from left
-
-- Uses the existing Sheet component with `side="left"`
-- Toggle via a button in the header or a FAB
-
-### Layout change in Timeline.tsx
-
-Current layout:
-```
-<div className="flex flex-1 overflow-hidden">
-  <main>...</main>
-  <CategorySidebar />  (right)
-</div>
-```
-
-New layout:
-```
-<div className="flex flex-1 overflow-hidden">
-  <LivePanel />         (left)
-  <main>...</main>
-  <CategorySidebar />   (right)
-</div>
-```
-
----
-
-## 4. Transport Feature
-
-This is the most complex feature. Here's the full breakdown:
-
-### 4a. "Add transport" / "Add event" button between entries
-
-**File: `src/components/timeline/CalendarDay.tsx`**
-
-Between every two consecutive entries on the timeline, render a button:
-
-- **If gap < 90 minutes**: Show "Add transport" button (bus icon)
-- **If gap >= 90 minutes**: Show "Add event" button (plus icon) -- this opens the regular entry form
-
-The button is centered horizontally between the two cards, positioned at the midpoint of the gap.
-
-Only visible on hover of the gap area (similar to existing + buttons).
-
-### 4b. Transport mode picker popup
-
-**New file: `src/components/timeline/TransportPicker.tsx`**
-
-When "Add transport" is clicked:
-1. A small popover appears with 4 mode buttons: Walk, Transit, Cycle, Drive (using emojis from `TRAVEL_MODES`)
-2. Selecting a mode triggers API calls for ALL 4 modes simultaneously
-3. Shows a loading spinner, then displays all 4 results with durations
-4. The selected mode is highlighted; user can switch modes to change the transport card
-5. "Confirm" button creates the transport entry
-
-### 4c. Transport entry on the time grid
-
-Transport entries are a special type:
-- Category: `'transport'` (new category, NOT shown in the "All Entries" sidebar)
-- `is_scheduled: true`
-- Duration is fixed to the API result (not user-adjustable)
-- Card shows: mode icon, duration ("12m walk"), and from/to labels
-- Card is NOT draggable or resizable (no resize handles, no drag cursor)
-- Mode switch buttons overlaid on the card with reduced opacity -- clicking re-fetches and resizes
-
-**New category in `src/lib/categories.ts`**:
-```
-{ id: 'transport', name: 'Transport', emoji: '🚌', color: 'hsl(200, 50%, 60%)', ... }
-```
-
-**Filter transport from sidebar**: In `CategorySidebar.tsx`, filter out `transport` entries (like `airport_processing`).
-
-### 4d. API enhancement: departure time forecasting
-
-**File: `supabase/functions/google-directions/index.ts`**
-
-- Accept optional `departureTime` parameter (ISO string)
-- Pass it to the Routes API as `departureTime` field
-- For TRANSIT: uses actual schedule data (up to 100 days in the future)
-- For DRIVE: uses traffic prediction for that time
-- For WALK/BICYCLE: departure time doesn't affect result but we send it anyway
-
-When creating transport, the departure time = the end time of the previous entry (when the user would leave).
-
-Also accept `modes` array parameter to calculate multiple modes in one call:
-```json
-{
-  "fromAddress": "...",
-  "toAddress": "...",
-  "modes": ["walk", "transit", "drive", "bicycle"],
-  "departureTime": "2026-03-15T14:00:00Z"
-}
-```
-
-Returns an array of results, one per mode.
-
-### 4e. Snap and between-transport buttons
-
-After a transport card is placed, between the transport card and the next entry:
-
-- Show a small "magnet" icon button (centered, ~30px below the transport card) that snaps the next event's start time to transport's end time (if the next event is not locked)
-- Show a small "+" icon button to add another event in the remaining gap
-
-These replace the current "+" buttons for that gap.
-
-### 4f. Drag-to-create between events suggests transport
-
-**File: `src/components/timeline/CalendarDay.tsx`** and **`src/pages/Timeline.tsx`**
-
-When a user drags to create in empty space that happens to be between two events:
-- After the entry form opens or before, check if the dragged slot is entirely between two existing entries
-- If yes, show a small toast/prompt: "Also add transport between [Entry A] and [Entry B]?"
-- If user confirms, trigger the transport picker for that gap
-- If transport duration < gap, snap the next event to it (if not locked)
-
----
-
-## 5. Overlap Detection and Red Tint
-
-### 5a. Visual overlap indicator
-
-**File: `src/components/timeline/EntryCard.tsx`**
-
-- Accept a new prop: `overlapMinutes?: number` and `overlapPosition?: 'top' | 'bottom'`
-- When `overlapMinutes > 0`, render a red gradient overlay on the overlapping portion of the card
-- The red tint covers only the percentage of the card that overlaps
-
-**File: `src/components/timeline/CalendarDay.tsx`**
-
-- After computing layout positions, detect pairwise overlaps between consecutive entries
-- For each overlapping pair, calculate how many minutes overlap
-- Pass `overlapMinutes` and `overlapPosition` to the affected `EntryCard` components
-
-### 5b. Auto-trigger conflict resolver on transport overlap
-
-When a transport card is placed and it causes an overlap:
-1. Show the red tint immediately
-2. Auto-open the `ConflictResolver` dialog with smart recommendations:
-   - "Push [next event] by Xm" (shift later)
-   - "Shorten [next event] by Xm"
-   - "Skip [next event]" (move to ideas)
-   - "Return to hotel earlier" (if hotel entry exists later)
-3. Use the existing deterministic conflict engine (`conflictEngine.ts`) for these recommendations
-4. Add a new recommendation type: "Skip entry" that moves it to unscheduled
+- Modify `handleDropOnTimeline`:
+  - Check if entry is a flight -- if so, block the drop
+  - Check `usageCount` -- if the entry is already scheduled somewhere, create a copy instead of moving
+  - If it's an unscheduled entry being placed for the first time, move it (current behavior)
 
 ---
 
 ## File Summary
 
-| File | Action | Purpose |
+| File | Action | Changes |
 |------|--------|---------|
-| `src/components/timeline/EntryCard.tsx` | Edit | Duration label + overlap red tint |
-| `src/components/timeline/SidebarEntryCard.tsx` | Edit | Opacity for scheduled, double height, duration label |
-| `src/components/timeline/CategorySidebar.tsx` | Edit | Remove "No entries", filter transport category |
-| `src/components/timeline/LivePanel.tsx` | New | LIVE placeholder panel (left sidebar / mobile sheet) |
-| `src/components/timeline/TransportPicker.tsx` | New | Mode selection + multi-mode API results popup |
-| `src/components/timeline/CalendarDay.tsx` | Edit | Between-entry buttons, transport cards, overlap detection, snap button |
-| `src/pages/Timeline.tsx` | Edit | LIVE panel state, transport creation logic, drag-suggest-transport |
-| `src/lib/categories.ts` | Edit | Add 'transport' category |
-| `src/lib/conflictEngine.ts` | Edit | Add "skip entry" recommendation type |
-| `supabase/functions/google-directions/index.ts` | Edit | Multi-mode + departureTime support |
+| `src/components/timeline/CategorySidebar.tsx` | Edit | Deduplication logic, filter tabs, flight handling, hide empty sections |
+| `src/components/timeline/SidebarEntryCard.tsx` | Edit | Usage count badge, flight restrictions, opacity 70%, isFlight prop |
+| `src/pages/Timeline.tsx` | Edit | Drop handler: copy vs move logic, flight block |
+
+No new files needed. No database changes.
 
 ---
 
 ## Technical Details
 
-### Duration formatting helper
+### Deduplication logic (CategorySidebar)
 
-```typescript
-function formatDuration(startIso: string, endIso: string): string {
-  const ms = new Date(endIso).getTime() - new Date(startIso).getTime();
-  const totalMin = Math.round(ms / 60000);
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  if (h === 0) return `${m}m`;
-  if (m === 0) return `${h}h`;
-  return `${h}h ${m}m`;
-}
+```text
+For each category group:
+  1. Group entries by (option.name + option.category)
+  2. For each group:
+     - Pick the entry with earliest created_at as "original"
+     - Count total entries in group = usageCount
+     - Count entries where is_scheduled = true = scheduledCount
+  3. Render only the "original" card with usageCount badge
 ```
 
-### Multi-mode directions API change
+### Filter tabs markup
 
-The edge function will accept a `modes` array and loop through each, returning:
-```json
-{
-  "results": [
-    { "mode": "walk", "duration_min": 45, "distance_km": 3.2 },
-    { "mode": "transit", "duration_min": 18, "distance_km": 5.1 },
-    { "mode": "drive", "duration_min": 12, "distance_km": 4.8 },
-    { "mode": "bicycle", "duration_min": 22, "distance_km": 4.5 }
-  ]
-}
+```text
+[All (15)] [Ideas (4)] [Scheduled (11)]
+
+Rendered as small rounded buttons/tabs in a row below the header.
+Active tab: bg-primary/10 text-primary border-primary/20
+Inactive tab: text-muted-foreground
 ```
 
-### Transport entry creation flow
+### Drop handler change (Timeline.tsx)
 
-1. User clicks "Add transport" between Entry A and Entry B
-2. TransportPicker popover opens with 4 mode buttons
-3. API is called with all 4 modes + `departureTime` = Entry A's end time
-4. Results displayed; user picks preferred mode
-5. On confirm:
-   - Create entry with `category: 'transport'`, `start_time` = Entry A end, `end_time` = start + duration
-   - Create entry_option with mode, from/to locations (inherited from A and B)
-6. If transport end > Entry B start (overlap):
-   - Show red tint on both cards
-   - Auto-open conflict resolver with recommendations
-7. If transport end < Entry B start (fits):
-   - Show snap button between transport and Entry B
-
-### Overlap calculation in CalendarDay
-
-```typescript
-// For each pair of consecutive entries
-for (let i = 0; i < sorted.length - 1; i++) {
-  const aEnd = getHourInTimezone(sorted[i].end_time, tz);
-  const bStart = getHourInTimezone(sorted[i+1].start_time, tz);
-  if (aEnd > bStart) {
-    const overlapMin = Math.round((aEnd - bStart) * 60);
-    // Pass to both cards
-  }
-}
+```text
+handleDropOnTimeline(entryId, day, hourOffset):
+  1. Find the entry
+  2. If entry.options[0].category === 'flight' -> toast error, return
+  3. If entry.is_scheduled === true (already on timeline):
+     -> Create a COPY (clone entry + options + images, set new times, is_scheduled: true)
+  4. If entry.is_scheduled === false (first placement):
+     -> MOVE it (update existing entry, set is_scheduled: true)
+  5. Run travel calculation + conflict detection as before
 ```
 
-### Google Routes API: departureTime note
+### Flight card in bank (visual)
 
-- **TRANSIT**: Supports `departureTime` up to 100 days in the future. Returns schedule-accurate results.
-- **DRIVE**: Supports `departureTime` for traffic-based predictions.
-- **WALK / BICYCLE**: `departureTime` is accepted but does not affect the result (distance-based only).
-
-This means transit and driving forecasts will be time-aware, which is great for trip planning. Walking and cycling will return consistent results regardless of time.
+```text
++---------------------------+
+| [check icon] BA 1234      |  <- no grip handle
+| LHR -> AMS                |
+| Day 2         2h 30m      |  <- "Day 2" badge, no action buttons
++---------------------------+
+  opacity: 0.7, cursor: default (not grab)
+```
 
