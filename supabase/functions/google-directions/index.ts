@@ -5,6 +5,50 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
+const ROUTES_API_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
+
+const MODE_MAP: Record<string, string> = {
+  transit: 'TRANSIT',
+  driving: 'DRIVE',
+  drive: 'DRIVE',
+  walking: 'WALK',
+  walk: 'WALK',
+  bicycling: 'BICYCLE',
+  bicycle: 'BICYCLE',
+};
+
+function buildWaypoint(input: string) {
+  // Check if it looks like coordinates "lat,lng"
+  const coordMatch = input.match(/^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/);
+  if (coordMatch) {
+    return {
+      location: {
+        latLng: {
+          latitude: parseFloat(coordMatch[1]),
+          longitude: parseFloat(coordMatch[2]),
+        },
+      },
+    };
+  }
+  return { address: input };
+}
+
+function parseRoutesResponse(data: any) {
+  if (!data.routes?.length) return null;
+  const route = data.routes[0];
+  const leg = route.legs?.[0];
+  if (!leg) return null;
+
+  const durationSec = parseInt((leg.duration || '0s').replace('s', ''), 10);
+  const distanceMeters = leg.distanceMeters || 0;
+
+  return {
+    duration_min: Math.round(durationSec / 60),
+    distance_km: Math.round(distanceMeters / 100) / 10,
+    polyline: route.polyline?.encodedPolyline ?? null,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -16,45 +60,61 @@ Deno.serve(async (req) => {
       throw new Error('GOOGLE_MAPS_API_KEY is not configured');
     }
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
-
     const body = await req.json();
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+      'X-Goog-FieldMask': 'routes.legs.duration,routes.legs.distanceMeters,routes.polyline.encodedPolyline',
+    };
 
     // --- Mode 1: Single address-based lookup (for Transfer entries) ---
     if (body.fromAddress && body.toAddress) {
       const { fromAddress, toAddress, mode } = body;
-      const travelMode = mode || 'transit';
+      const travelMode = MODE_MAP[mode || 'transit'] || 'TRANSIT';
 
-      console.log(`Fetching directions: "${fromAddress}" -> "${toAddress}" (${travelMode})`);
+      console.log(`Routes API: "${fromAddress}" -> "${toAddress}" (${travelMode})`);
 
-      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(fromAddress)}&destination=${encodeURIComponent(toAddress)}&mode=${travelMode}&key=${GOOGLE_MAPS_API_KEY}`;
-      const response = await fetch(url);
+      const requestBody = {
+        origin: buildWaypoint(fromAddress),
+        destination: buildWaypoint(toAddress),
+        travelMode,
+      };
+
+      const response = await fetch(ROUTES_API_URL, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+      });
       const data = await response.json();
 
-      if (data.status !== 'OK' || !data.routes?.length) {
+      const parsed = parseRoutesResponse(data);
+      if (!parsed) {
+        console.log('No route found:', JSON.stringify(data.error || data));
         return new Response(
-          JSON.stringify({ error: `No route found: ${data.status}`, duration_min: null, distance_km: null }),
+          JSON.stringify({ error: 'No route found', duration_min: null, distance_km: null }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
-      const leg = data.routes[0].legs[0];
       return new Response(
         JSON.stringify({
-          duration_min: Math.round(leg.duration.value / 60),
-          distance_km: Math.round(leg.distance.value / 100) / 10,
-          mode: travelMode,
+          duration_min: parsed.duration_min,
+          distance_km: parsed.distance_km,
+          mode: mode || 'transit',
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // --- Mode 2: Trip-wide batch calculation (existing flow) ---
+    // --- Mode 2: Trip-wide batch calculation ---
     const { tripId } = body;
     if (!tripId) throw new Error('tripId or fromAddress/toAddress is required');
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
 
     console.log(`Fetching directions for trip: ${tripId}`);
 
@@ -106,31 +166,43 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const origin = `${fromCoords.lat},${fromCoords.lng}`;
-      const destination = `${toCoords.lat},${toCoords.lng}`;
+      console.log(`Routes API: ${fromCoords.lat},${fromCoords.lng} -> ${toCoords.lat},${toCoords.lng}`);
 
-      console.log(`Fetching directions: ${origin} -> ${destination}`);
+      const requestBody = {
+        origin: {
+          location: {
+            latLng: { latitude: fromCoords.lat, longitude: fromCoords.lng },
+          },
+        },
+        destination: {
+          location: {
+            latLng: { latitude: toCoords.lat, longitude: toCoords.lng },
+          },
+        },
+        travelMode: 'TRANSIT',
+      };
 
-      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&mode=transit&key=${GOOGLE_MAPS_API_KEY}`;
-      const response = await fetch(url);
+      const response = await fetch(ROUTES_API_URL, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+      });
       const data = await response.json();
 
-      if (data.status !== 'OK' || !data.routes?.length) {
-        console.log(`No route found: ${data.status}`);
+      const parsed = parseRoutesResponse(data);
+      if (!parsed) {
+        console.log('No route found:', JSON.stringify(data.error || data));
         continue;
       }
-
-      const route = data.routes[0];
-      const leg = route.legs[0];
 
       const segment = {
         trip_id: tripId,
         from_entry_id: entries[i].id,
         to_entry_id: entries[i + 1].id,
-        duration_min: Math.round(leg.duration.value / 60),
-        distance_km: Math.round(leg.distance.value / 100) / 10,
+        duration_min: parsed.duration_min,
+        distance_km: parsed.distance_km,
         mode: 'transit',
-        polyline: route.overview_polyline?.points ?? null,
+        polyline: parsed.polyline,
       };
 
       const { error: insertError } = await supabase
