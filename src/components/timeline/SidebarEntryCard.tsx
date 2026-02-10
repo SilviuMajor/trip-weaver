@@ -1,4 +1,4 @@
-import { Copy, GripVertical } from 'lucide-react';
+import { Copy, GripVertical, ArrowRightToLine } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { findCategory } from '@/lib/categories';
 import { Badge } from '@/components/ui/badge';
@@ -9,9 +9,10 @@ interface SidebarEntryCardProps {
   onDragStart?: (e: React.DragEvent, entry: EntryWithOptions) => void;
   onClick?: () => void;
   onDuplicate?: (entry: EntryWithOptions) => void;
+  onInsert?: (entry: EntryWithOptions) => void;
 }
 
-const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate }: SidebarEntryCardProps) => {
+const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert }: SidebarEntryCardProps) => {
   const option = entry.options[0];
   if (!option) return null;
 
@@ -97,6 +98,23 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate }: SidebarE
           >
             {dayLabel}
           </Badge>
+          {onInsert && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onInsert(entry);
+              }}
+              className={cn(
+                'h-6 w-6 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all',
+                firstImage
+                  ? 'text-white/60 hover:bg-white/20 hover:text-white'
+                  : 'text-muted-foreground/50 hover:bg-accent hover:text-foreground'
+              )}
+              title="Insert on day"
+            >
+              <ArrowRightToLine className="h-3 w-3" />
+            </button>
+          )}
           {onDuplicate && (
             <button
               onClick={(e) => {

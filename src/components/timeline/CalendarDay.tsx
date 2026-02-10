@@ -42,6 +42,7 @@ interface CalendarDayProps {
   onClickSlot?: (time: Date) => void;
   onDragSlot?: (startTime: Date, endTime: Date) => void;
   dayLabel?: string;
+  dayIndex?: number;
   isFirstDay?: boolean;
   isLastDay?: boolean;
   onAddBetween?: (prefillTime: string) => void;
@@ -105,6 +106,7 @@ const CalendarDay = ({
   onClickSlot,
   onDragSlot,
   dayLabel,
+  dayIndex,
   isFirstDay,
   isLastDay,
   onAddBetween,
@@ -236,7 +238,7 @@ const CalendarDay = ({
   };
 
   return (
-    <div className="relative">
+    <div className="relative" data-day-index={dayIndex}>
       {/* Day header */}
       <div
         className={cn(

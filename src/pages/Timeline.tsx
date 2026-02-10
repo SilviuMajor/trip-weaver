@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
-import { getDateInTimezone } from '@/lib/timezoneUtils';
+import { getDateInTimezone, localToUTC } from '@/lib/timezoneUtils';
+import { findCategory } from '@/lib/categories';
 import { ArrowDown, LayoutList, ZoomIn, ZoomOut } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,8 @@ import EntryOverlay from '@/components/timeline/EntryOverlay';
 import EntryForm from '@/components/timeline/EntryForm';
 import CategorySidebar from '@/components/timeline/CategorySidebar';
 import ConflictResolver from '@/components/timeline/ConflictResolver';
+import DayPickerDialog from '@/components/timeline/DayPickerDialog';
+import HotelWizard from '@/components/timeline/HotelWizard';
 import type { Trip, Entry, EntryOption, EntryWithOptions, TravelSegment, WeatherData } from '@/types/trip';
 import type { ConflictInfo, Recommendation } from '@/lib/conflictEngine';
 
@@ -68,6 +71,13 @@ const Timeline = () => {
   const [currentConflict, setCurrentConflict] = useState<ConflictInfo | null>(null);
   const [currentRecommendations, setCurrentRecommendations] = useState<Recommendation[]>([]);
   const [pendingPlacement, setPendingPlacement] = useState<EntryWithOptions | null>(null);
+
+  // Insert day picker state
+  const [insertDayPickerOpen, setInsertDayPickerOpen] = useState(false);
+  const [insertingEntry, setInsertingEntry] = useState<EntryWithOptions | null>(null);
+
+  // Hotel wizard state
+  const [hotelWizardOpen, setHotelWizardOpen] = useState(false);
 
   // Travel calculation
   const { calculateTravel } = useTravelCalculation();
@@ -563,6 +573,121 @@ const Timeline = () => {
     }
   };
 
+  // Handle insert from sidebar: open day picker
+  const handleInsert = (entry: EntryWithOptions) => {
+    setInsertingEntry(entry);
+    setInsertDayPickerOpen(true);
+  };
+
+  // Handle day selection for insert
+  const handleInsertDaySelected = async (dayIndex: number) => {
+    if (!insertingEntry || !trip) return;
+
+    try {
+      const cat = findCategory(insertingEntry.options[0]?.category ?? '');
+      const defaultStartHour = cat?.defaultStartHour ?? 10;
+      const defaultStartMin = cat?.defaultStartMin ?? 0;
+      const defaultDuration = cat?.defaultDurationMin ?? 60;
+
+      const endMinutes = defaultStartHour * 60 + defaultStartMin + defaultDuration;
+      const eH = Math.floor(endMinutes / 60);
+      const eM = endMinutes % 60;
+
+      const dayDateStr = isUndated
+        ? format(addDays(parseISO(REFERENCE_DATE), dayIndex), 'yyyy-MM-dd')
+        : format(addDays(parseISO(trip.start_date!), dayIndex), 'yyyy-MM-dd');
+
+      const startIso = localToUTC(
+        dayDateStr,
+        `${String(defaultStartHour).padStart(2, '0')}:${String(defaultStartMin).padStart(2, '0')}`,
+        tripTimezone
+      );
+      const endIso = localToUTC(
+        dayDateStr,
+        `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`,
+        tripTimezone
+      );
+
+      // Clone entry
+      const { data: newEntry, error: entryErr } = await supabase
+        .from('entries')
+        .insert({
+          trip_id: insertingEntry.trip_id,
+          start_time: startIso,
+          end_time: endIso,
+          is_scheduled: true,
+          scheduled_day: dayIndex,
+        } as any)
+        .select('id')
+        .single();
+      if (entryErr || !newEntry) throw entryErr;
+
+      // Clone options + images
+      for (const opt of insertingEntry.options) {
+        const { data: newOpt, error: optErr } = await supabase
+          .from('entry_options')
+          .insert({
+            entry_id: newEntry.id,
+            name: opt.name,
+            website: opt.website,
+            category: opt.category,
+            category_color: opt.category_color,
+            location_name: opt.location_name,
+            latitude: opt.latitude,
+            longitude: opt.longitude,
+            departure_location: opt.departure_location,
+            arrival_location: opt.arrival_location,
+            departure_tz: opt.departure_tz,
+            arrival_tz: opt.arrival_tz,
+            departure_terminal: opt.departure_terminal,
+            arrival_terminal: opt.arrival_terminal,
+            airport_checkin_hours: opt.airport_checkin_hours,
+            airport_checkout_min: opt.airport_checkout_min,
+          } as any)
+          .select('id')
+          .single();
+        if (optErr || !newOpt) throw optErr;
+
+        if (opt.images && opt.images.length > 0) {
+          await supabase.from('option_images').insert(
+            opt.images.map(img => ({
+              option_id: newOpt.id,
+              image_url: img.image_url,
+              sort_order: img.sort_order,
+            }))
+          );
+        }
+      }
+
+      // Close sidebar, scroll to day
+      setSidebarOpen(false);
+      setInsertingEntry(null);
+
+      await fetchData();
+
+      // Scroll to that day
+      setTimeout(() => {
+        const dayEl = document.querySelector(`[data-day-index="${dayIndex}"]`);
+        if (dayEl) {
+          dayEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 200);
+
+      toast({ title: `Entry placed on Day ${dayIndex + 1} ✨` });
+    } catch (err: any) {
+      toast({ title: 'Failed to insert', description: err?.message, variant: 'destructive' });
+    }
+  };
+
+  // Day labels for the day picker
+  const dayLabels = useMemo(() => {
+    const d = getDays();
+    return d.map((day, i) => {
+      if (isUndated) return `Day ${i + 1}`;
+      return `Day ${i + 1} — ${format(day, 'EEE d MMM')}`;
+    });
+  }, [trip, isUndated]);
+
   const handleToggleLock = async (entryId: string, currentLocked: boolean) => {
     const { error } = await supabase
       .from('entries')
@@ -638,6 +763,7 @@ const Timeline = () => {
                     travelSegments={travelSegments}
                     weatherData={getWeatherForDay(day)}
                     dayLabel={isUndated ? `Day ${index + 1}` : undefined}
+                    dayIndex={index}
                     isFirstDay={index === 0}
                     isLastDay={index === days.length - 1}
                     onAddBetween={handleAddBetween}
@@ -666,12 +792,17 @@ const Timeline = () => {
                   if (opt) handleCardTap(entry, opt);
                 }}
                 onAddEntry={(catId) => {
+                  if (catId === 'hotel') {
+                    setHotelWizardOpen(true);
+                    return;
+                  }
                   setPrefillStartTime(undefined);
                   setPrefillEndTime(undefined);
                   setPrefillCategory(catId);
                   setEntryFormOpen(true);
                 }}
                 onDuplicate={handleDuplicate}
+                onInsert={handleInsert}
               />
             )}
           </div>
@@ -724,12 +855,17 @@ const Timeline = () => {
                   if (opt) handleCardTap(entry, opt);
                 }}
                 onAddEntry={(catId) => {
+                  if (catId === 'hotel') {
+                    setHotelWizardOpen(true);
+                    return;
+                  }
                   setPrefillStartTime(undefined);
                   setPrefillEndTime(undefined);
                   setPrefillCategory(catId);
                   setEntryFormOpen(true);
                 }}
                 onDuplicate={handleDuplicate}
+                onInsert={handleInsert}
               />
             </>
           )}
@@ -784,6 +920,24 @@ const Timeline = () => {
             recommendations={currentRecommendations}
             onApply={handleApplyRecommendation}
             onSkip={handleSkipConflict}
+          />
+
+          <DayPickerDialog
+            open={insertDayPickerOpen}
+            onOpenChange={(open) => {
+              setInsertDayPickerOpen(open);
+              if (!open) setInsertingEntry(null);
+            }}
+            days={dayLabels}
+            onSelectDay={handleInsertDaySelected}
+          />
+
+          <HotelWizard
+            open={hotelWizardOpen}
+            onOpenChange={setHotelWizardOpen}
+            tripId={trip.id}
+            trip={trip}
+            onCreated={fetchData}
           />
         </>
       )}
