@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { format, isToday, isPast, addMinutes } from 'date-fns';
 import { calculateSunTimes } from '@/lib/sunCalc';
 import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData } from '@/types/trip';
@@ -13,6 +13,7 @@ import EntryCard from './EntryCard';
 import FlightGroupCard from './FlightGroupCard';
 import TravelSegmentCard from './TravelSegmentCard';
 import WeatherBadge from './WeatherBadge';
+import { toast } from 'sonner';
 
 const PIXELS_PER_HOUR = 80;
 
@@ -200,6 +201,14 @@ const CalendarDay = ({
     startHour,
     onCommit: handleDragCommit,
   });
+
+  // Locked-entry drag feedback
+  const [shakeEntryId, setShakeEntryId] = useState<string | null>(null);
+  const handleLockedAttempt = useCallback((entryId: string) => {
+    toast.error('Cannot drag a locked event');
+    setShakeEntryId(entryId);
+    setTimeout(() => setShakeEntryId(null), 400);
+  }, []);
 
   // Compute overlap layout
   const layoutEntries = sortedEntries.map(e => {
@@ -605,7 +614,7 @@ const CalendarDay = ({
                       }}
                     >
                       <div className="relative h-full">
-                        {/* Top resize handle (not for locked or flight group entries) */}
+                        {/* Top resize handle */}
                         {canDrag && !flightGroup && (
                           <div
                             className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
@@ -613,6 +622,13 @@ const CalendarDay = ({
                             onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartHour, origEndHour, dragTz)}
                             onTouchMove={onTouchMove}
                             onTouchEnd={onTouchEnd}
+                          />
+                        )}
+                        {!canDrag && isLocked && !flightGroup && (
+                          <div
+                            className="absolute left-0 right-0 top-0 z-20 h-2 cursor-not-allowed"
+                            onMouseDown={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
+                            onTouchStart={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                           />
                         )}
 
@@ -650,12 +666,19 @@ const CalendarDay = ({
                               }}
                               onDragStart={canDrag ? (e) => {
                                 onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                              } : isLocked ? (e) => {
+                                e.stopPropagation();
+                                handleLockedAttempt(entry.id);
                               } : undefined}
                               onTouchDragStart={canDrag ? (e) => {
                                 onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                              } : isLocked ? (e) => {
+                                e.stopPropagation();
+                                handleLockedAttempt(entry.id);
                               } : undefined}
                               onTouchDragMove={onTouchMove}
                               onTouchDragEnd={onTouchEnd}
+                              isShaking={shakeEntryId === entry.id}
                             />
                             {/* Lock icon outside card */}
                             {isEditor && onToggleLock && (
@@ -706,12 +729,19 @@ const CalendarDay = ({
                               canEdit={isEditor}
                               onDragStart={canDrag ? (e) => {
                                 onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                              } : isLocked ? (e) => {
+                                e.stopPropagation();
+                                handleLockedAttempt(entry.id);
                               } : undefined}
                               onTouchDragStart={canDrag ? (e) => {
                                 onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                              } : isLocked ? (e) => {
+                                e.stopPropagation();
+                                handleLockedAttempt(entry.id);
                               } : undefined}
                               onTouchDragMove={onTouchMove}
                               onTouchDragEnd={onTouchEnd}
+                              isShaking={shakeEntryId === entry.id}
                             />
                             {/* Lock icon outside card */}
                             {isEditor && onToggleLock && (
@@ -732,7 +762,7 @@ const CalendarDay = ({
                           </div>
                         )}
 
-                        {/* Bottom resize handle (not for locked or flight group entries) */}
+                        {/* Bottom resize handle */}
                         {canDrag && !flightGroup && (
                           <div
                             className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
@@ -740,6 +770,13 @@ const CalendarDay = ({
                             onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz)}
                             onTouchMove={onTouchMove}
                             onTouchEnd={onTouchEnd}
+                          />
+                        )}
+                        {!canDrag && isLocked && !flightGroup && (
+                          <div
+                            className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-not-allowed"
+                            onMouseDown={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
+                            onTouchStart={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                           />
                         )}
 
