@@ -39,6 +39,7 @@ interface EntryCardProps {
   linkedType?: string | null;
   isCompact?: boolean;
   isMedium?: boolean;
+  isCondensed?: boolean;
   canEdit?: boolean;
   overlapMinutes?: number;
   overlapPosition?: 'top' | 'bottom';
@@ -103,6 +104,7 @@ const EntryCard = ({
   linkedType,
   isCompact,
   isMedium,
+  isCondensed,
   canEdit,
   overlapMinutes = 0,
   overlapPosition,
@@ -233,18 +235,6 @@ const EntryCard = ({
             }}
           />
         )}
-        {canEdit && onToggleLock && (
-          <button
-            onClick={handleLockClick}
-            className="absolute top-1 right-1 rounded-md p-0.5 transition-colors z-20 hover:bg-muted/50"
-          >
-            {isLocked ? (
-              <Lock className="h-3 w-3 text-muted-foreground/80" />
-            ) : (
-              <LockOpen className="h-3 w-3 text-muted-foreground/30" />
-            )}
-          </button>
-        )}
       </motion.div>
     );
   }
@@ -297,20 +287,101 @@ const EntryCard = ({
           <span className="shrink-0 text-[9px] text-muted-foreground whitespace-nowrap">
             {formatTime(startTime)}–{formatTime(endTime)} <span className="font-bold">{durationLabel}</span>
           </span>
-          <span className="flex-1" />
-          {canEdit && onToggleLock && (
-            <button
-              onClick={handleLockClick}
-              className="shrink-0 p-0.5 rounded hover:bg-muted/50 transition-colors"
-            >
-              {isLocked ? (
-              <Lock className="h-3.5 w-3.5 text-muted-foreground/80" />
-              ) : (
-                <LockOpen className="h-3.5 w-3.5 text-muted-foreground/30" />
-              )}
-            </button>
-          )}
         </div>
+      </motion.div>
+    );
+  }
+
+  // Condensed layout for 1-2 hour events (80-160px)
+  if (isCondensed) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        onClick={onClick}
+        onMouseDown={onDragStart}
+        onTouchStart={onTouchDragStart}
+        onTouchMove={onTouchDragMove}
+        onTouchEnd={onTouchDragEnd}
+        className={cn(
+          'group relative overflow-hidden rounded-xl border shadow-sm transition-all hover:shadow-md',
+          isEntryPast && 'opacity-50 grayscale-[30%]',
+          isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+          isLocked && 'border-dashed border-2 border-muted-foreground/40',
+          cardSizeClass
+        )}
+        style={{
+          borderColor: isLocked ? undefined : catColor,
+          borderLeftWidth: isLocked ? undefined : 3,
+          background: firstImage ? undefined : tintBg,
+        }}
+      >
+        {firstImage && (
+          <div className="absolute inset-0">
+            <img src={firstImage} alt={option.name} className="h-full w-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
+          </div>
+        )}
+        <div className={cn(
+          'relative z-10 flex h-full flex-col justify-between px-2.5 py-1.5',
+          firstImage ? 'text-white' : 'text-foreground'
+        )}>
+          <div>
+            {option.category && (
+              <span
+                className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-semibold mb-1"
+                style={{ backgroundColor: catColor, color: '#fff' }}
+              >
+                <span className="text-[10px]">{catEmoji}</span>
+                {catName}
+              </span>
+            )}
+            {isEditingName ? (
+              <input
+                ref={nameInputRef}
+                value={editedName}
+                onChange={(e) => setEditedName(e.target.value)}
+                onBlur={handleNameSave}
+                onKeyDown={handleNameKeyDown}
+                onClick={(e) => e.stopPropagation()}
+                className="block truncate text-sm font-bold leading-tight bg-transparent border-b border-primary outline-none min-w-0 w-full"
+              />
+            ) : (
+              <h3
+                className="truncate text-sm font-bold leading-tight cursor-text"
+                onClick={handleNameClick}
+              >
+                {option.name}
+              </h3>
+            )}
+          </div>
+          <div className="flex items-center justify-between">
+            <span className={cn(
+              'text-[10px]',
+              firstImage ? 'text-white/70' : 'text-muted-foreground'
+            )}>
+              {formatTime(startTime)} — {formatTime(endTime)}
+            </span>
+            <span className={cn(
+              'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+              firstImage ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
+            )}>
+              {durationLabel}
+            </span>
+          </div>
+        </div>
+        {overlapFraction > 0 && (
+          <div
+            className="absolute inset-x-0 z-[1] pointer-events-none rounded-xl"
+            style={{
+              background: 'linear-gradient(to right, hsla(0, 70%, 50%, 0.25), hsla(0, 70%, 50%, 0.1))',
+              ...(overlapPosition === 'top'
+                ? { top: 0, height: `${overlapFraction * 100}%` }
+                : { bottom: 0, height: `${overlapFraction * 100}%` }),
+            }}
+          />
+        )}
       </motion.div>
     );
   }
@@ -488,22 +559,6 @@ const EntryCard = ({
           </div>
         )}
 
-        {/* Lock button - always visible on all card types */}
-        {canEdit && onToggleLock && (
-          <button
-            onClick={handleLockClick}
-            className={cn(
-              'absolute top-1.5 right-1.5 rounded-md p-1 transition-colors z-20',
-              firstImage ? 'hover:bg-white/20' : 'hover:bg-muted/50'
-            )}
-          >
-            {isLocked ? (
-              <Lock className={cn('h-3.5 w-3.5', firstImage ? 'text-white/70' : 'text-muted-foreground/80')} />
-            ) : (
-              <LockOpen className={cn('h-3.5 w-3.5', firstImage ? 'text-white/30' : 'text-muted-foreground/30')} />
-            )}
-          </button>
-        )}
       </div>
 
       {/* Overlap red tint overlay */}

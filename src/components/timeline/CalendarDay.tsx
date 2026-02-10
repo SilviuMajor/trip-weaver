@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
 import { localToUTC } from '@/lib/timezoneUtils';
 import { computeOverlapLayout } from '@/lib/overlapLayout';
-import { Plus, Bus } from 'lucide-react';
+import { Plus, Bus, Lock, LockOpen } from 'lucide-react';
 import { useDragResize } from '@/hooks/useDragResize';
 import TimeSlotGrid from './TimeSlotGrid';
 import EntryCard from './EntryCard';
@@ -264,7 +264,7 @@ const CalendarDay = ({
           'sticky z-20 border-b border-border bg-background/90 px-4 py-1.5 backdrop-blur-md',
           today && 'border-primary/30 bg-primary/5'
         )}
-        style={{ top: 0 }}
+        style={{ top: 52 }}
         id={today ? 'today' : undefined}
       >
         <div className="mx-auto flex max-w-2xl items-center px-0">
@@ -378,7 +378,7 @@ const CalendarDay = ({
               flights={dayFlights}
             />
 
-            {/* Between-entry gap buttons */}
+            {/* Between-entry gap buttons + dashed line */}
             {(() => {
               const visibleEntries = sortedEntries.filter(e => {
                 const opt = e.options[0];
@@ -397,34 +397,44 @@ const CalendarDay = ({
 
                 if (gapMin <= 5) return null; // too small
 
+                const gapTopPx = (aEndHour - startHour) * PIXELS_PER_HOUR;
+                const gapBottomPx = (bStartHour - startHour) * PIXELS_PER_HOUR;
+                const gapHeight = gapBottomPx - gapTopPx;
                 const midHour = (aEndHour + bStartHour) / 2;
                 const btnTop = (midHour - startHour) * PIXELS_PER_HOUR - 12;
-                const isTransportGap = gapMin < 90;
+                const isTransportGap = gapMin < 120;
 
                 return (
-                  <button
-                    key={`gap-${entry.id}-${nextEntry.id}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (onAddBetween) {
-                        onAddBetween(entry.end_time);
-                      }
-                    }}
-                    className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 opacity-0 hover:opacity-100 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                    style={{ top: btnTop }}
-                  >
-                    {isTransportGap ? (
-                      <>
-                        <Bus className="h-3 w-3" />
-                        <span>Transport</span>
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="h-3 w-3" />
-                        <span>Event</span>
-                      </>
-                    )}
-                  </button>
+                  <div key={`gap-${entry.id}-${nextEntry.id}`}>
+                    {/* Vertical dashed connector line */}
+                    <div
+                      className="absolute left-1/2 border-l-2 border-dashed border-primary/20 pointer-events-none"
+                      style={{ top: gapTopPx, height: gapHeight }}
+                    />
+                    {/* Gap button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onAddBetween) {
+                          onAddBetween(entry.end_time);
+                        }
+                      }}
+                      className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                      style={{ top: btnTop }}
+                    >
+                      {isTransportGap ? (
+                        <>
+                          <Bus className="h-3 w-3" />
+                          <span>Transport</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="h-3 w-3" />
+                          <span>+ Add something</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 );
               });
             })()}
@@ -504,6 +514,7 @@ const CalendarDay = ({
                 const height = (groupEndHour - groupStartHour) * PIXELS_PER_HOUR;
                 const isCompact = height < 40 && !flightGroup;
                 const isMedium = height >= 40 && height < 80 && !flightGroup;
+                const isCondensed = height >= 80 && height < 160 && !flightGroup;
 
                 const layoutInfo = layoutMap.get(entry.id);
                 const column = layoutInfo?.column ?? 0;
@@ -615,42 +626,60 @@ const CalendarDay = ({
                           />
                           );
                         })() : (
-                          <EntryCard
-                            overlapMinutes={overlapMap.get(entry.id)?.minutes}
-                            overlapPosition={overlapMap.get(entry.id)?.position}
-                            isCompact={isCompact}
-                            isMedium={isMedium}
-                            option={primaryOption}
-                            startTime={entry.start_time}
-                            endTime={entry.end_time}
-                            formatTime={entryFormatTime}
-                            isPast={entryPast}
-                            optionIndex={0}
-                            totalOptions={entry.options.length}
-                            distanceKm={distanceKm}
-                            votingLocked={votingLocked}
-                            userId={userId}
-                            hasVoted={userVotes.includes(primaryOption.id)}
-                            onVoteChange={onVoteChange}
-                            onClick={() => {
-                              if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
-                            }}
-                            cardSizeClass="h-full"
-                            isDragging={isDragged}
-                            isLocked={isLocked}
-                            isProcessing={primaryOption.category === 'airport_processing'}
-                            linkedType={entry.linked_type}
-                            canEdit={isEditor}
-                            onToggleLock={() => onToggleLock?.(entry.id, !!isLocked)}
-                            onDragStart={canDrag ? (e) => {
-                              onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
-                            } : undefined}
-                            onTouchDragStart={canDrag ? (e) => {
-                              onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
-                            } : undefined}
-                            onTouchDragMove={onTouchMove}
-                            onTouchDragEnd={onTouchEnd}
-                          />
+                          <div className="relative h-full">
+                            <EntryCard
+                              overlapMinutes={overlapMap.get(entry.id)?.minutes}
+                              overlapPosition={overlapMap.get(entry.id)?.position}
+                              isCompact={isCompact}
+                              isMedium={isMedium}
+                              isCondensed={isCondensed}
+                              option={primaryOption}
+                              startTime={entry.start_time}
+                              endTime={entry.end_time}
+                              formatTime={entryFormatTime}
+                              isPast={entryPast}
+                              optionIndex={0}
+                              totalOptions={entry.options.length}
+                              distanceKm={distanceKm}
+                              votingLocked={votingLocked}
+                              userId={userId}
+                              hasVoted={userVotes.includes(primaryOption.id)}
+                              onVoteChange={onVoteChange}
+                              onClick={() => {
+                                if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
+                              }}
+                              cardSizeClass="h-full"
+                              isDragging={isDragged}
+                              isLocked={isLocked}
+                              isProcessing={primaryOption.category === 'airport_processing'}
+                              linkedType={entry.linked_type}
+                              canEdit={isEditor}
+                              onDragStart={canDrag ? (e) => {
+                                onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                              } : undefined}
+                              onTouchDragStart={canDrag ? (e) => {
+                                onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                              } : undefined}
+                              onTouchDragMove={onTouchMove}
+                              onTouchDragEnd={onTouchEnd}
+                            />
+                            {/* Lock icon outside card */}
+                            {isEditor && onToggleLock && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onToggleLock(entry.id, !!isLocked);
+                                }}
+                                className="absolute -top-2 -right-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+                              >
+                                {isLocked ? (
+                                  <Lock className="h-3 w-3 text-amber-500" />
+                                ) : (
+                                  <LockOpen className="h-3 w-3 text-muted-foreground/50" />
+                                )}
+                              </button>
+                            )}
+                          </div>
                         )}
 
                         {/* Bottom resize handle (not for locked or flight group entries) */}
