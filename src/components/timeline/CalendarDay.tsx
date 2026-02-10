@@ -115,7 +115,6 @@ const CalendarDay = ({
     const entry = sortedEntries.find(e => e.id === entryId);
     if (entry?.is_locked) return;
 
-    const commitTz = tz || activeTz || tripTimezone;
     const dateStr = format(dayDate, 'yyyy-MM-dd');
 
     const toTimeStr = (hour: number) => {
@@ -125,20 +124,27 @@ const CalendarDay = ({
       return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
     };
 
-    const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), commitTz);
-    const newEndIso = localToUTC(dateStr, toTimeStr(newEndHour), commitTz);
+    // For flights, use departure_tz for start and arrival_tz for end
+    const primaryOpt = entry?.options[0];
+    const isFlight = primaryOpt?.category === 'flight' && primaryOpt?.departure_tz && primaryOpt?.arrival_tz;
+    const startTz = isFlight ? primaryOpt.departure_tz! : (tz || activeTz || tripTimezone);
+    const endTz = isFlight ? primaryOpt.arrival_tz! : startTz;
+
+    const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), startTz);
+    const newEndIso = localToUTC(dateStr, toTimeStr(newEndHour), endTz);
     onEntryTimeChange(entryId, newStartIso, newEndIso);
 
     // Move linked processing entries if this is a flight
     if (entry) {
-      const primaryOpt = entry.options[0];
+      const linkedOpt = entry.options[0];
       const linkedEntries = allEntries.filter(e => e.linked_flight_id === entry.id);
+      const fallbackTz = tz || activeTz || tripTimezone;
 
       linkedEntries.forEach(linked => {
         // Check-in uses departure TZ, checkout uses arrival TZ
         const linkedTz = linked.linked_type === 'checkin'
-          ? (primaryOpt?.departure_tz || commitTz)
-          : (primaryOpt?.arrival_tz || commitTz);
+          ? (linkedOpt?.departure_tz || fallbackTz)
+          : (linkedOpt?.arrival_tz || fallbackTz);
 
         const linkedStartHour = getHourInTimezone(linked.start_time, linkedTz);
         const linkedEndHour = getHourInTimezone(linked.end_time, linkedTz);
@@ -212,7 +218,7 @@ const CalendarDay = ({
       {/* Day header */}
       <div
         className={cn(
-          'sticky top-[57px] z-20 border-b border-border bg-background/90 px-4 py-1.5 backdrop-blur-md',
+          'sticky top-[49px] z-20 border-b border-border bg-background/90 px-4 py-1.5 backdrop-blur-md',
           today && 'border-primary/30 bg-primary/5'
         )}
         id={today ? 'today' : undefined}
