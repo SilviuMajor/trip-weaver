@@ -1,0 +1,1 @@
+ALTER TABLE public.trips ADD COLUMN walk_threshold_min integer NOT NULL DEFAULT 10;

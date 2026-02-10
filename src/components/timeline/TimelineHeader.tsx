@@ -16,15 +16,16 @@ interface TimelineHeaderProps {
   onDataRefresh?: () => void;
   onToggleIdeas?: () => void;
   onToggleLive?: () => void;
+  onAutoGenerateTransport?: () => void;
+  autoTransportLoading?: boolean;
   liveOpen?: boolean;
   ideasCount?: number;
   scheduledEntries?: EntryWithOptions[];
 }
 
-const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas, onToggleLive, liveOpen, ideasCount = 0, scheduledEntries = [] }: TimelineHeaderProps) => {
+const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas, onToggleLive, onAutoGenerateTransport, autoTransportLoading, liveOpen, ideasCount = 0, scheduledEntries = [] }: TimelineHeaderProps) => {
   const { currentUser, logout, isOrganizer, isEditor } = useCurrentUser();
   const navigate = useNavigate();
-  const [travelLoading, setTravelLoading] = useState(false);
   const [weatherLoading, setWeatherLoading] = useState(false);
 
   const isUndated = !trip?.start_date;
@@ -49,22 +50,6 @@ const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas
       .eq('id', trip.id);
   };
 
-  const handleGenerateTravel = async () => {
-    if (!tripId) return;
-    setTravelLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('google-directions', {
-        body: { tripId },
-      });
-      if (error) throw error;
-      toast({ title: `Generated ${data?.segments?.length ?? 0} travel segments` });
-      onDataRefresh?.();
-    } catch (err: any) {
-      toast({ title: 'Failed to generate travel times', description: err.message, variant: 'destructive' });
-    } finally {
-      setTravelLoading(false);
-    }
-  };
 
   const handleUpdateWeather = async () => {
     if (!tripId || !trip) return;
@@ -176,9 +161,11 @@ const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas
               <Button variant="ghost" size="icon" onClick={handleToggleLock} className="h-8 w-8" title={trip.voting_locked ? 'Unlock voting' : 'Lock voting'}>
                 {trip.voting_locked ? <Lock className="h-4 w-4 text-destructive" /> : <Unlock className="h-4 w-4 text-muted-foreground" />}
               </Button>
-              <Button variant="ghost" size="icon" onClick={handleGenerateTravel} className="h-8 w-8" disabled={travelLoading} title="Generate travel times">
-                {travelLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Route className="h-4 w-4 text-muted-foreground" />}
-              </Button>
+              {onAutoGenerateTransport && (
+                <Button variant="ghost" size="icon" onClick={onAutoGenerateTransport} className="h-8 w-8" disabled={autoTransportLoading} title="Auto-generate transport between events">
+                  {autoTransportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Route className="h-4 w-4 text-muted-foreground" />}
+                </Button>
+              )}
               <Button variant="ghost" size="icon" onClick={handleUpdateWeather} className="h-8 w-8" disabled={weatherLoading || weatherDisabled} title={weatherTitle}>
                 {weatherLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudSun className={cn('h-4 w-4', weatherDisabled ? 'text-muted-foreground/40' : 'text-muted-foreground')} />}
               </Button>
