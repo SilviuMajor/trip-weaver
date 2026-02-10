@@ -15,10 +15,10 @@ const MODE_MAP: Record<string, string> = {
   walk: 'WALK',
   bicycling: 'BICYCLE',
   bicycle: 'BICYCLE',
+  cycle: 'BICYCLE',
 };
 
 function buildWaypoint(input: string) {
-  // Check if it looks like coordinates "lat,lng"
   const coordMatch = input.match(/^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/);
   if (coordMatch) {
     return {
@@ -49,6 +49,44 @@ function parseRoutesResponse(data: any) {
   };
 }
 
+async function fetchSingleMode(
+  apiKey: string,
+  from: string,
+  to: string,
+  mode: string,
+  departureTime?: string,
+) {
+  const travelMode = MODE_MAP[mode] || 'TRANSIT';
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Goog-Api-Key': apiKey,
+    'X-Goog-FieldMask': 'routes.legs.duration,routes.legs.distanceMeters,routes.polyline.encodedPolyline',
+  };
+
+  const requestBody: any = {
+    origin: buildWaypoint(from),
+    destination: buildWaypoint(to),
+    travelMode,
+  };
+
+  // Add departure time for transit and drive (traffic-aware)
+  if (departureTime && (travelMode === 'TRANSIT' || travelMode === 'DRIVE')) {
+    requestBody.departureTime = departureTime;
+    if (travelMode === 'DRIVE') {
+      requestBody.routingPreference = 'TRAFFIC_AWARE';
+    }
+  }
+
+  const response = await fetch(ROUTES_API_URL, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(requestBody),
+  });
+  const data = await response.json();
+  return parseRoutesResponse(data);
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -62,35 +100,34 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
 
-    const headers = {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
-      'X-Goog-FieldMask': 'routes.legs.duration,routes.legs.distanceMeters,routes.polyline.encodedPolyline',
-    };
-
-    // --- Mode 1: Single address-based lookup (for Transfer entries) ---
+    // --- Mode 1: Multi-mode address-based lookup ---
     if (body.fromAddress && body.toAddress) {
-      const { fromAddress, toAddress, mode } = body;
-      const travelMode = MODE_MAP[mode || 'transit'] || 'TRANSIT';
+      const { fromAddress, toAddress, departureTime } = body;
 
-      console.log(`Routes API: "${fromAddress}" -> "${toAddress}" (${travelMode})`);
+      // If modes array provided, fetch all modes in parallel
+      if (body.modes && Array.isArray(body.modes)) {
+        console.log(`Multi-mode Routes API: "${fromAddress}" -> "${toAddress}" modes: ${body.modes.join(', ')}`);
 
-      const requestBody = {
-        origin: buildWaypoint(fromAddress),
-        destination: buildWaypoint(toAddress),
-        travelMode,
-      };
+        const promises = body.modes.map((mode: string) =>
+          fetchSingleMode(GOOGLE_MAPS_API_KEY, fromAddress, toAddress, mode, departureTime)
+            .then(result => result ? { mode, duration_min: result.duration_min, distance_km: result.distance_km } : null)
+            .catch(() => null)
+        );
 
-      const response = await fetch(ROUTES_API_URL, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-      });
-      const data = await response.json();
+        const results = (await Promise.all(promises)).filter(Boolean);
 
-      const parsed = parseRoutesResponse(data);
+        return new Response(
+          JSON.stringify({ results }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Single mode (legacy)
+      const { mode } = body;
+      console.log(`Routes API: "${fromAddress}" -> "${toAddress}" (${mode || 'transit'})`);
+
+      const parsed = await fetchSingleMode(GOOGLE_MAPS_API_KEY, fromAddress, toAddress, mode || 'transit', departureTime);
       if (!parsed) {
-        console.log('No route found:', JSON.stringify(data.error || data));
         return new Response(
           JSON.stringify({ error: 'No route found', duration_min: null, distance_km: null }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -155,6 +192,12 @@ Deno.serve(async (req) => {
       .delete()
       .eq('trip_id', tripId);
 
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+      'X-Goog-FieldMask': 'routes.legs.duration,routes.legs.distanceMeters,routes.polyline.encodedPolyline',
+    };
+
     const segments = [];
 
     for (let i = 0; i < entries.length - 1; i++) {
@@ -180,6 +223,7 @@ Deno.serve(async (req) => {
           },
         },
         travelMode: 'TRANSIT',
+        departureTime: entries[i].end_time,
       };
 
       const response = await fetch(ROUTES_API_URL, {

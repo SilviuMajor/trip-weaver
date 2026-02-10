@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { format, isToday, isPast, addMinutes } from 'date-fns';
 import { calculateSunTimes } from '@/lib/sunCalc';
 import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData } from '@/types/trip';
@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
 import { localToUTC } from '@/lib/timezoneUtils';
 import { computeOverlapLayout } from '@/lib/overlapLayout';
-import { Plus } from 'lucide-react';
+import { Plus, Bus } from 'lucide-react';
 import { useDragResize } from '@/hooks/useDragResize';
 import TimeSlotGrid from './TimeSlotGrid';
 import EntryCard from './EntryCard';
@@ -211,6 +211,25 @@ const CalendarDay = ({
   const layout = computeOverlapLayout(layoutEntries);
   const layoutMap = new Map(layout.map(l => [l.entryId, l]));
 
+  // Compute pairwise overlaps for consecutive entries
+  const overlapMap = useMemo(() => {
+    const map = new Map<string, { minutes: number; position: 'top' | 'bottom' }>();
+    for (let i = 0; i < sortedEntries.length - 1; i++) {
+      const a = sortedEntries[i];
+      const b = sortedEntries[i + 1];
+      const aTzs = resolveEntryTz(a, dayFlights, activeTz, tripTimezone);
+      const bTzs = resolveEntryTz(b, dayFlights, activeTz, tripTimezone);
+      const aEnd = getHourInTimezone(a.end_time, aTzs.endTz);
+      const bStart = getHourInTimezone(b.start_time, bTzs.startTz);
+      if (aEnd > bStart) {
+        const overlapMin = Math.round((aEnd - bStart) * 60);
+        map.set(a.id, { minutes: overlapMin, position: 'bottom' });
+        map.set(b.id, { minutes: overlapMin, position: 'top' });
+      }
+    }
+    return map;
+  }, [sortedEntries, dayFlights, activeTz, tripTimezone]);
+
   const getWeatherForEntry = (entry: EntryWithOptions) => {
     const hour = Math.floor(getHourInTimezone(entry.start_time, tripTimezone));
     const dateStr = format(dayDate, 'yyyy-MM-dd');
@@ -358,6 +377,57 @@ const CalendarDay = ({
               activeTz={activeTz}
               flights={dayFlights}
             />
+
+            {/* Between-entry gap buttons */}
+            {(() => {
+              const visibleEntries = sortedEntries.filter(e => {
+                const opt = e.options[0];
+                return opt && opt.category !== 'airport_processing' && !e.linked_flight_id;
+              });
+
+              return visibleEntries.map((entry, idx) => {
+                if (idx >= visibleEntries.length - 1) return null;
+                const nextEntry = visibleEntries[idx + 1];
+
+                const aTzs = resolveEntryTz(entry, dayFlights, activeTz, tripTimezone);
+                const bTzs = resolveEntryTz(nextEntry, dayFlights, activeTz, tripTimezone);
+                const aEndHour = getHourInTimezone(entry.end_time, aTzs.endTz);
+                const bStartHour = getHourInTimezone(nextEntry.start_time, bTzs.startTz);
+                const gapMin = Math.round((bStartHour - aEndHour) * 60);
+
+                if (gapMin <= 5) return null; // too small
+
+                const midHour = (aEndHour + bStartHour) / 2;
+                const btnTop = (midHour - startHour) * PIXELS_PER_HOUR - 12;
+                const isTransportGap = gapMin < 90;
+
+                return (
+                  <button
+                    key={`gap-${entry.id}-${nextEntry.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onAddBetween) {
+                        onAddBetween(entry.end_time);
+                      }
+                    }}
+                    className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 opacity-0 hover:opacity-100 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                    style={{ top: btnTop }}
+                  >
+                    {isTransportGap ? (
+                      <>
+                        <Bus className="h-3 w-3" />
+                        <span>Transport</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="h-3 w-3" />
+                        <span>Event</span>
+                      </>
+                    )}
+                  </button>
+                );
+              });
+            })()}
 
             {/* Flight group computation */}
             {(() => {
@@ -546,6 +616,8 @@ const CalendarDay = ({
                           );
                         })() : (
                           <EntryCard
+                            overlapMinutes={overlapMap.get(entry.id)?.minutes}
+                            overlapPosition={overlapMap.get(entry.id)?.position}
                             isCompact={isCompact}
                             isMedium={isMedium}
                             option={primaryOption}

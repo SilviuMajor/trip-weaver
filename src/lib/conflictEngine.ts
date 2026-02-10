@@ -138,6 +138,16 @@ export function generateRecommendations(
     }
   }
 
+  // Option: skip entry (move to unscheduled)
+  for (const entry of unlocked) {
+    recommendations.push({
+      id: `skip-${entry.id}`,
+      label: `Skip "${entry.options[0]?.name}"`,
+      description: 'Move to ideas (unscheduled)',
+      changes: [], // handled specially by the caller
+    });
+  }
+
   return recommendations.slice(0, 5); // Max 5 recommendations
 }
 

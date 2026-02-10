@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Button } from '@/components/ui/button';
-import { LogOut, Lock, Unlock, Plus, Route, CloudSun, Loader2, Settings, Home, Lightbulb } from 'lucide-react';
+import { LogOut, Lock, Unlock, Plus, Route, CloudSun, Loader2, Settings, Radio, Lightbulb } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { differenceInDays, parseISO } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
@@ -15,11 +15,13 @@ interface TimelineHeaderProps {
   onAddEntry?: () => void;
   onDataRefresh?: () => void;
   onToggleIdeas?: () => void;
+  onToggleLive?: () => void;
+  liveOpen?: boolean;
   ideasCount?: number;
   scheduledEntries?: EntryWithOptions[];
 }
 
-const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas, ideasCount = 0, scheduledEntries = [] }: TimelineHeaderProps) => {
+const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas, onToggleLive, liveOpen, ideasCount = 0, scheduledEntries = [] }: TimelineHeaderProps) => {
   const { currentUser, logout, isOrganizer, isEditor } = useCurrentUser();
   const navigate = useNavigate();
   const [travelLoading, setTravelLoading] = useState(false);
@@ -156,6 +158,18 @@ const TimelineHeader = ({ trip, tripId, onAddEntry, onDataRefresh, onToggleIdeas
         </div>
 
         <div className="flex items-center gap-1">
+          {/* LIVE toggle */}
+          {onToggleLive && (
+            <Button
+              variant={liveOpen ? 'default' : 'ghost'}
+              size="sm"
+              onClick={onToggleLive}
+              className={cn('h-8 gap-1 px-2 text-xs font-bold', liveOpen && 'bg-primary text-primary-foreground')}
+            >
+              <Radio className="h-3.5 w-3.5" />
+              LIVE
+            </Button>
+          )}
           {/* Organizer-only buttons */}
           {isOrganizer && trip && (
             <>

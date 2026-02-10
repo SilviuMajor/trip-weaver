@@ -8,6 +8,16 @@ import { supabase } from '@/integrations/supabase/client';
 import { findCategory } from '@/lib/categories';
 import VoteButton from './VoteButton';
 
+const formatDuration = (startIso: string, endIso: string): string => {
+  const ms = new Date(endIso).getTime() - new Date(startIso).getTime();
+  const totalMin = Math.round(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+};
+
 interface EntryCardProps {
   option: EntryOption;
   startTime: string;
@@ -30,6 +40,8 @@ interface EntryCardProps {
   isCompact?: boolean;
   isMedium?: boolean;
   canEdit?: boolean;
+  overlapMinutes?: number;
+  overlapPosition?: 'top' | 'bottom';
   onToggleLock?: () => void;
   onDragStart?: (e: React.MouseEvent) => void;
   onTouchDragStart?: (e: React.TouchEvent) => void;
@@ -92,6 +104,8 @@ const EntryCard = ({
   isCompact,
   isMedium,
   canEdit,
+  overlapMinutes = 0,
+  overlapPosition,
   onToggleLock,
   onDragStart,
   onTouchDragStart,
@@ -151,6 +165,14 @@ const EntryCard = ({
     onToggleLock?.();
   };
 
+  const durationLabel = formatDuration(startTime, endTime);
+
+  // Overlap red tint calculation
+  const totalMs = new Date(endTime).getTime() - new Date(startTime).getTime();
+  const overlapFraction = overlapMinutes > 0 && totalMs > 0
+    ? Math.min(1, (overlapMinutes * 60000) / totalMs)
+    : 0;
+
   // Medium layout for sub-hour entries (40-80px)
   if (isMedium) {
     return (
@@ -197,8 +219,20 @@ const EntryCard = ({
           )}
           <span className="text-[10px] text-muted-foreground">
             {formatTime(startTime)} — {formatTime(endTime)}
+            <span className="ml-1 font-bold">{durationLabel}</span>
           </span>
         </div>
+        {overlapFraction > 0 && (
+          <div
+            className="absolute inset-x-0 z-[1] pointer-events-none rounded-xl"
+            style={{
+              background: 'linear-gradient(to right, hsla(0, 70%, 50%, 0.25), hsla(0, 70%, 50%, 0.1))',
+              ...(overlapPosition === 'top'
+                ? { top: 0, height: `${overlapFraction * 100}%` }
+                : { bottom: 0, height: `${overlapFraction * 100}%` }),
+            }}
+          />
+        )}
         {canEdit && onToggleLock && (
           <button
             onClick={handleLockClick}
@@ -261,7 +295,7 @@ const EntryCard = ({
             </span>
           )}
           <span className="shrink-0 text-[9px] text-muted-foreground whitespace-nowrap">
-            {formatTime(startTime)}–{formatTime(endTime)}
+            {formatTime(startTime)}–{formatTime(endTime)} <span className="font-bold">{durationLabel}</span>
           </span>
           <span className="flex-1" />
           {canEdit && onToggleLock && (
@@ -418,31 +452,39 @@ const EntryCard = ({
           </div>
         )}
 
-        {/* Bottom row: Distance + Votes */}
+        {/* Bottom row: Distance + Duration + Votes */}
         {!isProcessing && (
           <div className="flex items-center justify-between">
-            {distanceKm !== null && distanceKm !== undefined ? (
-              <div className={cn(
-                'flex items-center gap-1 text-xs',
-                firstImage ? 'text-white/70' : 'text-muted-foreground'
-              )}>
-                <MapPin className="h-3 w-3" />
-                <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
-              </div>
-            ) : (
-              <div />
-            )}
+            <div className="flex items-center gap-2">
+              {distanceKm !== null && distanceKm !== undefined && (
+                <div className={cn(
+                  'flex items-center gap-1 text-xs',
+                  firstImage ? 'text-white/70' : 'text-muted-foreground'
+                )}>
+                  <MapPin className="h-3 w-3" />
+                  <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
+                </div>
+              )}
+            </div>
 
-            {userId && totalOptions > 1 && (
-              <VoteButton
-                optionId={option.id}
-                userId={userId}
-                voteCount={option.vote_count ?? 0}
-                hasVoted={hasVoted}
-                locked={votingLocked}
-                onVoteChange={onVoteChange}
-              />
-            )}
+            <div className="flex items-center gap-2">
+              <span className={cn(
+                'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+                firstImage ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
+              )}>
+                {durationLabel}
+              </span>
+              {userId && totalOptions > 1 && (
+                <VoteButton
+                  optionId={option.id}
+                  userId={userId}
+                  voteCount={option.vote_count ?? 0}
+                  hasVoted={hasVoted}
+                  locked={votingLocked}
+                  onVoteChange={onVoteChange}
+                />
+              )}
+            </div>
           </div>
         )}
 
@@ -463,6 +505,19 @@ const EntryCard = ({
           </button>
         )}
       </div>
+
+      {/* Overlap red tint overlay */}
+      {overlapFraction > 0 && (
+        <div
+          className="absolute inset-x-0 z-[1] pointer-events-none rounded-2xl"
+          style={{
+            background: 'linear-gradient(to right, hsla(0, 70%, 50%, 0.25), hsla(0, 70%, 50%, 0.1))',
+            ...(overlapPosition === 'top'
+              ? { top: 0, height: `${overlapFraction * 100}%` }
+              : { bottom: 0, height: `${overlapFraction * 100}%` }),
+          }}
+        />
+      )}
     </motion.div>
   );
 };
