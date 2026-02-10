@@ -1,194 +1,141 @@
 
 
-# Transport System Upgrade: Smart Gaps, Route Maps, Contingency Buffers
+# Transport Card Redesign + "When" Section Removal + View Mode Fix
 
-## Overview
+## Issues Found
 
-Three changes to the transport creation and display flow:
+### 1. "When" section still shows for transport entries
+In `EntrySheet.tsx` (create mode), the entire "When" section (lines 1338-1416) -- including the "When" label, time inputs, and duration field -- still renders for transport entries. When transport context exists, the timing is derived from the gap, so these fields are redundant and should be hidden.
 
-1. **Clean up transport form**: Remove website and date fields for transport entries; the transport appears at the gap where it was clicked
-2. **Smart gap handling**: Always round transport duration up to nearest 5 minutes for the calendar block, show real duration in details. When transport exceeds the gap, trigger the existing Conflict Resolver with smart suggestions
-3. **Route map previews**: Show a static route map (from the polyline data) in the creation dialog, the view overlay, and a mini version on the timeline card
+### 2. Transport cards look the same as regular entries on the timeline
+Currently, transport entries render using the same `EntryCard` component as everything else. They appear as a full card with category badge, title, time row, etc. The user wants transport to look visually distinct -- more like a connector/segment showing mode, time, and distance rather than a full event card.
 
----
-
-## 1. Clean Up Transport Form
-
-**In `EntrySheet.tsx` (create mode, transfer section):**
-- Remove the "Website" field when `isTransfer` is true
-- Remove the "Date" field when `transportContext` is provided (the date is inherited from the gap position)
-- The "Day" selector is also hidden when transport context exists (it's implicit from the gap)
+### 3. Transport view mode doesn't match the new card design
+When clicking a transport card, the view mode in `EntrySheet.tsx` shows a generic entry layout (lines 935-975) with From/To, clock/time, route map, and then the standard website/map/vote/image section below. It should match the distinct transport visual and show relevant transport-specific info cleanly.
 
 ---
 
-## 2. Smart Gap Handling with Contingency Buffer
+## Changes
 
-### Rounding Logic
+### A. Remove "When" section for transport with context (`EntrySheet.tsx`)
 
-When a transport mode is selected (or auto-selected):
-- **Real duration** (e.g., 23 min) is stored and shown in the card details and view overlay
-- **Block duration** = real duration rounded UP to the nearest 5 minutes (e.g., 23 min becomes 25 min)
-- The calendar card occupies the block duration's time span
-- The difference (2 min) is labeled as "contingency" in the card subtitle
+Hide the entire "When" block (the divider, date selector, time inputs, and duration field) when `isTransfer && transportContext` is present. The start/end times are already computed from the selected route mode and the gap position.
 
-### How It Works
+**Lines affected**: 1338-1416 -- wrap in a condition `{!(isTransfer && transportContext) && (...)}`
 
-When user clicks a transport gap button:
-1. Routes are fetched (existing behavior)
-2. User selects a mode (or fastest is auto-selected)
-3. Calculate: `blockDuration = Math.ceil(realDuration / 5) * 5`
-4. Calculate: `gapMinutes` (time between the two adjacent entries)
-5. Compare `blockDuration` vs `gapMinutes`:
+### B. Redesign transport timeline card (`EntryCard.tsx`)
 
-**If blockDuration <= gapMinutes (fits in gap):**
-- Transport card is created with `start_time = previousEntry.end_time` and `end_time = start + blockDuration`
-- Remaining gap after transport = `gapMinutes - blockDuration`
-- If remaining gap > 0, this becomes a new smaller gap on the timeline (no auto-snapping -- the contingency buffer is already built into the block duration)
+For transport entries (`isTransfer === true`), render a completely different layout instead of the standard card. The new transport card will be a horizontal connector-style element:
 
-**If blockDuration > gapMinutes (doesn't fit):**
-- Trigger the existing Conflict Resolver (`analyzeConflict` + `generateRecommendations`)
-- The conflict resolver already generates suggestions like "Push next event later by Xm", "Shorten previous event by Xm", etc.
-- User picks a resolution or chooses "figure it out later" (places with red conflict marker)
-
-### Implementation
-
-**`EntrySheet.tsx`:**
-- New state: `gapMinutes: number | null` (passed from Timeline via new prop)
-- When `transportContext` is provided, also receive `gapMinutes`
-- On mode selection, compute `blockDuration` and compare with `gapMinutes`
-- If overflow detected: show inline warning banner with overflow amount, and a "Resolve" button that calls back to Timeline to trigger Conflict Resolver
-- The `handleSave` function uses `blockDuration` (rounded) for the entry's time span on the calendar
-
-**`Timeline.tsx`:**
-- In `handleAddTransport`, calculate and pass `gapMinutes` to the transport context
-- New prop on `EntrySheet`: `transportContext.gapMinutes`
-- New callback prop: `onTransportConflict` that opens ConflictResolver when transport overflows
-
-**Entry card display:**
-- Transport cards show the real duration (e.g., "23 min transit") in the details
-- The card physically occupies the rounded block time (25 min)
-- A small "+2m buffer" label appears in muted text
-
----
-
-## 3. Route Map Previews
-
-### Data Flow
-
-The `google-directions` edge function already returns `polyline` (encoded polyline) for single-mode requests. The multi-mode response currently drops it. We need to:
-
-1. **Update `google-directions` edge function**: Include `polyline` in multi-mode results
-2. **Store polyline**: Save the selected route's polyline when creating the transport entry (new column or stored in option metadata)
-3. **Render static map**: Use Google Static Maps API or an open-source alternative to render the polyline as a static image
-
-### Static Route Map Implementation
-
-Use Google Maps Static API to render polyline:
 ```
-https://maps.googleapis.com/maps/api/staticmap?size=600x200&path=enc:{polyline}&key={API_KEY}
+[Mode emoji]  Walk to Restaurant Y    12m · 0.8km
+              ─────────────────────
+              [mini route map if available]
 ```
 
-Since the API key is server-side only, create a small helper in the `google-directions` edge function (or a new endpoint) that returns the static map URL given a polyline.
+Design:
+- No category badge (it's visually obvious from the design)
+- Horizontal layout: mode emoji on left, name + details on right
+- Duration and distance shown inline, prominently
+- Dashed left border in the category color (same as current)
+- Subtler/slimmer than regular cards
+- Contingency buffer shown as small muted text if applicable
+- Mini route map preserved below if polyline exists and card is large enough
 
-**Alternative (no extra API cost):** Use OpenStreetMap-based static map with polyline overlay. This avoids needing the Google Static Maps API.
+This applies to all 4 layout variants (compact, medium, condensed, full).
 
-### Where Maps Appear
+### C. Redesign transport view overlay (`EntrySheet.tsx` view mode)
 
-1. **Transport creation dialog** (EntrySheet, create mode, transfer): Below the route list, show the static map of the currently selected route. Clicking opens Google Maps directions URL.
+When viewing a transport entry (lines 935-975), redesign the layout to match the card's connector feel:
 
-2. **Transport view overlay** (EntrySheet, view mode, transfer): Show the route map below the From/To details. Buttons to "Open in Google Maps" and "Open in Apple Maps" with the directions URL (not just a pin).
+```
++--------------------------------------------+
+| [Mode emoji large]   Transit               |
+|                                             |
+| From:  Heathrow Airport                     |
+| To:    Hotel Krasnapolsky                   |
+|                                             |
+| 12m · 1.2km                                |
+| +2m contingency buffer                      |
+|                                             |
+| [====== Route Map ======]                   |
+| [Open in Google Maps] [Open in Apple Maps]  |
+|                                             |
+| 09:30 -- 09:42                              |
+|                                             |
+| ------------------------------------------- |
+| [Lock] [Move to Ideas] [Delete]             |
++--------------------------------------------+
+```
 
-3. **Timeline card** (EntryCard/TravelSegmentCard): A mini route map thumbnail at the bottom of transport cards. Only shown on cards with enough height (not compact layout).
-
-### Map Link Format
-
-- Google Maps directions: `https://www.google.com/maps/dir/?api=1&origin={from}&destination={to}&travelmode={mode}`
-- Apple Maps directions: `https://maps.apple.com/?saddr={from}&daddr={to}&dirflg={mode_flag}`
-
-### Database Change
-
-Add a `route_polyline` column to `entry_options` to store the encoded polyline string for transport entries.
+Key differences from current:
+- No website field for transport view
+- Mode emoji + mode label as the header instead of category badge
+- From/To displayed prominently
+- Duration + distance shown as the primary metric
+- Contingency buffer shown if block time differs from real duration
+- Route map with "Open in Maps" buttons
+- Time shown but de-emphasized
 
 ---
 
 ## File Summary
 
-| File | Action | Changes |
-|------|--------|---------|
-| `supabase/functions/google-directions/index.ts` | Edit | Include `polyline` in multi-mode results; add static map URL endpoint |
-| `src/components/timeline/EntrySheet.tsx` | Edit | Remove website/date for transport; add gap comparison logic with contingency buffer; add route map preview; accept `gapMinutes` in transport context |
-| `src/pages/Timeline.tsx` | Edit | Pass `gapMinutes` in transport context; add `onTransportConflict` callback to trigger Conflict Resolver |
-| `src/components/timeline/EntryCard.tsx` | Edit | Show mini route map on transport cards; show contingency buffer label |
-| `src/components/timeline/RouteMapPreview.tsx` | Create | New component: renders static route map image with "Open in Maps" buttons |
-| Database migration | Create | Add `route_polyline TEXT` column to `entry_options` table |
+| File | Changes |
+|------|---------|
+| `src/components/timeline/EntrySheet.tsx` | Hide "When" section when `isTransfer && transportContext`. Redesign transport view mode layout with mode-centric header, From/To, duration/distance, contingency, and map links. Remove website from transport view. |
+| `src/components/timeline/EntryCard.tsx` | Add a distinct transport card layout for all 4 size variants (compact, medium, condensed, full) showing mode emoji, name, duration, distance as a slim connector-style card instead of the standard event card. |
+
+No database changes. No edge function changes. No new files.
 
 ---
 
 ## Technical Details
 
-### Transport Context (Updated)
+### EntryCard transport layouts
 
-```text
-transportContext: {
-  fromAddress: string;
-  toAddress: string;
-  gapMinutes: number;       // NEW: gap between adjacent entries in minutes
-  fromEntryId: string;      // NEW: needed for conflict resolution
-  toEntryId: string;        // NEW: needed for conflict resolution
+**Full layout** (height >= 160px):
+- Slim horizontal bar with mode emoji, entry name, duration pill, distance
+- Category color left border (3px)
+- Mini route map below if polyline exists
+- Lighter background tint than regular cards
+
+**Condensed layout** (80-160px):
+- Mode emoji + name on one line, duration + distance on second line
+- No route map (not enough space)
+
+**Medium layout** (40-80px):
+- Single line: emoji + truncated name + duration
+
+**Compact layout** (< 40px):
+- Single line: emoji + duration only
+
+### EntrySheet "When" section hiding
+
+Current code (line 1338):
+```tsx
+<div className="border-t border-border/50 pt-4 mt-2">
+  <Label className="text-sm font-semibold text-muted-foreground">When</Label>
+</div>
+```
+
+Wrap lines 1338-1416 in: `{!(isTransfer && transportContext) && ( ... )}`
+
+### Transport view mode redesign
+
+Replace the current transfer view block (lines 935-975) with a mode-centric layout. Extract travel mode from the entry name or store it. Use a `getModeEmoji` helper (already exists in TravelSegmentCard.tsx) to determine the mode icon. Calculate contingency from block duration vs real duration (block = entry end - start, real = nearest lower non-5-multiple or stored value).
+
+### Mode detection for view
+
+Since we don't store the travel mode separately, extract it from the entry name pattern (e.g., "Walk to ...", "Transit to ...", "Drive to ...") or from the category. Add a simple helper:
+```typescript
+function detectTransportMode(name: string): { mode: string; emoji: string; label: string } {
+  const lower = name.toLowerCase();
+  if (lower.startsWith('walk')) return { mode: 'walk', emoji: '🚶', label: 'Walking' };
+  if (lower.startsWith('transit')) return { mode: 'transit', emoji: '🚌', label: 'Transit' };
+  if (lower.startsWith('drive')) return { mode: 'drive', emoji: '🚗', label: 'Driving' };
+  if (lower.startsWith('cycle')) return { mode: 'bicycle', emoji: '🚲', label: 'Cycling' };
+  return { mode: 'transit', emoji: '🚆', label: 'Transport' };
 }
 ```
 
-### Gap Calculation in Timeline.tsx
-
-```text
-const gapMs = new Date(toEntry.start_time).getTime() - new Date(fromEntry.end_time).getTime();
-const gapMinutes = Math.round(gapMs / 60000);
-```
-
-### Block Duration Rounding
-
-```text
-const blockDuration = Math.ceil(realDuration / 5) * 5;
-const contingencyMin = blockDuration - realDuration;
-```
-
-### Overflow Detection in EntrySheet
-
-```text
-if (transportContext?.gapMinutes != null && blockDuration > transportContext.gapMinutes) {
-  // Show warning: "Transport takes Xm but gap is only Ym"
-  // Show "Resolve" button -> triggers onTransportConflict callback
-}
-```
-
-### RouteMapPreview Component
-
-```text
-Props:
-  polyline: string              // encoded polyline
-  fromAddress: string
-  toAddress: string
-  travelMode: string            // walk, transit, drive, bicycle
-  size?: 'mini' | 'full'        // mini for card, full for dialog
-  className?: string
-
-Renders:
-  - Static map image with polyline overlay
-  - "Open in Google Maps" / "Open in Apple Maps" buttons (full size only)
-  - Click handler on mini opens the view overlay
-```
-
-### Edge Function Update
-
-In the multi-mode handler (line 111-113 of google-directions), include polyline:
-
-```text
-// Current: { mode, duration_min, distance_km }
-// Updated: { mode, duration_min, distance_km, polyline }
-```
-
-### Static Map Rendering
-
-For the static map image, use a lightweight approach with OpenStreetMap tiles and polyline overlay. The `RouteMapPreview` component will decode the polyline and render an image via a static tile service, or we can use a simple embedded approach with the polyline drawn on a canvas over map tiles.
-
-Simpler alternative: Use the existing MapPreview component pattern but with a directions-oriented URL. For Google, generate: `https://maps.googleapis.com/maps/api/staticmap?size=400x150&path=enc:{polyline}&key={key}`. The key is fetched server-side via a new lightweight edge function endpoint that returns the image URL (or proxies the image).
