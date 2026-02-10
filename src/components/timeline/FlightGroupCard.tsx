@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Plane, Lock, LockOpen, ArrowRight, Clock } from 'lucide-react';
+import { Plane, ArrowRight, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { EntryOption, EntryWithOptions } from '@/types/trip';
 import { findCategory } from '@/lib/categories';
@@ -15,8 +15,6 @@ interface FlightGroupCardProps {
   isPast: boolean;
   isDragging?: boolean;
   isLocked?: boolean;
-  canEdit?: boolean;
-  onToggleLock?: () => void;
   onClick?: () => void;
   onDragStart?: (e: React.MouseEvent) => void;
   onTouchDragStart?: (e: React.TouchEvent) => void;
@@ -56,8 +54,6 @@ const FlightGroupCard = ({
   isPast,
   isDragging,
   isLocked,
-  canEdit,
-  onToggleLock,
   onClick,
   onDragStart,
   onTouchDragStart,
@@ -67,11 +63,6 @@ const FlightGroupCard = ({
   const catInfo = findCategory('flight');
   const catColor = catInfo?.color ?? 'hsl(260, 50%, 55%)';
   const firstImage = flightOption.images?.[0]?.image_url;
-
-  const handleLockClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onToggleLock?.();
-  };
 
   const depCode = flightOption.departure_location?.split(' - ')[0] ?? '';
   const arrCode = flightOption.arrival_location?.split(' - ')[0] ?? '';
@@ -190,22 +181,6 @@ const FlightGroupCard = ({
         </div>
       )}
 
-      {/* Lock button */}
-      {canEdit && onToggleLock && (
-        <button
-          onClick={handleLockClick}
-          className={cn(
-            'absolute top-1.5 right-1.5 rounded-md p-1 transition-colors z-20',
-            firstImage ? 'hover:bg-white/20' : 'hover:bg-muted/50'
-          )}
-        >
-          {isLocked ? (
-            <Lock className={cn('h-3.5 w-3.5', firstImage ? 'text-white/70' : 'text-muted-foreground/80')} />
-          ) : (
-            <LockOpen className={cn('h-3.5 w-3.5', firstImage ? 'text-white/30' : 'text-muted-foreground/30')} />
-          )}
-        </button>
-      )}
     </motion.div>
   );
 };
