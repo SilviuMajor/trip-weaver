@@ -1,125 +1,173 @@
 
 
-# Flight Card & Codebase Bug Fixes
+# Entry Creation: Image Picker + Merged Form
 
-## Bugs Identified
+## Overview
 
-### Bug 1: "+ Add something" button overlaps the Check-in section of the Flight Group Card
+Three changes to the entry creation flow:
 
-**Root cause (CalendarDay.tsx, lines 382-440):**
-The gap detection filters out `airport_processing` and `linked_flight_id` entries, then computes gaps between `visibleEntries`. However, the flight entry's `start_time` is the flight departure (e.g. 09:15), while the FlightGroupCard visually starts at the **check-in start** (e.g. 06:30). The gap button is positioned between the previous event and the flight's `start_time`, but the card renders from `groupStartHour` (check-in start), causing the button to land on top of the check-in section.
-
-**Fix:** In the gap calculation loop, when computing `bStartHour` for a flight entry that has linked check-in entries, use the check-in's `start_time` instead of the flight's `start_time`. This ensures the gap is measured to the actual visual top of the flight group card.
-
-### Bug 2: Vertical dashed line passes through the Flight Group Card
-
-**Root cause:** Same as Bug 1 -- the dashed line's bottom point (`gapBottomPx`) is computed from the flight's `start_time`, not the group's visual top (check-in start). And also, the line from the flight group bottom to the next event needs to use `groupEndHour` (checkout end) not `entry.end_time`.
-
-**Fix:** Same adjustment as Bug 1 -- account for the flight group bounds when computing gap start/end positions. Also need to handle the gap AFTER the flight group: use the checkout's `end_time` instead of the flight's `end_time`.
-
-### Bug 3: Lock icon still inside FlightGroupCard
-
-**Root cause (FlightGroupCard.tsx, lines 193-208):** The lock icon was moved outside the card for regular `EntryCard` (CalendarDay.tsx lines 666-681), but `FlightGroupCard` still renders its own lock button internally. This is inconsistent.
-
-**Fix:** Remove the lock button from `FlightGroupCard.tsx`. Add an external lock button in `CalendarDay.tsx` for flight group entries (same pattern as regular entries, at `-top-2 -right-2`).
+1. **Show Google Places photos** in the creation form as a horizontal scrollable strip with select/delete and drag-to-reorder
+2. **Merge the "When" step** into the "Details" step, making it a single scrollable page
+3. First image in the strip becomes the **cover photo** for the entry card
 
 ---
 
-## Implementation Plan
+## 1. Image Picker Strip
 
-### File: `src/components/timeline/CalendarDay.tsx`
+### Behavior
 
-**Gap calculation fix (lines 382-440):**
-- Before computing `bStartHour` for the next entry, check if it has a flight group with a linked check-in. If so, use the check-in's `start_time` for the gap endpoint.
-- Before computing `aEndHour` for the current entry, check if it has a flight group with a linked checkout. If so, use the checkout's `end_time` for the gap start.
-- This requires building the `flightGroupMap` earlier (currently built at line 445, after the gap section). Move the flight group computation above the gap buttons section, or precompute a lookup of flight-to-group-bounds.
+- When the user types a place name and selects from autocomplete, `handlePlaceSelect` currently stores photos in `autoPhotos` (string array of URLs)
+- After photos load, show a **horizontal scroll strip** of thumbnails below the name field
+- Each thumbnail:
+  - Shows a checkmark overlay when selected (all are selected by default)
+  - Tap the **X** button to deselect/delete a photo (removes it from the array)
+  - First image in the strip = cover photo, indicated with a small "Cover" badge
+- **Drag to reorder**: users can drag thumbnails left/right to change order. The leftmost image becomes the cover.
+- Only selected (remaining) photos are saved to `option_images` on submit
+- Does NOT apply to flights or transfers (they use plain `Input`, not `PlacesAutocomplete`)
+- A loading spinner shows while photos are being fetched (use existing `fetchingDetails` state from PlacesAutocomplete)
 
-**Lock icon for flight groups (around line 585-627):**
-- After `FlightGroupCard` is rendered, add the same external lock button pattern used for regular entries (the `-top-2 -right-2` positioned button).
+### Implementation
 
-### File: `src/components/timeline/FlightGroupCard.tsx`
+**New file: `src/components/timeline/PhotoStripPicker.tsx`**
 
-**Remove internal lock button (lines 193-208):**
-- Delete the lock button JSX from inside the component.
-- Remove `canEdit`, `onToggleLock`, and `isLocked` from props (lock is now handled externally).
-- Remove `Lock`, `LockOpen` from lucide imports.
-- Keep the `isLocked` border-dashed styling on the outer container (pass it as a prop or keep it).
+A self-contained component that:
+- Accepts `photos: string[]` and `onChange: (photos: string[]) => void`
+- Renders a horizontal scrollable row of image thumbnails (fixed height ~80px, aspect ratio preserved)
+- Each thumbnail has an X button (top-right) to remove
+- First thumbnail gets a "Cover" badge (bottom-left)
+- Supports drag-to-reorder using native HTML drag events (`draggable`, `onDragStart`, `onDragOver`, `onDrop`)
+- Smooth reorder animation with a visual drop indicator
 
-Actually, we should keep `isLocked` for the border-dashed styling but remove `canEdit` and `onToggleLock`.
+**File: `src/components/timeline/EntryForm.tsx`**
 
-### Restructure order in CalendarDay.tsx
-
-Move the flight group map computation (lines 443-461) to **before** the gap buttons section (line 382) so it's available for gap calculations.
-
----
-
-## Detailed Changes
-
-### CalendarDay.tsx -- move flight group map earlier
-
-```text
-// BEFORE the gap buttons section (~line 382), insert:
-const flightGroupMap = new Map<...>();
-const linkedEntryIds = new Set<string>();
-// ... same logic currently at lines 448-461
-```
-
-Then remove the duplicate from line 443-461.
-
-### CalendarDay.tsx -- fix gap calculation
-
-In the gap loop (line 388), when computing endpoints:
-
-```text
-// For entry (current), check if it's a flight with checkout
-const aGroup = flightGroupMap.get(entry.id);
-const aEffectiveEndTime = aGroup?.checkout?.end_time ?? entry.end_time;
-const aEndHour = getHourInTimezone(aEffectiveEndTime, aTzs.endTz);
-
-// For nextEntry, check if it's a flight with checkin
-const bGroup = flightGroupMap.get(nextEntry.id);
-const bEffectiveStartTime = bGroup?.checkin?.start_time ?? nextEntry.start_time;
-const bStartHour = getHourInTimezone(bEffectiveStartTime, bTzs.startTz);
-```
-
-Also need to resolve TZ correctly for the checkout/checkin entries (use arrival_tz for checkout end, departure_tz for checkin start).
-
-### FlightGroupCard.tsx -- remove lock button
-
-- Remove lines 193-208 (the lock button JSX)
-- Remove `handleLockClick` function (lines 71-74)
-- Keep `isLocked` prop for dashed border styling
-- Remove `canEdit` and `onToggleLock` props
-
-### CalendarDay.tsx -- add external lock for flight groups
-
-After the `FlightGroupCard` render (around line 627), wrap in a pattern similar to line 629-682:
-
-```text
-<div className="relative h-full">
-  <FlightGroupCard ... />
-  {isEditor && onToggleLock && (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggleLock(entry.id, !!isLocked);
-      }}
-      className="absolute -top-2 -right-2 z-30 flex h-5 w-5 ..."
-    >
-      {isLocked ? <Lock /> : <LockOpen />}
-    </button>
+- Import `PhotoStripPicker`
+- In the details step (line ~731, after the PlacesAutocomplete field), render:
+  ```
+  {autoPhotos.length > 0 && !isFlight && !isTransfer && (
+    <PhotoStripPicker photos={autoPhotos} onChange={setAutoPhotos} />
   )}
-</div>
-```
+  ```
+- The existing save logic (lines 516-542) already uploads `autoPhotos` to storage -- no change needed there, it will just upload whatever photos remain in the array after user selection
+
+---
+
+## 2. Merge "When" into "Details" (Single Scrollable Page)
+
+### Current flow
+- Step 1: Category picker (grid of emoji buttons)
+- Step 2: Details (name, website, location, etc.) with "Next: When?" button
+- Step 3: When (day/date, time, duration) with "Create Entry" button
+
+### New flow
+- Step 1: Category picker (unchanged)
+- Step 2: Details + When (single scrollable page)
+  - Top: Category badge, name field, photo strip, website, location
+  - Divider or subtle section header: "When"
+  - Day/date picker, time inputs, duration
+  - Footer: "Back" | "Add to Ideas" | "Create Entry"
+
+### Implementation
+
+**File: `src/components/timeline/EntryForm.tsx`**
+
+- Remove the `'when'` step entirely from the `Step` type -- change to `type Step = 'category' | 'details'`
+- Remove `handleDetailsNext` function (no longer needed)
+- In the `step === 'details'` block (lines 717-907):
+  - Keep all existing details fields
+  - After the location/website fields, add a subtle separator: `<div className="border-t border-border/50 pt-4 mt-2"><Label className="text-sm font-semibold text-muted-foreground">When</Label></div>`
+  - Paste in the "when" content (currently lines 910-1026): day/date picker, time inputs, duration
+  - Update the footer to show all three buttons: "Back" (to category), "Add to Ideas", "Create Entry"
+- Remove the `step === 'when'` block entirely (lines 909-1027)
+- The dialog already has `max-h-[90vh] overflow-y-auto` so scrolling works automatically
 
 ---
 
 ## File Summary
 
-| File | Changes |
-|------|---------|
-| `src/components/timeline/CalendarDay.tsx` | Move flight group map before gap section; fix gap endpoints to use checkin/checkout bounds; add external lock button for flight groups |
-| `src/components/timeline/FlightGroupCard.tsx` | Remove internal lock button; remove `canEdit` and `onToggleLock` props |
+| File | Action | Changes |
+|------|--------|---------|
+| `src/components/timeline/PhotoStripPicker.tsx` | **New** | Horizontal drag-to-reorder photo strip with delete and cover badge |
+| `src/components/timeline/EntryForm.tsx` | Edit | Add photo strip after name field; merge "when" step into "details" step; remove step 3 |
 
-No database changes. No new files.
+No database changes. No edge function changes.
+
+---
+
+## Technical Details
+
+### PhotoStripPicker component structure
+
+```text
+Props:
+  photos: string[]        -- ordered array of image URLs
+  onChange: (p: string[]) => void  -- called when order changes or photo removed
+
+State:
+  dragIndex: number | null  -- index being dragged
+
+Render:
+  <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+    {photos.map((url, i) => (
+      <div
+        key={url}
+        draggable
+        onDragStart={() => setDragIndex(i)}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={() => handleReorder(dragIndex, i)}
+        className="relative flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 cursor-grab
+                   {dragIndex === i ? 'opacity-50' : ''} 
+                   {i === 0 ? 'border-primary' : 'border-border'}"
+      >
+        <img src={url} className="w-full h-full object-cover" />
+        {i === 0 && <span className="absolute bottom-0 left-0 bg-primary text-white text-[9px] px-1.5 py-0.5 rounded-tr-md font-medium">Cover</span>}
+        <button onClick={() => removePhoto(i)} className="absolute top-0.5 right-0.5 bg-black/60 rounded-full p-0.5">
+          <X className="h-3 w-3 text-white" />
+        </button>
+      </div>
+    ))}
+  </div>
+
+handleReorder(from, to):
+  const copy = [...photos]
+  const [item] = copy.splice(from, 1)
+  copy.splice(to, 0, item)
+  onChange(copy)
+
+removePhoto(index):
+  onChange(photos.filter((_, i) => i !== index))
+```
+
+### Merged form layout
+
+```text
++----------------------------------+
+| [category badge] <- change       |
+|                                  |
+| Name *                           |
+| [PlacesAutocomplete input]       |
+|                                  |
+| [photo1] [photo2] [photo3] -->   |  <- horizontal scroll strip
+|  Cover                           |
+|                                  |
+| Website                          |
+| [input]                          |
+|                                  |
+| Location Name                    |
+| [input]                          |
+|                                  |
+| -------- When --------           |  <- subtle divider
+|                                  |
+| Day / Date                       |
+| [day picker or date input]       |
+|                                  |
+| Time         Suggested: 09:00... |
+| [Start]      [End]               |
+|                                  |
+| Duration (minutes)               |
+| [input]                          |
+|                                  |
+| [Back] [Add to Ideas] [Create]   |
++----------------------------------+
+```
 
