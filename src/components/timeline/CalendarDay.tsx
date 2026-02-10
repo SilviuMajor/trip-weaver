@@ -378,21 +378,49 @@ const CalendarDay = ({
               flights={dayFlights}
             />
 
-            {/* Between-entry gap buttons + dashed line */}
+            {/* Pre-compute flight groups (needed for gap calculations below) */}
             {(() => {
+              const flightGroupMap = new Map<string, { flight: EntryWithOptions; checkin?: EntryWithOptions; checkout?: EntryWithOptions }>();
+              const linkedEntryIds = new Set<string>();
+
+              sortedEntries.forEach(entry => {
+                const opt = entry.options[0];
+                if (opt?.category === 'flight') {
+                  const group: { flight: EntryWithOptions; checkin?: EntryWithOptions; checkout?: EntryWithOptions } = { flight: entry };
+                  sortedEntries.forEach(e => {
+                    if (e.linked_flight_id === entry.id) {
+                      linkedEntryIds.add(e.id);
+                      if (e.linked_type === 'checkin') group.checkin = e;
+                      else if (e.linked_type === 'checkout') group.checkout = e;
+                    }
+                  });
+                  flightGroupMap.set(entry.id, group);
+                }
+              });
+
+              /* ---------- Between-entry gap buttons + dashed line ---------- */
               const visibleEntries = sortedEntries.filter(e => {
                 const opt = e.options[0];
                 return opt && opt.category !== 'airport_processing' && !e.linked_flight_id;
               });
 
-              return visibleEntries.map((entry, idx) => {
+              const gapElements = visibleEntries.map((entry, idx) => {
                 if (idx >= visibleEntries.length - 1) return null;
                 const nextEntry = visibleEntries[idx + 1];
 
                 const aTzs = resolveEntryTz(entry, dayFlights, activeTz, tripTimezone);
                 const bTzs = resolveEntryTz(nextEntry, dayFlights, activeTz, tripTimezone);
-                const aEndHour = getHourInTimezone(entry.end_time, aTzs.endTz);
-                const bStartHour = getHourInTimezone(nextEntry.start_time, bTzs.startTz);
+
+                // Use flight group bounds for gap endpoints
+                const aGroup = flightGroupMap.get(entry.id);
+                const aEffectiveEndTime = aGroup?.checkout?.end_time ?? entry.end_time;
+                const aEffectiveEndTz = aGroup?.checkout ? (entry.options[0]?.arrival_tz || aTzs.endTz) : aTzs.endTz;
+                const aEndHour = getHourInTimezone(aEffectiveEndTime, aEffectiveEndTz);
+
+                const bGroup = flightGroupMap.get(nextEntry.id);
+                const bEffectiveStartTime = bGroup?.checkin?.start_time ?? nextEntry.start_time;
+                const bEffectiveStartTz = bGroup?.checkin ? (nextEntry.options[0]?.departure_tz || bTzs.startTz) : bTzs.startTz;
+                const bStartHour = getHourInTimezone(bEffectiveStartTime, bEffectiveStartTz);
                 const gapMin = Math.round((bStartHour - aEndHour) * 60);
 
                 if (gapMin <= 5) return null; // too small
@@ -437,11 +465,13 @@ const CalendarDay = ({
                   </div>
                 );
               });
+
+              return <>{gapElements}</>;
             })()}
 
-            {/* Flight group computation */}
+            {/* Entry cards */}
             {(() => {
-              // Build flight groups
+              // Build flight groups (same as above, needed for card rendering)
               const flightGroupMap = new Map<string, { flight: EntryWithOptions; checkin?: EntryWithOptions; checkout?: EntryWithOptions }>();
               const linkedEntryIds = new Set<string>();
 
@@ -599,31 +629,47 @@ const CalendarDay = ({
                           const coFrac = totalDuration > 0 ? checkoutDuration / totalDuration : 0.25;
 
                           return (
-                          <FlightGroupCard
-                            flightOption={primaryOption}
-                            flightEntry={entry}
-                            checkinEntry={flightGroup.checkin}
-                            checkoutEntry={flightGroup.checkout}
-                            checkinFraction={ciFrac}
-                            flightFraction={flFrac}
-                            checkoutFraction={coFrac}
-                            isPast={entryPast}
-                            isDragging={isDragged}
-                            isLocked={isLocked}
-                            canEdit={isEditor}
-                            onToggleLock={() => onToggleLock?.(entry.id, !!isLocked)}
-                            onClick={() => {
-                              if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
-                            }}
-                            onDragStart={canDrag ? (e) => {
-                              onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
-                            } : undefined}
-                            onTouchDragStart={canDrag ? (e) => {
-                              onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
-                            } : undefined}
-                            onTouchDragMove={onTouchMove}
-                            onTouchDragEnd={onTouchEnd}
-                          />
+                          <div className="relative h-full">
+                            <FlightGroupCard
+                              flightOption={primaryOption}
+                              flightEntry={entry}
+                              checkinEntry={flightGroup.checkin}
+                              checkoutEntry={flightGroup.checkout}
+                              checkinFraction={ciFrac}
+                              flightFraction={flFrac}
+                              checkoutFraction={coFrac}
+                              isPast={entryPast}
+                              isDragging={isDragged}
+                              isLocked={isLocked}
+                              onClick={() => {
+                                if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
+                              }}
+                              onDragStart={canDrag ? (e) => {
+                                onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                              } : undefined}
+                              onTouchDragStart={canDrag ? (e) => {
+                                onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                              } : undefined}
+                              onTouchDragMove={onTouchMove}
+                              onTouchDragEnd={onTouchEnd}
+                            />
+                            {/* Lock icon outside card */}
+                            {isEditor && onToggleLock && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onToggleLock(entry.id, !!isLocked);
+                                }}
+                                className="absolute -top-2 -right-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+                              >
+                                {isLocked ? (
+                                  <Lock className="h-3 w-3 text-amber-500" />
+                                ) : (
+                                  <LockOpen className="h-3 w-3 text-muted-foreground/50" />
+                                )}
+                              </button>
+                            )}
+                          </div>
                           );
                         })() : (
                           <div className="relative h-full">
