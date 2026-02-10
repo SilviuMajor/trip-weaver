@@ -51,6 +51,27 @@ interface CalendarDayProps {
   activeTz?: string;
   isEditor?: boolean;
   onToggleLock?: (entryId: string, currentLocked: boolean) => void;
+  headerHeight?: number;
+}
+
+/** Resolve the timezone(s) to use for positioning an entry on the grid */
+function resolveEntryTz(
+  entry: EntryWithOptions,
+  dayFlights: FlightTzInfo[],
+  activeTz: string | undefined,
+  tripTimezone: string
+): { startTz: string; endTz: string } {
+  const opt = entry.options[0];
+  if (opt?.category === 'flight' && opt.departure_tz && opt.arrival_tz) {
+    return { startTz: opt.departure_tz, endTz: opt.arrival_tz };
+  }
+  let tz = activeTz || tripTimezone;
+  if (dayFlights.length > 0 && dayFlights[0].flightEndUtc) {
+    const entryMs = new Date(entry.start_time).getTime();
+    const flightEndMs = new Date(dayFlights[0].flightEndUtc).getTime();
+    tz = entryMs >= flightEndMs ? dayFlights[0].destinationTz : dayFlights[0].originTz;
+  }
+  return { startTz: tz, endTz: tz };
 }
 
 function getHourInTimezone(isoString: string, tzName: string): number {
@@ -93,6 +114,7 @@ const CalendarDay = ({
   activeTz,
   isEditor,
   onToggleLock,
+  headerHeight,
 }: CalendarDayProps) => {
   const isUndated = !!dayLabel;
   const today = !isUndated && isToday(dayDate);
@@ -178,8 +200,9 @@ const CalendarDay = ({
 
   // Compute overlap layout
   const layoutEntries = sortedEntries.map(e => {
-    const s = (getHourInTimezone(e.start_time, tripTimezone) - startHour) * 60;
-    let en = (getHourInTimezone(e.end_time, tripTimezone) - startHour) * 60;
+    const { startTz, endTz } = resolveEntryTz(e, dayFlights, activeTz, tripTimezone);
+    const s = (getHourInTimezone(e.start_time, startTz) - startHour) * 60;
+    let en = (getHourInTimezone(e.end_time, endTz) - startHour) * 60;
     if (en <= s) en = s + 120;
     return { id: e.id, startMinutes: s, endMinutes: en };
   });
@@ -218,9 +241,10 @@ const CalendarDay = ({
       {/* Day header */}
       <div
         className={cn(
-          'sticky top-[49px] z-20 border-b border-border bg-background/90 px-4 py-1.5 backdrop-blur-md',
+          'sticky z-20 border-b border-border bg-background/90 px-4 py-1.5 backdrop-blur-md',
           today && 'border-primary/30 bg-primary/5'
         )}
+        style={{ top: headerHeight ?? 53 }}
         id={today ? 'today' : undefined}
       >
         <div className="mx-auto flex max-w-2xl items-center px-0">
