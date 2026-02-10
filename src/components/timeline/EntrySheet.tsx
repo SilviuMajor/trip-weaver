@@ -686,6 +686,7 @@ const EntrySheet = ({
         airport_checkin_hours: isFlight ? checkinHours : null,
         airport_checkout_min: isFlight ? checkoutMin : null,
         route_polyline: isTransfer ? (selectedPolyline || null) : null,
+        distance_km: isTransfer ? (transportResults.find(r => r.mode === transferMode)?.distance_km ?? null) : null,
       };
 
       let optionId: string | null = null;
@@ -983,6 +984,13 @@ const EntrySheet = ({
                       {/* Duration & distance */}
                       <div className="flex items-center gap-3">
                         <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-bold text-primary">{durationStr}</span>
+                        {(option as any).distance_km != null && (
+                          <span className="text-sm text-muted-foreground">
+                            {(option as any).distance_km < 1
+                              ? `${Math.round((option as any).distance_km * 1000)}m`
+                              : `${Number((option as any).distance_km).toFixed(1)}km`}
+                          </span>
+                        )}
                         {contingency > 0 && (
                           <span className="text-xs text-muted-foreground">+{contingency}m contingency</span>
                         )}

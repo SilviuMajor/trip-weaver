@@ -1,0 +1,1 @@
+ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS distance_km NUMERIC;

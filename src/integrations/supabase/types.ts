@@ -94,6 +94,7 @@ export type Database = {
           departure_location: string | null
           departure_terminal: string | null
           departure_tz: string | null
+          distance_km: number | null
           entry_id: string
           id: string
           latitude: number | null
@@ -116,6 +117,7 @@ export type Database = {
           departure_location?: string | null
           departure_terminal?: string | null
           departure_tz?: string | null
+          distance_km?: number | null
           entry_id: string
           id?: string
           latitude?: number | null
@@ -138,6 +140,7 @@ export type Database = {
           departure_location?: string | null
           departure_terminal?: string | null
           departure_tz?: string | null
+          distance_km?: number | null
           entry_id?: string
           id?: string
           latitude?: number | null
