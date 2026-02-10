@@ -1,59 +1,115 @@
 
 
-# Fix: Reposition "+" Buttons to Card Corners
+# Three Fixes: Member PIN Codes, Custom Categories in Settings, and Timezone-Aware Prefill
 
-## Problem
+## 1. Member PIN Codes
 
-The "+" buttons are currently placed in the gutter (left of cards, between time labels and the gradient line) using negative `left` offsets. The user wants them at the **top-left and bottom-left corners of each card**, so users can insert something before or after any event.
+**Goal**: Organizers can optionally set a PIN for any trip member. When that member taps their name on the User Select screen, they must enter the correct PIN before entering the trip.
 
-## Current Implementation
+### Database Change
 
-- A standalone "+" button before the first entry (lines 360-379) -- positioned in gutter with `left: -14/-20`
-- A standalone "+" button between/after entries (lines 614-684) -- also in gutter with gap-detection logic
+Add a `pin_hash` column to `trip_users`:
 
-Both are siblings of the card div, positioned absolutely within the grid container.
-
-## New Approach
-
-Move the "+" buttons **inside each card's container** so they are positioned relative to the card itself:
-
-- **Top-left corner**: Small "+" button at `top: -10px, left: -10px` (overlapping the card corner). Clicking inserts an entry before this one.
-- **Bottom-left corner**: Small "+" button at `bottom: -10px, left: -10px`. Clicking inserts an entry after this one.
-
-This eliminates the need for gap-detection logic and the separate "before first entry" button. Every card simply has two insertion points.
-
-The buttons will show on hover (using `group-hover` or `opacity-0 hover:opacity-100`) to keep the UI clean.
-
-## File: `src/components/timeline/CalendarDay.tsx`
-
-### Changes
-
-1. **Remove** the standalone "before first entry" + button block (lines 360-379)
-
-2. **Remove** the entire between/after + button block (lines 614-684)
-
-3. **Add two + buttons inside each card's inner container** (the `<div className="relative h-full">` at line 510). These will be:
-   - Top-left: absolutely positioned at `top: -10, left: -10`, triggers `onAddBetween` with a time 60 minutes before the entry start
-   - Bottom-left: absolutely positioned at `bottom: -10, left: -10`, triggers `onAddBetween` with the entry's end time
-   - Both use `z-20`, `opacity-0 group-hover:opacity-100` transition for clean appearance
-   - The parent card container (line 498) gets a `group` class for hover detection
-
-4. Add `group` class to the card wrapper div so the + buttons appear on hover
-
-### Visual Result
-
-```text
-  +------------------+
-  |+ (top-left)       |
-  |                   |
-  |   Card Content    |
-  |                   |
-  |+ (bottom-left)    |
-  +------------------+
+```sql
+ALTER TABLE public.trip_users ADD COLUMN pin_hash text;
 ```
 
-Both buttons are small (20x20px) dashed-border circles, matching the existing style but positioned on the card corners instead of the gutter.
+PINs will be stored as plain short codes (4-6 digits) since this is a lightweight access gate, not true authentication. The column is nullable -- members without a PIN enter freely.
 
-## No other files need changes
+### Trip Settings (`src/pages/TripSettings.tsx`)
 
-This is a purely positional change within `CalendarDay.tsx`. The `FlightGroupCard` and `EntryCard` components don't need modification -- the + buttons are rendered by the parent layout.
+- Add a PIN input field next to each member row (a small `Input` with `type="password"`, `maxLength={6}`, `placeholder="PIN"`)
+- When the organizer types a PIN and saves, update `trip_users.pin_hash` for that member
+- Show a small lock icon next to members that have a PIN set
+- Add a "Clear PIN" button to remove the PIN
+
+### User Select Screen (`src/pages/UserSelect.tsx`)
+
+- When a user taps a member name, check if that `trip_user` has a `pin_hash` value
+- If yes, show a small dialog/modal with a PIN input (4-6 digit numeric input)
+- Compare the entered value against `pin_hash`
+- If it matches, call `login()` and proceed
+- If no PIN is set, proceed as normal (current behavior)
+- Fetch the `pin_hash` column along with the member data (it's already fetched via `select('*')`)
+
+### Files to modify:
+- `src/pages/TripSettings.tsx` -- add PIN input per member
+- `src/pages/UserSelect.tsx` -- add PIN challenge dialog
+- `src/types/trip.ts` -- add `pin_hash?: string` to `TripUser`
+
+---
+
+## 2. Custom Categories in Trip Settings
+
+**Goal**: Allow adding custom categories to an existing trip from Trip Settings (currently only possible during trip creation wizard).
+
+### Trip Settings (`src/pages/TripSettings.tsx`)
+
+Add a new "Custom Categories" section (reusing the same UI pattern from `CategoryStep.tsx`):
+
+- Show existing custom categories from `trip.category_presets` as colored pills
+- Add an emoji input + name input + "Add" button (same as the wizard)
+- Remove button (X) on each custom category
+- On change, update `trips.category_presets` in the database
+
+This is purely a UI addition -- the database already supports `category_presets` as a JSONB column on the `trips` table.
+
+### Files to modify:
+- `src/pages/TripSettings.tsx` -- add categories section
+
+---
+
+## 3. Timezone-Aware Prefill for "+" Buttons
+
+**Root cause**: When clicking a "+" button on a card, the code does:
+```typescript
+// Top button (insert before):
+const prefillDate = addMinutes(new Date(entry.start_time), -60);
+onAddBetween(prefillDate.toISOString());
+
+// Bottom button (insert after):
+onAddBetween(entry.end_time);
+```
+
+Then in `EntryForm`, the prefill time is parsed with:
+```typescript
+const dt = new Date(prefillStartTime);
+setStartTime(format(dt, 'HH:mm'));
+```
+
+`format(dt, 'HH:mm')` uses the **browser's local timezone** (e.g., GMT), not the trip timezone. If the trip timezone is `Europe/Amsterdam` (CET, UTC+1), the displayed time is off by 1 hour.
+
+### Fix in `EntryForm.tsx`
+
+When prefilling start/end times, convert the UTC ISO string to the trip timezone using `utcToLocal()`:
+
+```typescript
+// Instead of:
+const dt = new Date(prefillStartTime);
+setStartTime(format(dt, 'HH:mm'));
+
+// Do:
+import { utcToLocal } from '@/lib/timezoneUtils';
+const { date: d, time: t } = utcToLocal(prefillStartTime, tripTimezone);
+setStartTime(t);
+if (!isUndated) setDate(d);
+```
+
+Apply the same fix for:
+- `prefillEndTime` parsing (line 157)
+- `applySmartDefaults` when using `prefillStartTime` (line 172)
+- Edit mode prefill (line 112) -- currently uses `format(startDt, 'HH:mm')` which is also browser-local
+
+### Files to modify:
+- `src/components/timeline/EntryForm.tsx` -- use `utcToLocal` for all time prefills
+
+---
+
+## Summary
+
+| Area | File(s) | Change |
+|------|---------|--------|
+| Member PINs | `TripSettings.tsx`, `UserSelect.tsx`, `trip.ts`, DB migration | Add `pin_hash` column, PIN input in settings, PIN challenge on login |
+| Custom Categories | `TripSettings.tsx` | Add category management section (emoji + name + color pills) |
+| Timezone Prefill | `EntryForm.tsx` | Use `utcToLocal(iso, tripTimezone)` instead of `format(new Date(iso), 'HH:mm')` |
+
