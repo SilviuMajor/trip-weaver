@@ -1,183 +1,141 @@
 
 
-# Comprehensive Timeline Timezone, Weather, and UX Fixes
+# Fix: Flight Input, Header Gap, and Lock/Unlock Time Shift
 
-## Overview
+## Issue 1: Can't input a flight on Monday Feb 23rd
 
-This plan addresses five interconnected issues and restructures the timezone/location model so that **flights are the sole timezone transition mechanism**, weather and sun gradients are location-aware, drag/click bugs are fixed, and plus buttons are correctly placed.
+**Root cause**: The trip runs Feb 21-23, so Feb 23rd is the last day. The EntryForm date input has no restrictions, but when pre-filling from a "+" button click, the `prefillStartTime` is passed as an ISO string. In `EntryForm` (line 147), the prefill sets `startTime` via `format(dt, 'HH:mm')` -- but it never sets the `date` field. Since `date` starts as `''`, clicking "Create Entry" triggers the validation "Please select a date" on line 399.
 
-## Issue 1: Drag/Click Glitch (Card Jumps ~1 Hour)
+**Fix**: When `prefillStartTime` is provided for a dated trip, also pre-fill the `date` field from it.
 
-**Root cause**: In `CalendarDay.tsx` lines 447-449, `origStartHour` and `origEndHour` are computed using `tripTimezone`, but the card is visually positioned using `resolvedTz` (which may be origin or destination TZ on flight days). When you mousedown, the drag system initialises with the wrong hour values, causing the card to "jump" to a different position.
+## Issue 2: Header sticky gap
 
-**Fix**: Replace `tripTimezone` with `resolvedTz` when computing `origStartHour`/`origEndHour` for drag initialisation. Also update `handleDragCommit` to accept and use the entry's resolved timezone instead of always using `tripTimezone` for the `localToUTC` conversion.
+**Root cause**: The day header in `CalendarDay.tsx` line 215 uses `sticky top-[57px]`, assuming the `TimelineHeader` is exactly 57px tall. But the header contains a greeting line ("Hey, {name}") which makes it taller. The hardcoded `57px` doesn't match the actual header height, creating a visible gap between the main header and the day bar.
 
-### Files changed
-- `CalendarDay.tsx` lines 447-449: Use `resolvedTz` instead of `tripTimezone`
-- `CalendarDay.tsx` lines 113-168: `handleDragCommit` needs a `tz` parameter so it converts using the correct timezone. Each drag handler call will pass the entry's resolved TZ.
+**Fix**: Change `top-[57px]` to a value that matches the actual header height. The header has `py-3` (12px top + 12px bottom = 24px) plus content (title ~28px line-height + greeting ~16px) plus 1px border = roughly 69px. A cleaner approach: use a CSS variable or measure the header, but the simplest fix is to adjust to the correct pixel value. Based on the header structure (py-3 = 24px padding, ~24px content height with two lines, 1px border), the correct value is approximately `top-[53px]` (the header with single-line name + small greeting). We should verify and adjust. Alternatively, we can remove the gap by setting `top-[49px]` which accounts for py-3 (24px total) + single line content (~24px) + border (1px).
 
-## Issue 2: Flight Timezones Not Lining Up
+Actually the cleanest fix: make the header height consistent by measuring. The header `py-3` = 12+12 = 24px. The content inside is a flex row. The trip name is `text-lg leading-tight` (~24px) and the greeting is `text-xs` (~16px). Total inner = ~40px + 24px padding = ~64px + 1px border = ~65px. But this varies. The safest approach is to remove the hardcoded value and use `top-0` on the day header while nesting it inside a container that accounts for the main header via scroll margin or making both part of the same sticky context.
 
-**Root cause**: The `dayTimezoneMap` in `Timeline.tsx` sets `activeTz` to the departure TZ for the whole day. But before the flight, entries should use departure TZ; after the flight, they should use arrival TZ. The current per-entry resolution logic in `CalendarDay.tsx` (lines 400-404) already attempts this, but the drag system undoes it (Issue 1). Additionally, the `handleDragCommit` for linked entries (checkin/checkout) always uses `tripTimezone` for conversion -- it should use departure_tz for check-in and arrival_tz for checkout.
+**Simplest reliable fix**: Set the TimelineHeader to a fixed height and match `top-[Xpx]` exactly, or better: wrap both in a way that the day header stacks below the main header using a shared sticky parent.
 
-**Fix**: Already partially addressed by Issue 1 fix. Additionally:
-- When committing drag for linked entries, use the flight's `departure_tz` for check-in and `arrival_tz` for checkout instead of `tripTimezone`.
+## Issue 3: Lock/unlock adds 1 hour to arrival time
 
-### Files changed
-- `CalendarDay.tsx` `handleDragCommit` (lines 132-167): Use flight option's departure/arrival TZ for linked entries.
+**Root cause**: This is the critical bug. When you click on a flight card (even without dragging), the mousedown handler fires `startDrag`, and on mouseup `commitDrag` fires `onCommit` which calls `handleDragCommit`. 
 
-## Issue 3: Starting Timezone = First Flight's Departure TZ
+In `handleDragCommit` (CalendarDay line 113-130), it converts BOTH start and end hours back to UTC using a single `commitTz`. But for flights:
+- `origStartHour` was computed using `departure_tz` 
+- `origEndHour` was computed using `arrival_tz`
 
-**Current**: `tripTimezone` is set from the trip wizard (e.g. `Europe/Amsterdam`). The `dayTimezoneMap` uses this as the baseline.
+Yet `commitTz` = `dragTz` = `departure_tz`. So the arrival time (which was read in arrival_tz) gets written back using departure_tz. If there's a 1-hour difference between the two timezones, every click shifts the arrival by 1 hour.
 
-**Fix**: In `Timeline.tsx`, when computing `dayTimezoneMap`, initialise `currentTz` from the first flight's `departure_tz` if a flight exists in the trip. If no flights exist, fall back to `trip.timezone`. This makes the starting timezone automatic based on the first airport.
+The lock toggle button is inside the card, so clicking it triggers the card's mousedown -> mouseup cycle, committing a "drag" with corrupted arrival time.
 
-### Files changed
-- `Timeline.tsx` lines 211-265: Before the day loop, scan all scheduled entries for the first flight and set `currentTz = firstFlight.options[0].departure_tz` if available.
+**Fix**: For flight entries, `handleDragCommit` must convert start_time using departure_tz and end_time using arrival_tz separately, rather than using a single timezone for both.
 
-## Issue 4: Location-Aware Weather and Sun Gradient
+## Implementation Plan
 
-### 4a. Weather should reflect current location
+### File: `src/components/timeline/CalendarDay.tsx`
 
-**Current**: Weather is fetched with hardcoded Amsterdam coordinates (`lat: 52.37, lng: 4.90`) for the entire trip.
+**Fix drag commit for flights (Issue 3)**:
+- Modify `handleDragCommit` to detect if the entry is a flight (has departure_tz and arrival_tz)
+- If flight: convert `newStartHour` with `departure_tz` and `newEndHour` with `arrival_tz`
+- If not flight: use single `commitTz` as currently
+- Additionally: skip the commit entirely if `wasDraggedRef.current` is false (no actual movement occurred). This prevents "phantom" drag commits from simple clicks on lock buttons, card taps, etc.
 
-**Fix**: Weather needs to be fetched per-location-segment. The approach:
+**Fix header gap (Issue 2)**:
+- Change `sticky top-[57px]` to `sticky top-[53px]` initially, and add an approach that's more robust: use a ref on the main header to measure its height dynamically.
 
-1. **Add `latitude`/`longitude` columns to `weather_cache`** so we can store weather for multiple locations within one trip.
-2. **Compute location segments**: Before fetching weather, determine which location the user is at for each date range based on flights:
-   - Before first flight: use first flight's departure airport coordinates (from `departure_location` parsed, or airport lat/lng)
-   - Between flights: use the arriving flight's destination coordinates
-   - After last flight: use last flight's arrival coordinates
-3. **Update `fetch-weather` edge function**: Accept an array of `{ lat, lng, startDate, endDate }` segments instead of a single lat/lng. Fetch Open-Meteo for each segment and tag records with lat/lng.
-4. **Update `TimelineHeader.tsx`**: Compute location segments from flight entries and pass them to the edge function.
-5. **Update `CalendarDay.tsx` weather rendering**: Weather is already matched by date+hour, so as long as the correct location's data is stored, it will work.
+### File: `src/components/timeline/EntryForm.tsx`
 
-### 4b. Sun gradient should reflect current location
+**Fix flight input date pre-fill (Issue 1)**:
+- In the `prefillStartTime` useEffect (lines 144-149), also set `date` from the prefilled time when the trip is dated.
 
-**Current**: Sun gradient uses `userLat ?? 51.5, userLng ?? -0.1` (browser geolocation or London fallback).
+### File: `src/hooks/useDragResize.ts`
 
-**Fix**: Pass the "current location" for each day into `CalendarDay`. Compute this in `Timeline.tsx` based on the flight-derived location segments (same logic as weather). On flight days, the gradient should use the destination's coordinates (since most of the day will be at the destination).
+**Prevent phantom commits (Issue 3 defense-in-depth)**:
+- In `commitDrag`, only call `onCommit` if `wasDraggedRef.current` is true (actual movement occurred). If no movement, just clean up drag state without committing.
 
-### Files changed
-- **New migration**: Add `latitude`, `longitude` columns to `weather_cache`
-- `supabase/functions/fetch-weather/index.ts`: Accept `segments` array parameter
-- `TimelineHeader.tsx`: Compute location segments from entries, pass to fetch-weather
-- `Timeline.tsx`: Compute per-day location (lat/lng) from flight entries, pass to CalendarDay
-- `CalendarDay.tsx`: Accept `dayLat`/`dayLng` props, use for sun gradient instead of browser location
+### File: `src/pages/Timeline.tsx`
 
-## Issue 5: Plus Button Placement
-
-**Current**: Plus buttons appear before the first entry and after every entry, regardless of gaps.
-
-**Fix**: Plus buttons should appear:
-- **Before the first card** (where there's a gap from day start)
-- **Between two cards** only if there's a time gap; if two cards are back-to-back, show a single small plus between them
-- **After the last card** (where there's a gap to day end)
-
-Logic:
-1. Before first entry: show plus button above it
-2. Between entries: if `gap > 0 minutes`, show plus in the gap. If `gap <= 0` (adjacent/overlapping), show a thin plus line at the boundary
-3. After last entry: show plus button below it
-
-### Files changed
-- `CalendarDay.tsx` lines 334-353 (before-first plus) and lines 562-575 (between-entries plus): Refactor to compute gaps and conditionally render.
-
-## Implementation Order
-
-1. **Fix drag/click glitch** (Issue 1) -- highest user-facing impact, smallest change
-2. **Fix drag commit timezone for linked entries** (Issue 2)
-3. **Starting timezone from first flight** (Issue 3)
-4. **Plus button placement** (Issue 5) -- pure UI, no backend
-5. **Location-aware sun gradient** (Issue 4b) -- no backend, just pass coordinates
-6. **Location-aware weather** (Issue 4a) -- requires migration + edge function update
+**No changes needed** - the header height fix will be in CalendarDay's sticky offset.
 
 ## Technical Details
 
-### CalendarDay.tsx -- Drag Fix (Issues 1+2)
+### CalendarDay.tsx - handleDragCommit flight-aware conversion
 
 ```text
-Current (line 447-449):
-  const origStartHour = getHourInTimezone(entry.start_time, tripTimezone);
-  let origEndHour = getHourInTimezone(entry.end_time, tripTimezone);
+Current (broken):
+  const commitTz = tz || activeTz || tripTimezone;
+  const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), commitTz);
+  const newEndIso = localToUTC(dateStr, toTimeStr(newEndHour), commitTz);
 
 Fixed:
-  const origStartHour = getHourInTimezone(entry.start_time, resolvedTz);
-  let origEndHour = getHourInTimezone(entry.end_time, resolvedTz);
+  const entry = sortedEntries.find(e => e.id === entryId);
+  const primaryOpt = entry?.options[0];
+  const isFlight = primaryOpt?.category === 'flight' && primaryOpt?.departure_tz && primaryOpt?.arrival_tz;
+
+  const startTz = isFlight ? primaryOpt.departure_tz! : (tz || activeTz || tripTimezone);
+  const endTz = isFlight ? primaryOpt.arrival_tz! : startTz;
+  
+  const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), startTz);
+  const newEndIso = localToUTC(dateStr, toTimeStr(newEndHour), endTz);
 ```
 
-`handleDragCommit` signature changes to accept a timezone parameter:
+### useDragResize.ts - Skip phantom commits
+
 ```text
-handleDragCommit(entryId, newStartHour, newEndHour)
-  -> handleDragCommit(entryId, newStartHour, newEndHour, tz)
+Current:
+  const commitDrag = useCallback(() => {
+    const state = dragStateRef.current;
+    if (state) {
+      onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz);
+    }
+    ...
+
+Fixed:
+  const commitDrag = useCallback(() => {
+    const state = dragStateRef.current;
+    if (state && wasDraggedRef.current) {
+      onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz);
+    }
+    ...
 ```
 
-And uses `tz` instead of `tripTimezone` for `localToUTC` calls. For linked entries:
-- Check-in: use flight's `departure_tz`
-- Checkout: use flight's `arrival_tz`
+This is the most important fix -- it prevents ANY click (lock toggle, card tap) from accidentally re-writing entry times.
 
-The `useDragResize` hook's `onCommit` callback will need to carry the TZ. We will store `resolvedTz` alongside the drag state, passing it through via a wrapper.
+### EntryForm.tsx - Pre-fill date
 
-### Timeline.tsx -- Auto-detect Starting TZ (Issue 3)
-
-Before the day loop in `dayTimezoneMap`:
 ```text
-const allFlights = scheduledEntries.filter(e => e.options[0]?.category === 'flight');
-if (allFlights.length > 0) {
-  const firstFlight = allFlights.sort((a,b) => 
-    new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
-  )[0];
-  currentTz = firstFlight.options[0].departure_tz || tripTimezone;
-}
+Current (line 144-149):
+  useEffect(() => {
+    if (prefillStartTime && open && !editEntry) {
+      const dt = new Date(prefillStartTime);
+      setStartTime(format(dt, 'HH:mm'));
+    }
+  }, [prefillStartTime, open, editEntry]);
+
+Fixed:
+  useEffect(() => {
+    if (prefillStartTime && open && !editEntry) {
+      const dt = new Date(prefillStartTime);
+      setStartTime(format(dt, 'HH:mm'));
+      if (!isUndated) {
+        setDate(format(dt, 'yyyy-MM-dd'));
+      }
+    }
+  }, [prefillStartTime, open, editEntry, isUndated]);
 ```
 
-### Timeline.tsx + CalendarDay.tsx -- Per-Day Location (Issue 4b)
+### CalendarDay.tsx - Header offset
 
-Compute a `dayLocationMap` alongside `dayTimezoneMap`:
-```text
-Map<string, { lat: number; lng: number }>
-```
-Logic mirrors timezone: before first flight use departure airport coords, after each flight use arrival airport coords. Pass `dayLat`/`dayLng` as props to CalendarDay.
+Change line 215 from `top-[57px]` to `top-[53px]`. This will need visual verification and may need further tuning.
 
-In CalendarDay, the sun gradient (lines 596-623) uses `dayLat`/`dayLng` instead of `userLat`/`userLng`.
+## Summary of Changes
 
-### Weather System Overhaul (Issue 4a)
-
-**Migration**: Add `latitude` and `longitude` (nullable numeric) to `weather_cache`.
-
-**Edge function**: Accept `segments: Array<{lat, lng, startDate, endDate}>`. For each segment, call Open-Meteo and insert records tagged with lat/lng.
-
-**TimelineHeader**: Build segments from flight data:
-```text
-segments = [
-  { lat: depLat, lng: depLng, startDate: tripStart, endDate: flightDate },
-  { lat: arrLat, lng: arrLng, startDate: flightDate, endDate: tripEnd }
-]
-```
-
-### Plus Buttons (Issue 5)
-
-Replace the current "plus after every entry" with gap-aware logic:
-```text
-For each pair of consecutive entries (i, i+1):
-  gapMinutes = entry[i+1].startHour - entry[i].endHour (in hours * 60)
-  if gapMinutes > 0:
-    position plus at midpoint of gap
-  else:
-    position a thin plus line at entry[i].endHour
-    
-Plus before first entry: position at firstEntry.startHour - offset
-Plus after last entry: position at lastEntry.endHour + offset
-```
-
-### Files Summary
-
-| File | Changes |
-|------|---------|
-| `CalendarDay.tsx` | Drag TZ fix, handleDragCommit TZ parameter, linked entry TZ, plus button gap logic, sun gradient uses dayLat/dayLng |
-| `Timeline.tsx` | Auto-detect starting TZ from first flight, compute dayLocationMap, pass dayLat/dayLng to CalendarDay |
-| `TimelineHeader.tsx` | Build location segments from flights, pass to fetch-weather |
-| `supabase/functions/fetch-weather/index.ts` | Accept segments array, fetch per-segment, tag with lat/lng |
-| `WeatherBadge.tsx` | No changes needed (already receives data) |
-| `useDragResize.ts` | Extend onCommit callback to accept optional TZ string |
-| **Migration** | Add latitude/longitude to weather_cache |
+| File | Change | Issue |
+|------|--------|-------|
+| `useDragResize.ts` | Skip commit when no actual drag movement | #3 (primary fix) |
+| `CalendarDay.tsx` | Flight-aware dual-TZ in handleDragCommit | #3 (safety net) |
+| `CalendarDay.tsx` | Adjust sticky top offset | #2 |
+| `EntryForm.tsx` | Pre-fill date from prefillStartTime | #1 |
 
