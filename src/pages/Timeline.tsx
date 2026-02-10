@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
 import { getDateInTimezone } from '@/lib/timezoneUtils';
-import { ArrowDown, ZoomIn, ZoomOut } from 'lucide-react';
+import { ArrowDown, LayoutList, ZoomIn, ZoomOut } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -17,7 +17,7 @@ import TimelineHeader from '@/components/timeline/TimelineHeader';
 import CalendarDay from '@/components/timeline/CalendarDay';
 import EntryOverlay from '@/components/timeline/EntryOverlay';
 import EntryForm from '@/components/timeline/EntryForm';
-import IdeasPanel from '@/components/timeline/IdeasPanel';
+import CategorySidebar from '@/components/timeline/CategorySidebar';
 import ConflictResolver from '@/components/timeline/ConflictResolver';
 import type { Trip, Entry, EntryOption, EntryWithOptions, TravelSegment, WeatherData } from '@/types/trip';
 import type { ConflictInfo, Recommendation } from '@/lib/conflictEngine';
@@ -58,9 +58,10 @@ const Timeline = () => {
   const [editOption, setEditOption] = useState<EntryOption | null>(null);
   const [prefillStartTime, setPrefillStartTime] = useState<string | undefined>();
   const [prefillEndTime, setPrefillEndTime] = useState<string | undefined>();
+  const [prefillCategory, setPrefillCategory] = useState<string | undefined>();
 
-  // Ideas panel state
-  const [ideasPanelOpen, setIdeasPanelOpen] = useState(false);
+  // Category sidebar state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Conflict resolution state
   const [conflictOpen, setConflictOpen] = useState(false);
@@ -494,10 +495,72 @@ const Timeline = () => {
     await fetchData();
   };
 
-  // Handle drag start from ideas panel
-  const handleIdeaDragStart = (e: React.DragEvent, entry: EntryWithOptions) => {
+  // Handle drag start from sidebar
+  const handleSidebarDragStart = (e: React.DragEvent, entry: EntryWithOptions) => {
     e.dataTransfer.setData('text/plain', entry.id);
     e.dataTransfer.effectAllowed = 'move';
+  };
+
+  // Handle duplicate entry
+  const handleDuplicate = async (entry: EntryWithOptions) => {
+    try {
+      // 1. Clone entry row
+      const { data: newEntry, error: entryErr } = await supabase
+        .from('entries')
+        .insert({
+          trip_id: entry.trip_id,
+          start_time: entry.start_time,
+          end_time: entry.end_time,
+          is_scheduled: false,
+          scheduled_day: entry.scheduled_day,
+        } as any)
+        .select('id')
+        .single();
+      if (entryErr || !newEntry) throw entryErr;
+
+      // 2. Clone each option + its images
+      for (const opt of entry.options) {
+        const { data: newOpt, error: optErr } = await supabase
+          .from('entry_options')
+          .insert({
+            entry_id: newEntry.id,
+            name: opt.name,
+            website: opt.website,
+            category: opt.category,
+            category_color: opt.category_color,
+            location_name: opt.location_name,
+            latitude: opt.latitude,
+            longitude: opt.longitude,
+            departure_location: opt.departure_location,
+            arrival_location: opt.arrival_location,
+            departure_tz: opt.departure_tz,
+            arrival_tz: opt.arrival_tz,
+            departure_terminal: opt.departure_terminal,
+            arrival_terminal: opt.arrival_terminal,
+            airport_checkin_hours: opt.airport_checkin_hours,
+            airport_checkout_min: opt.airport_checkout_min,
+          } as any)
+          .select('id')
+          .single();
+        if (optErr || !newOpt) throw optErr;
+
+        // Clone images
+        if (opt.images && opt.images.length > 0) {
+          await supabase.from('option_images').insert(
+            opt.images.map(img => ({
+              option_id: newOpt.id,
+              image_url: img.image_url,
+              sort_order: img.sort_order,
+            }))
+          );
+        }
+      }
+
+      toast({ title: 'Entry duplicated ✨' });
+      await fetchData();
+    } catch (err: any) {
+      toast({ title: 'Failed to duplicate', description: err?.message, variant: 'destructive' });
+    }
   };
 
   const handleToggleLock = async (entryId: string, currentLocked: boolean) => {
@@ -524,10 +587,11 @@ const Timeline = () => {
         onAddEntry={() => {
           setPrefillStartTime(undefined);
           setPrefillEndTime(undefined);
+          setPrefillCategory(undefined);
           setEntryFormOpen(true);
         }}
         onDataRefresh={fetchData}
-        onToggleIdeas={() => setIdeasPanelOpen(prev => !prev)}
+        onToggleIdeas={() => setSidebarOpen(prev => !prev)}
         ideasCount={unscheduledEntries.length}
         scheduledEntries={scheduledEntries}
       />
@@ -591,21 +655,23 @@ const Timeline = () => {
 
             {/* Desktop sidebar */}
             {!isMobile && (
-              <IdeasPanel
-                open={ideasPanelOpen}
-                onOpenChange={setIdeasPanelOpen}
-                entries={unscheduledEntries}
-                scheduledEntries={scheduledEntries}
-                onDragStart={handleIdeaDragStart}
+              <CategorySidebar
+                open={sidebarOpen}
+                onOpenChange={setSidebarOpen}
+                entries={entries}
+                trip={trip}
+                onDragStart={handleSidebarDragStart}
                 onCardTap={(entry) => {
                   const opt = entry.options[0];
                   if (opt) handleCardTap(entry, opt);
                 }}
-                onAddIdea={() => {
+                onAddEntry={(catId) => {
                   setPrefillStartTime(undefined);
                   setPrefillEndTime(undefined);
+                  setPrefillCategory(catId);
                   setEntryFormOpen(true);
                 }}
+                onDuplicate={handleDuplicate}
               />
             )}
           </div>
@@ -632,14 +698,14 @@ const Timeline = () => {
             )}
           </div>
 
-          {/* Mobile FAB for Ideas */}
+          {/* Mobile FAB for sidebar */}
           {isMobile && (
             <>
               <button
-                onClick={() => setIdeasPanelOpen(prev => !prev)}
+                onClick={() => setSidebarOpen(prev => !prev)}
                 className="fixed bottom-20 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-primary shadow-lg transition-transform hover:scale-105 active:scale-95"
               >
-                <span className="text-xl">💡</span>
+                <LayoutList className="h-5 w-5 text-primary-foreground" />
                 {unscheduledEntries.length > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
                     {unscheduledEntries.length}
@@ -647,21 +713,23 @@ const Timeline = () => {
                 )}
               </button>
 
-              <IdeasPanel
-                open={ideasPanelOpen}
-                onOpenChange={setIdeasPanelOpen}
-                entries={unscheduledEntries}
-                scheduledEntries={scheduledEntries}
-                onDragStart={handleIdeaDragStart}
+              <CategorySidebar
+                open={sidebarOpen}
+                onOpenChange={setSidebarOpen}
+                entries={entries}
+                trip={trip}
+                onDragStart={handleSidebarDragStart}
                 onCardTap={(entry) => {
                   const opt = entry.options[0];
                   if (opt) handleCardTap(entry, opt);
                 }}
-                onAddIdea={() => {
+                onAddEntry={(catId) => {
                   setPrefillStartTime(undefined);
                   setPrefillEndTime(undefined);
+                  setPrefillCategory(catId);
                   setEntryFormOpen(true);
                 }}
+                onDuplicate={handleDuplicate}
               />
             </>
           )}
@@ -696,6 +764,7 @@ const Timeline = () => {
                 setEditOption(null);
                 setPrefillStartTime(undefined);
                 setPrefillEndTime(undefined);
+                setPrefillCategory(undefined);
               }
             }}
             tripId={trip.id}
@@ -705,6 +774,7 @@ const Timeline = () => {
             editOption={editOption}
             prefillStartTime={prefillStartTime}
             prefillEndTime={prefillEndTime}
+            prefillCategory={prefillCategory}
           />
 
           <ConflictResolver
