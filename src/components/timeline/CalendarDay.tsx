@@ -51,7 +51,7 @@ interface CalendarDayProps {
   activeTz?: string;
   isEditor?: boolean;
   onToggleLock?: (entryId: string, currentLocked: boolean) => void;
-  headerHeight?: number;
+  
 }
 
 /** Resolve the timezone(s) to use for positioning an entry on the grid */
@@ -114,7 +114,6 @@ const CalendarDay = ({
   activeTz,
   isEditor,
   onToggleLock,
-  headerHeight,
 }: CalendarDayProps) => {
   const isUndated = !!dayLabel;
   const today = !isUndated && isToday(dayDate);
@@ -244,7 +243,7 @@ const CalendarDay = ({
           'sticky z-20 border-b border-border bg-background/90 px-4 py-1.5 backdrop-blur-md',
           today && 'border-primary/30 bg-primary/5'
         )}
-        style={{ top: headerHeight ?? 53 }}
+        style={{ top: 0 }}
         id={today ? 'today' : undefined}
       >
         <div className="mx-auto flex max-w-2xl items-center px-0">
@@ -366,8 +365,8 @@ const CalendarDay = ({
               const prefillDate = addMinutes(new Date(firstEntry.start_time), -60);
               return (
                 <div
-                  className="absolute left-0 z-[15] flex w-10 items-center justify-center"
-                  style={{ top: Math.max(0, firstTop - 14) }}
+                  className="absolute z-[15] flex w-10 items-center justify-center"
+                  style={{ top: Math.max(0, firstTop - 14), left: dayFlights.length > 0 ? -20 : -14 }}
                 >
                   <button
                     onClick={() => onAddBetween(prefillDate.toISOString())}
@@ -623,8 +622,8 @@ const CalendarDay = ({
                         // After last entry
                         return (
                           <div
-                            className="absolute left-0 z-[15] flex w-10 items-center justify-center"
-                            style={{ top: top + height + 8 }}
+                            className="absolute z-[15] flex w-10 items-center justify-center"
+                            style={{ top: top + height + 8, left: dayFlights.length > 0 ? -20 : -14 }}
                           >
                             <button
                               onClick={() => onAddBetween(entry.end_time)}
@@ -655,8 +654,8 @@ const CalendarDay = ({
                         const midTop = top + height + (gapHours * PIXELS_PER_HOUR / 2) - 10;
                         return (
                           <div
-                            className="absolute left-0 z-[15] flex w-10 items-center justify-center"
-                            style={{ top: midTop }}
+                            className="absolute z-[15] flex w-10 items-center justify-center"
+                            style={{ top: midTop, left: dayFlights.length > 0 ? -20 : -14 }}
                           >
                             <button
                               onClick={() => onAddBetween(entry.end_time)}
@@ -670,8 +669,8 @@ const CalendarDay = ({
                         // Back-to-back — thin plus line
                         return (
                           <div
-                            className="absolute left-0 z-[15] flex w-10 items-center justify-center"
-                            style={{ top: top + height - 2 }}
+                            className="absolute z-[15] flex w-10 items-center justify-center"
+                            style={{ top: top + height - 2, left: dayFlights.length > 0 ? -20 : -14 }}
                           >
                             <button
                               onClick={() => onAddBetween(entry.end_time)}
