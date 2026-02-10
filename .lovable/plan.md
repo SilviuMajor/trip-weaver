@@ -1,180 +1,194 @@
 
 
-# Implement Unified EntrySheet (Merge Create + View)
+# Transport System Upgrade: Smart Gaps, Route Maps, Contingency Buffers
 
-## What's Missing
+## Overview
 
-The plan to merge `EntryForm` (creation/editing Dialog) and `EntryOverlay` (read-only view Sheet) into a single unified component was approved but never implemented. Currently:
+Three changes to the transport creation and display flow:
 
-- **Clicking a card** opens `EntryOverlay` (a bottom Sheet) showing read-only details
-- **Clicking "Edit"** inside the overlay closes it, then opens `EntryForm` (a centered Dialog)
-- These are two completely separate 350+ line components with duplicated logic
+1. **Clean up transport form**: Remove website and date fields for transport entries; the transport appears at the gap where it was clicked
+2. **Smart gap handling**: Always round transport duration up to nearest 5 minutes for the calendar block, show real duration in details. When transport exceeds the gap, trigger the existing Conflict Resolver with smart suggestions
+3. **Route map previews**: Show a static route map (from the polyline data) in the creation dialog, the view overlay, and a mini version on the timeline card
 
-## What We're Building
+---
 
-A single `EntrySheet.tsx` component in a **centered Dialog** that handles both viewing and creating. When viewing an existing entry, editors can **inline-edit individual fields** (click a field to edit it in-place).
+## 1. Clean Up Transport Form
 
-## Behavior
+**In `EntrySheet.tsx` (create mode, transfer section):**
+- Remove the "Website" field when `isTransfer` is true
+- Remove the "Date" field when `transportContext` is provided (the date is inherited from the gap position)
+- The "Day" selector is also hidden when transport context exists (it's implicit from the gap)
 
-### Creating a new entry
-- Step 1: Category picker grid (unchanged from current EntryForm)
-- Step 2: Centered dialog with all fields editable (name, website, location, photo strip, when section) -- identical to current EntryForm step 2
+---
 
-### Viewing an existing entry (card click)
-- Opens a centered Dialog (not bottom Sheet) showing the entry details
-- Non-editors see everything read-only
-- Editors see each field as display text; clicking a field makes just that field editable (input replaces text). Enter/blur saves immediately to the database
-- Map, images, votes, distance, lock/delete/move-to-ideas buttons all present
-- ImageUploader available for editors
+## 2. Smart Gap Handling with Contingency Buffer
 
-### What's preserved from EntryOverlay
-- Category badge with color
-- Flight departure/arrival layout with terminals and timezone abbreviations
-- Time display
-- Distance calculation
-- Website link
-- Map preview
-- Vote button
-- Image gallery + uploader
-- Lock/unlock toggle
-- Move to ideas
-- Delete with confirmation
+### Rounding Logic
 
-### What's preserved from EntryForm
-- Category picker grid (step 1)
-- PlacesAutocomplete with auto-fill
-- PhotoStripPicker
-- Flight-specific: airport pickers, timezone, terminals, checkin/checkout, airport processing entries
-- Transfer-specific: from/to, inline route comparison (transport gap flow), manual mode picker
-- Day/date picker, time inputs, duration
-- Save as idea flow
-- Return flight prompt
-- Auto-detect trip dates from flights
-- Flight booking upload
-- Transport context auto-fill
+When a transport mode is selected (or auto-selected):
+- **Real duration** (e.g., 23 min) is stored and shown in the card details and view overlay
+- **Block duration** = real duration rounded UP to the nearest 5 minutes (e.g., 23 min becomes 25 min)
+- The calendar card occupies the block duration's time span
+- The difference (2 min) is labeled as "contingency" in the card subtitle
 
-## File Changes
+### How It Works
 
-| File | Action | Description |
-|------|--------|-------------|
-| `src/components/timeline/EntrySheet.tsx` | **Create** | Unified component (~800 lines) combining all EntryForm + EntryOverlay functionality. Uses centered Dialog. Supports `mode: 'create' | 'view'`. View mode has inline per-field editing for editors. |
-| `src/components/timeline/EntryOverlay.tsx` | **Delete** | Fully replaced by EntrySheet |
-| `src/components/timeline/EntryForm.tsx` | **Delete** | Fully replaced by EntrySheet |
-| `src/pages/Timeline.tsx` | **Edit** | Replace dual state management (overlayEntry/overlayOpen + entryFormOpen/editEntry) with unified state: `sheetMode`, `sheetEntry`, `sheetOption`, `sheetOpen`. Card clicks set mode='view'. Add buttons set mode='create'. Pass all necessary props to single EntrySheet. |
+When user clicks a transport gap button:
+1. Routes are fetched (existing behavior)
+2. User selects a mode (or fastest is auto-selected)
+3. Calculate: `blockDuration = Math.ceil(realDuration / 5) * 5`
+4. Calculate: `gapMinutes` (time between the two adjacent entries)
+5. Compare `blockDuration` vs `gapMinutes`:
 
-No database changes. No edge function changes.
+**If blockDuration <= gapMinutes (fits in gap):**
+- Transport card is created with `start_time = previousEntry.end_time` and `end_time = start + blockDuration`
+- Remaining gap after transport = `gapMinutes - blockDuration`
+- If remaining gap > 0, this becomes a new smaller gap on the timeline (no auto-snapping -- the contingency buffer is already built into the block duration)
+
+**If blockDuration > gapMinutes (doesn't fit):**
+- Trigger the existing Conflict Resolver (`analyzeConflict` + `generateRecommendations`)
+- The conflict resolver already generates suggestions like "Push next event later by Xm", "Shorten previous event by Xm", etc.
+- User picks a resolution or chooses "figure it out later" (places with red conflict marker)
+
+### Implementation
+
+**`EntrySheet.tsx`:**
+- New state: `gapMinutes: number | null` (passed from Timeline via new prop)
+- When `transportContext` is provided, also receive `gapMinutes`
+- On mode selection, compute `blockDuration` and compare with `gapMinutes`
+- If overflow detected: show inline warning banner with overflow amount, and a "Resolve" button that calls back to Timeline to trigger Conflict Resolver
+- The `handleSave` function uses `blockDuration` (rounded) for the entry's time span on the calendar
+
+**`Timeline.tsx`:**
+- In `handleAddTransport`, calculate and pass `gapMinutes` to the transport context
+- New prop on `EntrySheet`: `transportContext.gapMinutes`
+- New callback prop: `onTransportConflict` that opens ConflictResolver when transport overflows
+
+**Entry card display:**
+- Transport cards show the real duration (e.g., "23 min transit") in the details
+- The card physically occupies the rounded block time (25 min)
+- A small "+2m buffer" label appears in muted text
+
+---
+
+## 3. Route Map Previews
+
+### Data Flow
+
+The `google-directions` edge function already returns `polyline` (encoded polyline) for single-mode requests. The multi-mode response currently drops it. We need to:
+
+1. **Update `google-directions` edge function**: Include `polyline` in multi-mode results
+2. **Store polyline**: Save the selected route's polyline when creating the transport entry (new column or stored in option metadata)
+3. **Render static map**: Use Google Static Maps API or an open-source alternative to render the polyline as a static image
+
+### Static Route Map Implementation
+
+Use Google Maps Static API to render polyline:
+```
+https://maps.googleapis.com/maps/api/staticmap?size=600x200&path=enc:{polyline}&key={API_KEY}
+```
+
+Since the API key is server-side only, create a small helper in the `google-directions` edge function (or a new endpoint) that returns the static map URL given a polyline.
+
+**Alternative (no extra API cost):** Use OpenStreetMap-based static map with polyline overlay. This avoids needing the Google Static Maps API.
+
+### Where Maps Appear
+
+1. **Transport creation dialog** (EntrySheet, create mode, transfer): Below the route list, show the static map of the currently selected route. Clicking opens Google Maps directions URL.
+
+2. **Transport view overlay** (EntrySheet, view mode, transfer): Show the route map below the From/To details. Buttons to "Open in Google Maps" and "Open in Apple Maps" with the directions URL (not just a pin).
+
+3. **Timeline card** (EntryCard/TravelSegmentCard): A mini route map thumbnail at the bottom of transport cards. Only shown on cards with enough height (not compact layout).
+
+### Map Link Format
+
+- Google Maps directions: `https://www.google.com/maps/dir/?api=1&origin={from}&destination={to}&travelmode={mode}`
+- Apple Maps directions: `https://maps.apple.com/?saddr={from}&daddr={to}&dirflg={mode_flag}`
+
+### Database Change
+
+Add a `route_polyline` column to `entry_options` to store the encoded polyline string for transport entries.
+
+---
+
+## File Summary
+
+| File | Action | Changes |
+|------|--------|---------|
+| `supabase/functions/google-directions/index.ts` | Edit | Include `polyline` in multi-mode results; add static map URL endpoint |
+| `src/components/timeline/EntrySheet.tsx` | Edit | Remove website/date for transport; add gap comparison logic with contingency buffer; add route map preview; accept `gapMinutes` in transport context |
+| `src/pages/Timeline.tsx` | Edit | Pass `gapMinutes` in transport context; add `onTransportConflict` callback to trigger Conflict Resolver |
+| `src/components/timeline/EntryCard.tsx` | Edit | Show mini route map on transport cards; show contingency buffer label |
+| `src/components/timeline/RouteMapPreview.tsx` | Create | New component: renders static route map image with "Open in Maps" buttons |
+| Database migration | Create | Add `route_polyline TEXT` column to `entry_options` table |
+
+---
 
 ## Technical Details
 
-### Unified state in Timeline.tsx
-
-Replace:
-- `overlayEntry`, `overlayOption`, `overlayOpen` (for EntryOverlay)
-- `entryFormOpen`, `editEntry`, `editOption` (for EntryForm)
-
-With:
-```text
-sheetMode: 'create' | 'view' | null
-sheetEntry: EntryWithOptions | null    (populated for view mode)
-sheetOption: EntryOption | null        (populated for view mode)
-sheetOpen: boolean
-```
-
-Card click: `sheetMode='view'`, populate entry/option, open=true
-Add button: `sheetMode='create'`, entry/option=null, open=true
-"Edit" is no longer needed as a separate action -- fields are inline-editable
-
-### InlineField helper (inside EntrySheet)
+### Transport Context (Updated)
 
 ```text
-interface InlineFieldProps {
-  label: string;
-  value: string;
-  canEdit: boolean;
-  onSave: (newValue: string) => Promise<void>;
-  renderDisplay?: (val: string) => React.ReactNode;
-  renderInput?: (val: string, onChange: (v: string) => void) => React.ReactNode;
+transportContext: {
+  fromAddress: string;
+  toAddress: string;
+  gapMinutes: number;       // NEW: gap between adjacent entries in minutes
+  fromEntryId: string;      // NEW: needed for conflict resolution
+  toEntryId: string;        // NEW: needed for conflict resolution
 }
 ```
 
-- Default display: text span with subtle pencil icon on hover
-- Click to enter edit mode (shows Input, Enter saves, Escape cancels, blur saves)
-- On save: writes directly to Supabase (`entry_options` or `entries` table), then calls `onSaved()` to refresh
-
-### Editable fields (view mode, editors only)
-- Name (text input, or PlacesAutocomplete for non-flight/transfer)
-- Website (text input)
-- Location name (text input)
-- Time range: start and end (time inputs)
-- Flight: departure/arrival airports, terminals
-- Transfer: from/to, travel mode
-
-### Non-editable (display only)
-- Category badge (changing category has complex implications)
-- Map preview (auto-updates if location changes)
-- Distance
-- Vote button
-- Images (managed via gallery + uploader, not inline edit)
-
-### EntrySheet props
+### Gap Calculation in Timeline.tsx
 
 ```text
-interface EntrySheetProps {
-  mode: 'create' | 'view';
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  tripId: string;
-  trip?: Trip | null;
-  onSaved: () => void;
+const gapMs = new Date(toEntry.start_time).getTime() - new Date(fromEntry.end_time).getTime();
+const gapMinutes = Math.round(gapMs / 60000);
+```
 
-  // View mode
-  entry?: EntryWithOptions | null;
-  option?: EntryOption | null;
-  formatTime?: (iso: string) => string;
-  userLat?: number | null;
-  userLng?: number | null;
-  votingLocked?: boolean;
-  userVotes?: string[];
-  onVoteChange?: () => void;
-  onMoveToIdeas?: (entryId: string) => void;
+### Block Duration Rounding
 
-  // Create mode
-  prefillStartTime?: string;
-  prefillEndTime?: string;
-  prefillCategory?: string;
-  transportContext?: { fromAddress: string; toAddress: string } | null;
+```text
+const blockDuration = Math.ceil(realDuration / 5) * 5;
+const contingencyMin = blockDuration - realDuration;
+```
+
+### Overflow Detection in EntrySheet
+
+```text
+if (transportContext?.gapMinutes != null && blockDuration > transportContext.gapMinutes) {
+  // Show warning: "Transport takes Xm but gap is only Ym"
+  // Show "Resolve" button -> triggers onTransportConflict callback
 }
 ```
 
-### View mode layout
+### RouteMapPreview Component
 
 ```text
-+--------------------------------------------+
-| [Category badge]                            |
-|                                             |
-| Entry Name              [click to edit]     |
-|                                             |
-| 09:00 -- 11:00 (2h)    [click to edit]     |
-|                                             |
-| 1.2km away                                  |
-| Visit website           [click to edit]     |
-|                                             |
-| [====== Map Preview ======]                 |
-|                                             |
-| [Vote button]  5 votes                      |
-|                                             |
-| [photo1] [photo2] [photo3]                  |
-| [+ Upload photo]                            |
-|                                             |
-| ------------------------------------------- |
-| [Lock] [Move to Ideas] [Delete]             |
-+--------------------------------------------+
+Props:
+  polyline: string              // encoded polyline
+  fromAddress: string
+  toAddress: string
+  travelMode: string            // walk, transit, drive, bicycle
+  size?: 'mini' | 'full'        // mini for card, full for dialog
+  className?: string
+
+Renders:
+  - Static map image with polyline overlay
+  - "Open in Google Maps" / "Open in Apple Maps" buttons (full size only)
+  - Click handler on mini opens the view overlay
 ```
 
-### Create mode layout (unchanged from current EntryForm)
+### Edge Function Update
+
+In the multi-mode handler (line 111-113 of google-directions), include polyline:
 
 ```text
-Step 1: Category picker grid
-Step 2: Details + When (single scrollable page)
+// Current: { mode, duration_min, distance_km }
+// Updated: { mode, duration_min, distance_km, polyline }
 ```
 
+### Static Map Rendering
+
+For the static map image, use a lightweight approach with OpenStreetMap tiles and polyline overlay. The `RouteMapPreview` component will decode the polyline and render an image via a static tile service, or we can use a simple embedded approach with the polyline drawn on a canvas over map tiles.
+
+Simpler alternative: Use the existing MapPreview component pattern but with a directions-oriented URL. For Google, generate: `https://maps.googleapis.com/maps/api/staticmap?size=400x150&path=enc:{polyline}&key={key}`. The key is fetched server-side via a new lightweight edge function endpoint that returns the image URL (or proxies the image).
