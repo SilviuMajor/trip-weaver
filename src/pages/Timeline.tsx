@@ -377,9 +377,30 @@ const Timeline = () => {
     setOverlayOpen(true);
   };
 
+  // Transport context for gap button
+  const [transportContext, setTransportContext] = useState<{ fromAddress: string; toAddress: string } | null>(null);
+
   const handleAddBetween = (prefillTime: string) => {
     setPrefillStartTime(prefillTime);
     setPrefillEndTime(undefined);
+    setTransportContext(null);
+    setEntryFormOpen(true);
+  };
+
+  const handleAddTransport = (fromEntryId: string, toEntryId: string, prefillTime: string) => {
+    const fromEntry = entries.find(e => e.id === fromEntryId);
+    const toEntry = entries.find(e => e.id === toEntryId);
+    const fromOpt = fromEntry?.options[0];
+    const toOpt = toEntry?.options[0];
+
+    // Use location_name for regular entries, arrival_location for flights (where you end up)
+    const fromAddr = fromOpt?.location_name || fromOpt?.arrival_location || '';
+    const toAddr = toOpt?.location_name || toOpt?.departure_location || '';
+
+    setTransportContext({ fromAddress: fromAddr, toAddress: toAddr });
+    setPrefillStartTime(prefillTime);
+    setPrefillEndTime(undefined);
+    setPrefillCategory('transfer');
     setEntryFormOpen(true);
   };
 
@@ -854,6 +875,7 @@ const Timeline = () => {
                     isFirstDay={index === 0}
                     isLastDay={index === days.length - 1}
                     onAddBetween={handleAddBetween}
+                    onAddTransport={handleAddTransport}
                     onDragSlot={handleDragSlot}
                     onEntryTimeChange={handleEntryTimeChange}
                     onDropFromPanel={(entryId, hourOffset) => handleDropOnTimeline(entryId, day, hourOffset)}
@@ -990,6 +1012,7 @@ const Timeline = () => {
                 setPrefillStartTime(undefined);
                 setPrefillEndTime(undefined);
                 setPrefillCategory(undefined);
+                setTransportContext(null);
               }
             }}
             tripId={trip.id}
@@ -1000,6 +1023,7 @@ const Timeline = () => {
             prefillStartTime={prefillStartTime}
             prefillEndTime={prefillEndTime}
             prefillCategory={prefillCategory}
+            transportContext={transportContext}
           />
 
           <ConflictResolver

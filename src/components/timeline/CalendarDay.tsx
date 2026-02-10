@@ -46,6 +46,7 @@ interface CalendarDayProps {
   isFirstDay?: boolean;
   isLastDay?: boolean;
   onAddBetween?: (prefillTime: string) => void;
+  onAddTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string) => void;
   onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
   onDropFromPanel?: (entryId: string, hourOffset: number) => void;
   dayFlights?: FlightTzInfo[];
@@ -110,6 +111,7 @@ const CalendarDay = ({
   isFirstDay,
   isLastDay,
   onAddBetween,
+  onAddTransport,
   onEntryTimeChange,
   onDropFromPanel,
   dayFlights = [],
@@ -443,7 +445,9 @@ const CalendarDay = ({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (onAddBetween) {
+                        if (isTransportGap && onAddTransport) {
+                          onAddTransport(entry.id, nextEntry.id, entry.end_time);
+                        } else if (onAddBetween) {
                           onAddBetween(entry.end_time);
                         }
                       }}

@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.fetch-weather]
 verify_jwt = false
+
+[functions.parse-flight-booking]
+verify_jwt = false
