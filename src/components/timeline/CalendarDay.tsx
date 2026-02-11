@@ -55,6 +55,7 @@ interface CalendarDayProps {
   isLastDay?: boolean;
   onAddBetween?: (prefillTime: string, gapContext?: { fromName: string; toName: string; fromAddress: string; toAddress: string }) => void;
   onAddTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string, resolvedTz?: string) => void;
+  onGenerateTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string, resolvedTz?: string) => void;
   onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
   onDropFromPanel?: (entryId: string, hourOffset: number) => void;
   onModeSwitchConfirm?: (entryId: string, mode: string, newDurationMin: number, distanceKm: number, polyline?: string | null) => Promise<void>;
@@ -92,6 +93,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
   isLastDay,
   onAddBetween,
   onAddTransport,
+  onGenerateTransport,
   onEntryTimeChange,
   onDropFromPanel,
   onModeSwitchConfirm,
@@ -362,6 +364,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
         ) : (
           <div
             className="relative ml-20"
+            data-grid-top
             style={{ height: containerHeight, minHeight: 200, marginRight: 8 }}
             onDragOver={(e) => {
               if (onDropFromPanel) {
@@ -516,7 +519,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (isTransportGap && onAddTransport) {
+                        if (isTransportGap && (onGenerateTransport || onAddTransport)) {
                           // Pass the resolved TZ of the "from" entry so transport inherits it
                           const fromResolvedTz = (() => {
                             if (dayFlights.length > 0 && dayFlights[0].flightEndUtc) {
@@ -526,7 +529,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                             }
                             return activeTz || tripTimezone;
                           })();
-                          onAddTransport(entry.id, nextEntry.id, entry.end_time, fromResolvedTz);
+                          (onGenerateTransport || onAddTransport)!(entry.id, nextEntry.id, entry.end_time, fromResolvedTz);
                         } else if (onAddBetween) {
                           onAddBetween(entry.end_time, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
                         }
@@ -987,23 +990,72 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                         if (linkedEntryIds.has(e.id)) return false;
                         return true;
                       });
-                      if (!nextVisible || nextVisible.is_locked) return null;
-                      const gapMs = new Date(nextVisible.start_time).getTime() - new Date(entry.end_time).getTime();
+                      if (!nextVisible) return null;
+
+                      const transportEnd = new Date(entry.end_time).getTime();
+                      const nextStart = new Date(nextVisible.start_time).getTime();
+                      const gapMs = nextStart - transportEnd;
                       if (gapMs <= 0) return null;
 
-                      const handleSnapNext = async (e: React.MouseEvent) => {
-                        e.stopPropagation();
-                        const transportEndMs = new Date(entry.end_time).getTime();
-                        const nextStartMs = new Date(nextVisible.start_time).getTime();
-                        const nextEndMs = new Date(nextVisible.end_time).getTime();
-                        const duration = nextEndMs - nextStartMs;
-                        const newStart = new Date(transportEndMs).toISOString();
-                        const newEnd = new Date(transportEndMs + duration).toISOString();
+                      const handleSnapNext = async () => {
+                        if (nextVisible.is_locked) {
+                          toast.error('This event is locked and cannot be moved');
+                          return;
+                        }
 
-                        const { supabase } = await import('@/integrations/supabase/client');
+                        const transportEndMs = new Date(entry.end_time).getTime();
+                        const duration = new Date(nextVisible.end_time).getTime() - new Date(nextVisible.start_time).getTime();
+
+                        // Recalculate transport duration for the current mode
+                        const fromAddr = primaryOption.departure_location;
+                        const toAddr = primaryOption.arrival_location;
+                        let finalTransportEndMs = transportEndMs;
+
+                        if (fromAddr && toAddr) {
+                          try {
+                            const nameLower = primaryOption.name.toLowerCase();
+                            let currentMode = 'transit';
+                            if (nameLower.startsWith('walk')) currentMode = 'walk';
+                            else if (nameLower.startsWith('drive')) currentMode = 'drive';
+                            else if (nameLower.startsWith('cycle') || nameLower.startsWith('bicycl')) currentMode = 'bicycle';
+
+                            const { data: dirData, error: dirError } = await supabase.functions.invoke('google-directions', {
+                              body: {
+                                fromAddress: fromAddr,
+                                toAddress: toAddr,
+                                mode: currentMode,
+                                departureTime: entry.start_time,
+                              },
+                            });
+
+                            if (!dirError && dirData?.duration_min != null) {
+                              const blockDur = Math.ceil(dirData.duration_min / 5) * 5;
+                              const newTransportEnd = new Date(new Date(entry.start_time).getTime() + blockDur * 60000).toISOString();
+                              finalTransportEndMs = new Date(newTransportEnd).getTime();
+
+                              await supabase.from('entries')
+                                .update({ end_time: newTransportEnd })
+                                .eq('id', entry.id);
+
+                              if (dirData.distance_km != null) {
+                                await supabase.from('entry_options')
+                                  .update({ distance_km: dirData.distance_km, route_polyline: dirData.polyline ?? null } as any)
+                                  .eq('id', primaryOption.id);
+                              }
+                            }
+                          } catch (err) {
+                            console.error('Transport recalculation failed:', err);
+                          }
+                        }
+
+                        // Snap next event to transport end
+                        const newStart = new Date(finalTransportEndMs).toISOString();
+                        const newEnd = new Date(finalTransportEndMs + duration).toISOString();
+
                         await supabase.from('entries')
                           .update({ start_time: newStart, end_time: newEnd })
                           .eq('id', nextVisible.id);
+
                         onVoteChange();
                         toast.success('Snapped next event into place');
                       };
@@ -1011,7 +1063,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                       return (
                         <button
                           onClick={handleSnapNext}
-                          className="absolute z-20 left-1/2 -translate-x-1/2 rounded-full bg-orange-100 dark:bg-orange-900/30 px-3 py-0.5 text-[10px] font-bold text-orange-600 dark:text-orange-300 border border-orange-200 dark:border-orange-800/40 hover:bg-orange-200 dark:hover:bg-orange-800/40 transition-colors"
+                          className="absolute z-20 left-1/2 -translate-x-1/2 rounded-full bg-green-100 dark:bg-green-900/30 px-3 py-0.5 text-[10px] font-bold text-green-600 dark:text-green-300 border border-green-200 dark:border-green-800/40 hover:bg-green-200 dark:hover:bg-green-800/40 transition-colors"
                           style={{ top: height + 2 }}
                         >
                           SNAP
