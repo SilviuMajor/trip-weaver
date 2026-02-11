@@ -1,4 +1,5 @@
-import { RefreshCw, Loader2 } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { RefreshCw, Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { EntryWithOptions, EntryOption, TransportMode } from '@/types/trip';
 
@@ -33,6 +34,7 @@ interface TransportConnectorProps {
   onRefresh: () => void;
   isRefreshing?: boolean;
   selectedMode?: string;
+  onDelete?: () => void;
 }
 
 const TransportConnector = ({
@@ -45,10 +47,32 @@ const TransportConnector = ({
   onRefresh,
   isRefreshing,
   selectedMode: selectedModeProp,
+  onDelete,
 }: TransportConnectorProps) => {
   const transportModes: TransportMode[] = (option as any).transport_modes ?? [];
-  
-  // Detect current selected mode from the option name
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    };
+  }, []);
+
+  const handleDeleteTap = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirmingDelete) {
+      // Second tap — execute delete
+      if (confirmTimer.current) clearTimeout(confirmTimer.current);
+      setConfirmingDelete(false);
+      onDelete?.();
+    } else {
+      // First tap — enter confirm state
+      setConfirmingDelete(true);
+      confirmTimer.current = setTimeout(() => setConfirmingDelete(false), 3000);
+    }
+  };
+
   const detectCurrentMode = (): string => {
     if (selectedModeProp) return selectedModeProp;
     const lower = option.name.toLowerCase();
@@ -61,9 +85,8 @@ const TransportConnector = ({
 
   const currentMode = detectCurrentMode();
   const isCompact = height < 40;
-  const showLabels = height >= 160; // Fix 3: show labels only for tall connectors (2+ hours)
+  const showLabels = height >= 160;
 
-  // Find the selected mode data
   const selectedData = transportModes.find(m => m.mode === currentMode);
   const selectedDistance = selectedData ? fmtDist(selectedData.distance_km) : '';
 
@@ -77,18 +100,6 @@ const TransportConnector = ({
       )}
       style={{ height }}
     >
-      {/* Refresh button */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onRefresh(); }}
-        className="absolute top-1 right-1 z-10 rounded-full p-0.5 hover:bg-stone-200 dark:hover:bg-stone-800/50 transition-colors"
-      >
-        {isRefreshing ? (
-          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-        ) : (
-          <RefreshCw className="h-3 w-3 text-muted-foreground/60" />
-        )}
-      </button>
-
       {/* From → To labels */}
       {showLabels && fromLabel && toLabel && (
         <div className="text-[9px] text-muted-foreground/60 truncate max-w-[90%] mb-0.5">
@@ -96,7 +107,7 @@ const TransportConnector = ({
         </div>
       )}
 
-      {/* Mode icons row */}
+      {/* Mode icons row + refresh + delete */}
       <div className={cn('flex items-center gap-1', isCompact ? 'gap-0.5' : 'gap-1.5')}>
         {MODE_CONFIG.map(({ mode, emoji, apiMode }) => {
           const modeData = transportModes.find(m => m.mode === apiMode);
@@ -132,13 +143,39 @@ const TransportConnector = ({
             </button>
           );
         })}
+
+        {/* Refresh button — inline */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onRefresh(); }}
+          className="flex flex-col items-center rounded-md px-1.5 py-0.5 opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
+        >
+          {isRefreshing ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+        </button>
+
+        {/* Delete button — inline, two-tap confirm */}
+        {onDelete && (
+          <button
+            onClick={handleDeleteTap}
+            className={cn(
+              'flex flex-col items-center rounded-md px-1.5 py-0.5 transition-all',
+              confirmingDelete
+                ? 'bg-red-500 text-white scale-105'
+                : 'opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30'
+            )}
+          >
+            <X className={cn('h-3.5 w-3.5', confirmingDelete ? 'text-white' : 'text-muted-foreground')} />
+          </button>
+        )}
       </div>
 
       {/* Distance for selected mode */}
       {selectedDistance && !isCompact && (
         <span className="text-[9px] text-muted-foreground/50 mt-0.5">{selectedDistance}</span>
       )}
-
     </div>
   );
 };

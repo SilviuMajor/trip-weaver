@@ -58,6 +58,7 @@ interface CalendarDayProps {
   onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
   onDropFromPanel?: (entryId: string, hourOffset: number) => void;
   onModeSwitchConfirm?: (entryId: string, mode: string, newDurationMin: number, distanceKm: number, polyline?: string | null) => Promise<void>;
+  onDeleteTransport?: (entryId: string) => Promise<void>;
   dayFlights?: FlightTzInfo[];
   activeTz?: string;
   isEditor?: boolean;
@@ -94,6 +95,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
   onEntryTimeChange,
   onDropFromPanel,
   onModeSwitchConfirm,
+  onDeleteTransport,
   dayFlights = [],
   activeTz,
   isEditor,
@@ -690,7 +692,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                           <div className="absolute inset-0 rounded-xl ring-2 ring-red-400/60 pointer-events-none z-20" />
                         )}
                         {hasConflict && !isDragged && (
-                          <div className="absolute -top-1 -right-1 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow-md">
+                          <div className="absolute right-1 top-1/2 -translate-y-1/2 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow-md">
                             <AlertTriangle className="h-3 w-3" />
                           </div>
                         )}
@@ -786,7 +788,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                                   e.stopPropagation();
                                   toast.info('Flight position is fixed — edit times inside the card');
                                 }}
-                                className="absolute -top-2 -right-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+                                className="absolute -top-2 -left-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background shadow-sm"
                               >
                                 <Lock className="h-3 w-3 text-amber-500" />
                               </button>
@@ -832,6 +834,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                                   setRefreshingTransportId(null);
                                 }
                               }}
+                              onDelete={onDeleteTransport ? () => onDeleteTransport(entry.id) : undefined}
                             />
                           </div>
                         ) : (
@@ -886,7 +889,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                                   e.stopPropagation();
                                   onToggleLock(entry.id, !!isLocked);
                                 }}
-                                className="absolute -top-2 -right-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+                                className="absolute -top-2 -left-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background shadow-sm"
                               >
                                 {isLocked ? (
                                   <Lock className="h-3 w-3 text-amber-500" />
