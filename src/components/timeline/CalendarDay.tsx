@@ -406,7 +406,10 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
               /* ---------- Between-entry gap buttons + dashed line ---------- */
               const visibleEntries = sortedEntries.filter(e => {
                 const opt = e.options[0];
-                return opt && opt.category !== 'airport_processing' && !e.linked_flight_id;
+                return opt
+                  && opt.category !== 'airport_processing'
+                  && opt.category !== 'transfer'
+                  && !e.linked_flight_id;
               });
 
               const gapElements = visibleEntries.map((entry, idx) => {
@@ -601,7 +604,9 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                 }
                 if (origEndHour < origStartHour) origEndHour = 24;
 
-                const canDrag = onEntryTimeChange && !isLocked;
+                const isTransport = primaryOption.category === 'transfer';
+                const isFlightCard = !!flightGroup;
+                const canDrag = onEntryTimeChange && !isLocked && !isTransport && !isFlightCard;
 
                 // Per-entry formatTime using resolved TZ
                 const entryFormatTime = (iso: string) => {
@@ -688,36 +693,53 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                               onClick={() => {
                                 if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
                               }}
-                              onDragStart={canDrag ? (e) => {
-                                onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz, dayDate);
-                              } : isLocked ? (e) => {
+                              onDragStart={(e) => {
                                 e.stopPropagation();
-                                handleLockedAttempt(entry.id);
-                              } : undefined}
-                              onTouchDragStart={canDrag ? (e) => {
-                                onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz, dayDate);
-                              } : isLocked ? (e) => {
+                                toast.info('Flight position is fixed — edit times inside the card');
+                              }}
+                              onTouchDragStart={(e) => {
                                 e.stopPropagation();
-                                handleLockedAttempt(entry.id);
-                              } : undefined}
+                                toast.info('Flight position is fixed — edit times inside the card');
+                              }}
                               onTouchDragMove={onTouchMove}
                               onTouchDragEnd={onTouchEnd}
                               isShaking={shakeEntryId === entry.id}
                             />
-                            {/* Lock icon outside card */}
+                            {/* Flight group resize handles */}
+                            {onEntryTimeChange && flightGroup?.checkin && (() => {
+                              const ciDurationH = (new Date(flightGroup.checkin.end_time).getTime() - new Date(flightGroup.checkin.start_time).getTime()) / 3600000;
+                              return (
+                                <div
+                                  className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
+                                  onMouseDown={(e) => onMouseDown(e, flightGroup.checkin!.id, 'resize-top', groupStartHour, groupStartHour + ciDurationH, dragTz, dayDate)}
+                                  onTouchStart={(e) => onTouchStart(e, flightGroup.checkin!.id, 'resize-top', groupStartHour, groupStartHour + ciDurationH, dragTz, dayDate)}
+                                  onTouchMove={onTouchMove}
+                                  onTouchEnd={onTouchEnd}
+                                />
+                              );
+                            })()}
+                            {onEntryTimeChange && flightGroup?.checkout && (() => {
+                              const coDurationH = (new Date(flightGroup.checkout.end_time).getTime() - new Date(flightGroup.checkout.start_time).getTime()) / 3600000;
+                              return (
+                                <div
+                                  className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
+                                  onMouseDown={(e) => onMouseDown(e, flightGroup.checkout!.id, 'resize-bottom', groupEndHour - coDurationH, groupEndHour, dragTz, dayDate)}
+                                  onTouchStart={(e) => onTouchStart(e, flightGroup.checkout!.id, 'resize-bottom', groupEndHour - coDurationH, groupEndHour, dragTz, dayDate)}
+                                  onTouchMove={onTouchMove}
+                                  onTouchEnd={onTouchEnd}
+                                />
+                              );
+                            })()}
+                            {/* Lock icon outside card — always locked for flights */}
                             {isEditor && onToggleLock && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  onToggleLock(entry.id, !!isLocked);
+                                  toast.info('Flight position is fixed — edit times inside the card');
                                 }}
                                 className="absolute -top-2 -right-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background shadow-sm"
                               >
-                                {isLocked ? (
-                                  <Lock className="h-3 w-3 text-amber-500" />
-                                ) : (
-                                  <LockOpen className="h-3 w-3 text-muted-foreground/50" />
-                                )}
+                                <Lock className="h-3 w-3 text-amber-500" />
                               </button>
                             )}
                           </div>

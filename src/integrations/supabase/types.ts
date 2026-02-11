@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           created_at: string
           end_time: string
+          from_entry_id: string | null
           id: string
           is_locked: boolean
           is_scheduled: boolean
@@ -26,12 +27,14 @@ export type Database = {
           option_group_id: string | null
           scheduled_day: number | null
           start_time: string
+          to_entry_id: string | null
           trip_id: string
           updated_at: string
         }
         Insert: {
           created_at?: string
           end_time: string
+          from_entry_id?: string | null
           id?: string
           is_locked?: boolean
           is_scheduled?: boolean
@@ -40,12 +43,14 @@ export type Database = {
           option_group_id?: string | null
           scheduled_day?: number | null
           start_time: string
+          to_entry_id?: string | null
           trip_id: string
           updated_at?: string
         }
         Update: {
           created_at?: string
           end_time?: string
+          from_entry_id?: string | null
           id?: string
           is_locked?: boolean
           is_scheduled?: boolean
@@ -54,10 +59,18 @@ export type Database = {
           option_group_id?: string | null
           scheduled_day?: number | null
           start_time?: string
+          to_entry_id?: string | null
           trip_id?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "entries_from_entry_id_fkey"
+            columns: ["from_entry_id"]
+            isOneToOne: false
+            referencedRelation: "entries"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "entries_linked_flight_id_fkey"
             columns: ["linked_flight_id"]
@@ -70,6 +83,13 @@ export type Database = {
             columns: ["option_group_id"]
             isOneToOne: false
             referencedRelation: "option_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entries_to_entry_id_fkey"
+            columns: ["to_entry_id"]
+            isOneToOne: false
+            referencedRelation: "entries"
             referencedColumns: ["id"]
           },
           {

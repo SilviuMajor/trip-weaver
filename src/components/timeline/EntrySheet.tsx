@@ -680,7 +680,13 @@ const EntrySheet = ({
         if (error) throw error;
         entryId = editEntry.id;
       } else {
-        const { data: d, error } = await supabase.from('entries').insert({ trip_id: tripId, start_time: startIso, end_time: endIso }).select('id').single();
+        const insertPayload: any = { trip_id: tripId, start_time: startIso, end_time: endIso };
+        // Store parent entry IDs for transport connectors
+        if (isTransfer && transportContext?.fromEntryId && transportContext?.toEntryId) {
+          insertPayload.from_entry_id = transportContext.fromEntryId;
+          insertPayload.to_entry_id = transportContext.toEntryId;
+        }
+        const { data: d, error } = await supabase.from('entries').insert(insertPayload).select('id').single();
         if (error) throw error;
         entryId = d.id;
       }

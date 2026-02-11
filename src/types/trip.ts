@@ -42,6 +42,8 @@ export interface Entry {
   option_group_id: string | null;
   linked_flight_id: string | null;
   linked_type: string | null;
+  from_entry_id: string | null;
+  to_entry_id: string | null;
   created_at: string;
   updated_at: string;
 }
