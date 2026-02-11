@@ -822,6 +822,59 @@ const EntrySheet = ({
     onSaved();
   };
 
+  // Save flight departure/arrival time and cascade to linked checkin/checkout
+  const handleFlightTimeSave = async (type: 'departure' | 'arrival', newTimeStr: string) => {
+    if (!entry || !option) return;
+    const tz = type === 'departure' ? (option.departure_tz || tripTimezone) : (option.arrival_tz || tripTimezone);
+
+    // Parse the new HH:MM in the relevant timezone and build a full ISO timestamp
+    const currentISO = type === 'departure' ? entry.start_time : entry.end_time;
+    const currentDate = new Date(currentISO);
+    // Get the date part in the relevant timezone
+    const datePart = currentDate.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+    const utcISO = localToUTC(datePart, newTimeStr, tz);
+
+    // Update the entry's start_time or end_time
+    const updateField = type === 'departure' ? 'start_time' : 'end_time';
+    const { error } = await supabase.from('entries').update({ [updateField]: utcISO } as any).eq('id', entry.id);
+    if (error) { toast({ title: 'Failed to save time', variant: 'destructive' }); return; }
+
+    // Cascade to linked entries
+    const checkinHrs = option.airport_checkin_hours ?? defaultCheckinHours;
+    const checkoutMins = option.airport_checkout_min ?? defaultCheckoutMin;
+
+    const { data: linkedEntries } = await supabase
+      .from('entries')
+      .select('*')
+      .eq('linked_flight_id', entry.id);
+
+    if (linkedEntries) {
+      for (const linked of linkedEntries) {
+        if (linked.linked_type === 'checkin' && type === 'departure') {
+          // Checkin ends at departure, starts checkinHrs before
+          const depMs = new Date(utcISO).getTime();
+          const checkinStart = new Date(depMs - checkinHrs * 3600000).toISOString();
+          await supabase.from('entries').update({
+            start_time: checkinStart,
+            end_time: utcISO,
+          } as any).eq('id', linked.id);
+        }
+        if (linked.linked_type === 'checkout' && type === 'arrival') {
+          // Checkout starts at arrival, ends checkoutMins after
+          const arrMs = new Date(utcISO).getTime();
+          const checkoutEnd = new Date(arrMs + checkoutMins * 60000).toISOString();
+          await supabase.from('entries').update({
+            start_time: utcISO,
+            end_time: checkoutEnd,
+          } as any).eq('id', linked.id);
+        }
+      }
+    }
+
+    toast({ title: `${type === 'departure' ? 'Departure' : 'Arrival'} time updated` });
+    onSaved();
+  };
+
   const handleInlineSaveEntry = async (field: string, value: string) => {
     if (!entry) return;
     const { error } = await supabase.from('entries').update({ [field]: value } as any).eq('id', entry.id);
@@ -893,9 +946,13 @@ const EntrySheet = ({
                         placeholder="Terminal"
                       />
                     )}
-                    <p className="text-lg font-semibold text-foreground">
-                      {formatTimeInTz(entry.start_time, option.departure_tz!)}
-                    </p>
+                    <InlineField
+                      value={formatTimeInTz(entry.start_time, option.departure_tz!)}
+                      canEdit={isEditor}
+                      onSave={async (v) => handleFlightTimeSave('departure', v)}
+                      inputType="time"
+                      renderDisplay={(val) => <p className="text-lg font-semibold text-foreground">{val}</p>}
+                    />
                     <p className="text-[10px] font-medium text-muted-foreground uppercase">
                       {getTzAbbr(option.departure_tz!)}
                     </p>
@@ -923,9 +980,13 @@ const EntrySheet = ({
                         placeholder="Terminal"
                       />
                     )}
-                    <p className="text-lg font-semibold text-foreground">
-                      {formatTimeInTz(entry.end_time, option.arrival_tz!)}
-                    </p>
+                    <InlineField
+                      value={formatTimeInTz(entry.end_time, option.arrival_tz!)}
+                      canEdit={isEditor}
+                      onSave={async (v) => handleFlightTimeSave('arrival', v)}
+                      inputType="time"
+                      renderDisplay={(val) => <p className="text-lg font-semibold text-foreground">{val}</p>}
+                    />
                     <p className="text-[10px] font-medium text-muted-foreground uppercase">
                       {getTzAbbr(option.arrival_tz!)}
                     </p>
