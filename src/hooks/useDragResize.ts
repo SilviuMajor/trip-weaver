@@ -26,7 +26,7 @@ interface DayBoundary {
 interface UseDragResizeOptions {
   pixelsPerHour: number;
   startHour: number;
-  onCommit: (entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date) => void;
+  onCommit: (entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date, dragType?: DragType) => void;
   scrollContainerRef?: React.RefObject<HTMLElement>;
   dayBoundaries?: DayBoundary[];
 }
@@ -154,17 +154,18 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
           const relativeY = absoluteY - boundary.topPx;
           const duration = state.originalEndHour - state.originalStartHour;
           const rawHour = startHour + relativeY / pixelsPerHour;
-          const newStart = snapToGrid(rawHour);
+          let newStart = snapToGrid(rawHour);
           let newEnd = newStart + duration;
 
-          if (newStart < 0) { newEnd -= newStart; }
-          const clampedStart = Math.max(0, newStart);
-          const clampedEnd = Math.min(24, newEnd);
+          if (newStart < 0) { newEnd -= newStart; newStart = 0; }
+          if (newEnd > 24) { newStart -= (newEnd - 24); newEnd = 24; }
+          newStart = Math.max(0, newStart);
+          newEnd = Math.min(24, newEnd);
 
           const updated: DragState = {
             ...state,
-            currentStartHour: clampedStart,
-            currentEndHour: clampedEnd,
+            currentStartHour: newStart,
+            currentEndHour: newEnd,
             targetDay: boundary.dayDate,
           };
           setDragState(updated);
@@ -205,7 +206,7 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
   const commitDrag = useCallback(() => {
     const state = dragStateRef.current;
     if (state && wasDraggedRef.current) {
-      onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz, state.targetDay);
+      onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz, state.targetDay, state.type);
     }
     stopAutoScroll();
     setDragState(null);
