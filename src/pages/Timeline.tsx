@@ -554,6 +554,68 @@ const Timeline = () => {
     await fetchData();
   };
 
+  // Handle delete transport with undo support
+  const handleDeleteTransport = async (entryId: string) => {
+    const entry = entries.find(e => e.id === entryId);
+    if (!entry) return;
+
+    const opt = entry.options[0];
+    const entryData = {
+      trip_id: entry.trip_id,
+      start_time: entry.start_time,
+      end_time: entry.end_time,
+      from_entry_id: entry.from_entry_id,
+      to_entry_id: entry.to_entry_id,
+      is_scheduled: entry.is_scheduled,
+      scheduled_day: entry.scheduled_day,
+    };
+    const optionData = opt ? {
+      name: opt.name,
+      category: opt.category,
+      category_color: opt.category_color,
+      departure_location: opt.departure_location,
+      arrival_location: opt.arrival_location,
+      distance_km: (opt as any).distance_km,
+      route_polyline: (opt as any).route_polyline,
+      transport_modes: opt.transport_modes,
+    } : null;
+
+    pushAction({
+      description: `Delete ${opt?.name || 'transport'}`,
+      undo: async () => {
+        // Re-insert the transport entry
+        const { data: newEntry } = await supabase.from('entries').insert(entryData as any).select().single();
+        if (newEntry && optionData) {
+          await supabase.from('entry_options').insert({ ...optionData, entry_id: newEntry.id } as any);
+        }
+        await fetchData();
+      },
+      redo: async () => {
+        // Delete again by matching from/to
+        const { data: match } = await supabase.from('entries')
+          .select('id')
+          .eq('from_entry_id', entryData.from_entry_id ?? '')
+          .eq('to_entry_id', entryData.to_entry_id ?? '')
+          .eq('trip_id', entryData.trip_id)
+          .single();
+        if (match) {
+          await supabase.from('entry_options').delete().eq('entry_id', match.id);
+          await supabase.from('entries').delete().eq('id', match.id);
+        }
+        await fetchData();
+      },
+    });
+
+    // Delete option first, then entry
+    if (opt) {
+      await supabase.from('entry_options').delete().eq('entry_id', entryId);
+    }
+    await supabase.from('entries').delete().eq('id', entryId);
+
+    toast({ title: 'Transport deleted', description: 'Press Ctrl+Z to undo' });
+    await fetchData();
+  };
+
   // Handle drop from ideas panel onto timeline
   const handleDropOnTimeline = async (entryId: string, dayDate: Date, hourOffset: number) => {
     const entry = entries.find(e => e.id === entryId);
@@ -1220,6 +1282,7 @@ const Timeline = () => {
                     onEntryTimeChange={handleEntryTimeChange}
                     onDropFromPanel={(entryId, hourOffset) => handleDropOnTimeline(entryId, day, hourOffset)}
                     onModeSwitchConfirm={handleModeSwitchConfirm}
+                    onDeleteTransport={handleDeleteTransport}
                     activeTz={tzInfo?.activeTz}
                     dayFlights={tzInfo?.flights}
                     isEditor={isEditor}
