@@ -839,11 +839,17 @@ const EntrySheet = ({
 
   const handleStartTimeChange = (newStart: string) => {
     setStartTime(newStart);
-    const [h, m] = newStart.split(':').map(Number);
-    const endTotalMin = h * 60 + m + durationMin;
-    const endH = Math.floor(endTotalMin / 60) % 24;
-    const endM = endTotalMin % 60;
-    setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
+  };
+
+  // ─── Generic time save (view mode) ───
+  const handleGenericTimeSave = async (which: 'start' | 'end', newTimeStr: string) => {
+    if (!entry || !trip) return;
+    const dateStr = utcToLocal(entry.start_time, tripTimezone).date;
+    const newUtc = localToUTC(dateStr, newTimeStr, tripTimezone);
+    const field = which === 'start' ? 'start_time' : 'end_time';
+    const { error } = await supabase.from('entries').update({ [field]: newUtc } as any).eq('id', entry.id);
+    if (error) { toast({ title: 'Failed to save time', variant: 'destructive' }); return; }
+    onSaved();
   };
 
   // ─── View mode helpers ───
@@ -1311,11 +1317,39 @@ const EntrySheet = ({
               </>
             ) : (
               <>
-                {/* Generic time (inline-editable) */}
-                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  <Clock className="h-4 w-4" />
-                  <span>{formatTimeProp?.(entry.start_time) ?? ''} — {formatTimeProp?.(entry.end_time) ?? ''}</span>
-                  {isLocked && <Lock className="ml-1 h-3.5 w-3.5 text-muted-foreground/60" />}
+                {/* Editable Start / End / Duration */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div className="flex items-center gap-1.5">
+                      <InlineField
+                        value={formatTimeProp?.(entry.start_time) ?? ''}
+                        canEdit={isEditor}
+                        onSave={async (v) => handleGenericTimeSave('start', v)}
+                        inputType="time"
+                        renderDisplay={(val) => <span className="text-sm font-medium">{val}</span>}
+                      />
+                      <span className="text-sm text-muted-foreground">—</span>
+                      <InlineField
+                        value={formatTimeProp?.(entry.end_time) ?? ''}
+                        canEdit={isEditor}
+                        onSave={async (v) => handleGenericTimeSave('end', v)}
+                        inputType="time"
+                        renderDisplay={(val) => <span className="text-sm font-medium">{val}</span>}
+                      />
+                    </div>
+                    <span className="text-xs text-muted-foreground ml-auto">
+                      {(() => {
+                        const diffMs = new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime();
+                        const totalMin = Math.round(diffMs / 60000);
+                        if (totalMin <= 0) return '';
+                        const h = Math.floor(totalMin / 60);
+                        const m = totalMin % 60;
+                        return h > 0 ? `${h}h${m ? ` ${m}m` : ''}` : `${m}m`;
+                      })()}
+                    </span>
+                    {isLocked && <Lock className="h-3.5 w-3.5 text-muted-foreground/60" />}
+                  </div>
                 </div>
               </>
             )}
@@ -1748,10 +1782,18 @@ const EntrySheet = ({
                 <div className="flex items-center justify-between">
                   <Label>Time</Label>
                   <span className="text-xs text-muted-foreground">
-                    {isFlight
-                      ? `Duration: ${durationMin >= 60 ? `${Math.floor(durationMin / 60)}h${durationMin % 60 ? ` ${durationMin % 60}m` : ''}` : `${durationMin}m`}`
-                      : `Suggested: ${startTime} – ${endTime} (${durationMin >= 60 ? `${Math.floor(durationMin / 60)}h${durationMin % 60 ? ` ${durationMin % 60}m` : ''}` : `${durationMin}m`})`
-                    }
+                    {(() => {
+                      if (isFlight) {
+                        return `Duration: ${durationMin >= 60 ? `${Math.floor(durationMin / 60)}h${durationMin % 60 ? ` ${durationMin % 60}m` : ''}` : `${durationMin}m`}`;
+                      }
+                      const [sh, sm] = startTime.split(':').map(Number);
+                      const [eh, em] = endTime.split(':').map(Number);
+                      const diff = (eh * 60 + em) - (sh * 60 + sm);
+                      if (diff <= 0) return '';
+                      const h = Math.floor(diff / 60);
+                      const m = diff % 60;
+                      return `Duration: ${h > 0 ? `${h}h${m ? ` ${m}m` : ''}` : `${m}m`}`;
+                    })()}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -1766,7 +1808,7 @@ const EntrySheet = ({
                 </div>
               </div>
 
-              {!isFlight && (
+              {isTransfer && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="flex-1 space-y-1">
@@ -1781,11 +1823,9 @@ const EntrySheet = ({
                         }}
                       />
                     </div>
-                    {isTransfer && (
-                      <Button variant="outline" size="sm" className="mt-6" onClick={calcTransferDuration} disabled={calcLoading}>
-                        {calcLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Calculate'}
-                      </Button>
-                    )}
+                    <Button variant="outline" size="sm" className="mt-6" onClick={calcTransferDuration} disabled={calcLoading}>
+                      {calcLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Calculate'}
+                    </Button>
                   </div>
                 </div>
               )}
