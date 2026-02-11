@@ -1,115 +1,94 @@
 
 
-# Make Timing Editable in Event Overview + Remove Duration from Creation
+# Fix Drag Offset, Transport Button, Drag Chain, and SNAP Button
 
-## Change 1: Editable Timing in Event Overview (View Mode)
+## Issue 1: Drag Hold Offset Regression
 
-### Current Behavior
-Lines 1314-1319 in `EntrySheet.tsx` show a read-only time span for generic (non-flight, non-transport) events:
-```
-<Clock /> 09:00 — 10:00
-```
-No way to edit start/end times from the overview.
+### Root Cause
+The `dayBoundaries` are computed from the outer `CalendarDay` wrapper div (which includes the day header and padding), but the grab offset calculation assumes `boundary.topPx` aligns with the start of the time grid. The day header, padding, and "Trip Begins" marker add vertical offset that is not accounted for, causing the cursor-to-card offset to be miscalculated.
 
-### New Behavior
-Replace the read-only time span with three fields:
-- **Start time** -- editable via `InlineField` with `type="time"`
-- **End time** -- editable via `InlineField` with `type="time"`
-- **Duration** -- auto-calculated, read-only display (e.g. "1h 30m")
+### Fix
+**File: `src/components/timeline/CalendarDay.tsx`**
+- Add a second ref for the actual grid container (the `div` with `ml-20` and `height: containerHeight`).
+- Expose this grid ref position via a callback or data attribute so boundaries can reference the grid top, not the wrapper top.
 
-When Start or End is changed and saved:
-1. Save the new time to the database (update `entries.start_time` or `entries.end_time`)
-2. Duration recalculates live in the display
-3. Call `onSaved()` to refresh the timeline
+**File: `src/pages/Timeline.tsx`**
+- When computing `dayBoundaries`, measure the grid container position (not the day wrapper). Use a separate ref map for grid containers, or compute the offset from data attributes.
 
-### Implementation
-In `EntrySheet.tsx`, replace lines 1314-1319 (the generic time block) with:
+**File: `src/hooks/useDragResize.ts`**
+- Add missing dependencies (`dayBoundaries`, `scrollContainerRef`, `startHour`, `pixelsPerHour`) to the `startDrag` useCallback to prevent stale closure values.
 
-```tsx
-{/* Editable Start / End / Duration */}
-<div className="space-y-2">
-  <div className="flex items-center gap-3">
-    <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-    <div className="flex items-center gap-1.5">
-      <InlineField
-        value={formatTimeProp?.(entry.start_time) ?? ''}
-        canEdit={isEditor}
-        onSave={async (v) => handleGenericTimeSave('start', v)}
-        inputType="time"
-        renderDisplay={(val) => <span className="text-sm font-medium">{val}</span>}
-      />
-      <span className="text-sm text-muted-foreground">—</span>
-      <InlineField
-        value={formatTimeProp?.(entry.end_time) ?? ''}
-        canEdit={isEditor}
-        onSave={async (v) => handleGenericTimeSave('end', v)}
-        inputType="time"
-        renderDisplay={(val) => <span className="text-sm font-medium">{val}</span>}
-      />
-    </div>
-    <span className="text-xs text-muted-foreground ml-auto">{genericDurationStr}</span>
-    {isLocked && <Lock className="h-3.5 w-3.5 text-muted-foreground/60" />}
-  </div>
-</div>
-```
+### Alternative simpler approach
+Instead of refactoring refs, compute a `gridOffset` inside CalendarDay by measuring the distance from the day wrapper top to the grid container top, and pass it alongside dayBoundaries. Then in `useDragResize`, subtract this offset when computing `relativeY`.
 
-A new `handleGenericTimeSave` function will:
-- Take the new HH:MM value and the entry's current date (extracted from the existing ISO timestamp in the trip timezone)
-- Convert to UTC using `localToUTC`
-- Update `entries.start_time` or `entries.end_time` in the database
-- Call `onSaved()` to refresh
-
-A computed `genericDurationStr` will calculate duration from `entry.end_time - entry.start_time` and format as "Xh Ym".
-
-No preview/confirm step is needed here -- the user is informed that this will immediately reposition the card. The `InlineField` pattern (click to edit, blur/Enter to save, Escape to cancel) already provides a natural cancel mechanism.
+**Chosen approach**: Add a `gridTopPx` field to each day boundary entry. In Timeline.tsx, measure both the day wrapper and the grid container (via a second ref map) to populate `gridTopPx`. In `useDragResize.ts`, use `gridTopPx` instead of `topPx` for hour calculations.
 
 ---
 
-## Change 2: Remove Duration Input from Event Creation
+## Issue 2: Transport Button Between Events Reverted
+
+### Root Cause
+The recent modal rework changed `onAddTransport` in Timeline.tsx to open the EntrySheet (modal) with prefillCategory='transfer'. For gaps under 2 hours, the transport button should directly generate transport without opening a modal.
+
+### Fix
+**File: `src/pages/Timeline.tsx`**
+- Split `handleAddTransport` into two paths:
+  - **Direct generation** (for the transport gap button in gaps under 2 hours): Directly invoke the `auto-generate-transport` edge function or create the transport entry inline (same logic as the "Route" button), bypassing the modal entirely.
+  - **Modal path** (for the contextual suggestion in the "Add Something" modal): Keep existing behavior.
+- Rename or add a new handler `handleGenerateTransport` that creates the transport entry directly.
+
+**File: `src/components/timeline/CalendarDay.tsx`**
+- The gap button's `onClick` for `isTransportGap` already calls `onAddTransport` -- this callback will now point to the direct-generation handler instead of the modal opener.
+
+---
+
+## Issue 3: Drag Chain Behavior
 
 ### Current Behavior
-Lines 1769-1791 show a "Duration (minutes)" number input for non-flight events. Changing duration auto-adjusts end time. The `handleStartTimeChange` function (line 840) also recalculates end time from `start + duration`.
+In `handleEntryTimeChange` (Timeline.tsx lines 496-507), after repositioning trailing transport, the code also auto-pulls the next event (`to_entry_id`) to meet the transport end. This moves the entire chain.
 
 ### New Behavior
-- Remove the entire "Duration (minutes)" input block (lines 1769-1791)
-- Show a read-only duration label derived from `endTime - startTime` next to the time inputs (replacing the current "Suggested: ..." text)
-- Change `handleStartTimeChange` to no longer auto-adjust end time -- just set start time and let duration auto-recalculate in the display
-- End time input already works independently (line 1764: `setEndTime(...)`)
+Only the dragged event and its trailing transport move. The next event stays put, creating a gap.
 
-### Implementation
+### Fix
+**File: `src/pages/Timeline.tsx`**
+- Remove lines 496-507 (the block that auto-pulls the `to_entry_id` event after transport repositioning) from `handleEntryTimeChange`.
+- Keep the transport repositioning logic (lines 489-493) intact -- trailing transport still moves with its parent event.
 
-1. **Remove duration input block** (lines 1769-1791): Delete the entire `{!isFlight && (...)}` block containing the Duration input and Calculate button.
+---
 
-2. **Update the time label** (line 1750-1755): Replace the "Suggested: ..." text with a simple computed duration display:
-   ```tsx
-   <span className="text-xs text-muted-foreground">
-     Duration: {computedDuration}
-   </span>
-   ```
-   Where `computedDuration` is calculated from `endTime - startTime`.
+## Issue 4: SNAP Button Improvements
 
-3. **Simplify `handleStartTimeChange`** (line 840): Change it to only set start time without adjusting end time:
-   ```tsx
-   const handleStartTimeChange = (newStart: string) => {
-     setStartTime(newStart);
-   };
-   ```
+### Current State
+A SNAP button already exists at CalendarDay.tsx lines 982-1020 but:
+- Returns null for locked next events (should show with warning)
+- Uses orange styling (should be green)
+- Does not recalculate transport after snapping
 
-4. The `durationMin` state variable is still used internally for transport calculations, so it remains but is no longer user-facing for regular events.
+### Fix
+**File: `src/components/timeline/CalendarDay.tsx`**
+
+1. **Show for locked events**: Change line 990 from `if (!nextVisible || nextVisible.is_locked) return null;` to only return null when `!nextVisible`. When `nextVisible.is_locked`, show the button but on click show a warning toast and do not execute the snap.
+
+2. **Green styling**: Change the button classes from `bg-orange-100 text-orange-600 border-orange-200` to `bg-green-100 text-green-600 border-green-200` (and corresponding dark mode variants).
+
+3. **Transport recalculation after snap**: After snapping the next event, trigger a transport recalculation if the transport connector between the events exists. Call `onVoteChange()` (already done) to refresh data, which will trigger re-render with updated positions.
 
 ---
 
 ## Files Changed
 
-| File | Change |
-|------|--------|
-| `src/components/timeline/EntrySheet.tsx` | Add `handleGenericTimeSave` function; replace read-only time display with editable InlineFields + auto-duration; remove Duration input from creation form; simplify `handleStartTimeChange` |
+| File | Changes |
+|------|---------|
+| `src/hooks/useDragResize.ts` | Fix stale closure in `startDrag` deps; use `gridTopPx` from boundaries for offset calculation |
+| `src/components/timeline/CalendarDay.tsx` | Add grid ref for boundary measurement; fix SNAP button for locked events + green styling; keep transport button calling direct-generation handler |
+| `src/pages/Timeline.tsx` | Add grid ref map for boundary measurement; add `handleGenerateTransport` for direct transport creation; remove next-event auto-pull from `handleEntryTimeChange` |
 
 ## What Is NOT Changed
 
-- Timeline card rendering
-- Drag-to-resize behavior
-- Flight card overview (flights already have their own editable time fields)
-- Transport card overview
-- The `durationMin` state (still used internally for transport logic)
+- Transport connector inline editing (mode switching, refresh, delete)
+- Flight card behavior (permanently drag-locked)
+- The "Add Something" modal's contextual transport suggestion
+- Event card rendering/styling
+- Gap detection logic for when buttons appear
 
