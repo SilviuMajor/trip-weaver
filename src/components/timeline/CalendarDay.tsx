@@ -959,7 +959,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
               if (offset === 0) return null;
               const badgeTop = (tzHour - startHour) * PIXELS_PER_HOUR + PIXELS_PER_HOUR / 2 - 8;
               return (
-                <div className="absolute z-[6]" style={{ top: badgeTop, left: -140, width: 46 }}>
+                <div className="absolute z-[6]" style={{ top: badgeTop, left: -100, width: 46 }}>
                   <span className="rounded-full bg-primary/20 border border-primary/30 px-2 py-0.5 text-[10px] font-bold text-primary whitespace-nowrap">
                     TZ {offset > 0 ? '+' : ''}{offset}h
                   </span>
