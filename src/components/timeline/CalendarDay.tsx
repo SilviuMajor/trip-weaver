@@ -7,7 +7,7 @@ import { haversineKm } from '@/lib/distance';
 import { localToUTC, getHourInTimezone, resolveEntryTz } from '@/lib/timezoneUtils';
 import { computeOverlapLayout } from '@/lib/overlapLayout';
 import { Plus, Bus, Lock, LockOpen } from 'lucide-react';
-import { useDragResize } from '@/hooks/useDragResize';
+import { useDragResize, type DragType } from '@/hooks/useDragResize';
 import TimeSlotGrid, { getUtcOffsetHoursDiff } from './TimeSlotGrid';
 import EntryCard from './EntryCard';
 import FlightGroupCard from './FlightGroupCard';
@@ -114,7 +114,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
   const containerHeight = totalHours * PIXELS_PER_HOUR;
 
   // Drag-to-resize/move
-  const handleDragCommit = useCallback((entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date) => {
+  const handleDragCommit = useCallback((entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date, dragType?: DragType) => {
     if (!onEntryTimeChange) return;
     const entry = sortedEntries.find(e => e.id === entryId);
     if (entry?.is_locked) return;
@@ -129,15 +129,25 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
       return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
     };
 
-    // For flights, use departure_tz for start and arrival_tz for end
     const primaryOpt = entry?.options[0];
     const isFlight = primaryOpt?.category === 'flight' && primaryOpt?.departure_tz && primaryOpt?.arrival_tz;
     const startTz = isFlight ? primaryOpt.departure_tz! : (tz || activeTz || tripTimezone);
     const endTz = isFlight ? primaryOpt.arrival_tz! : startTz;
 
-    const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), startTz);
-    const newEndIso = localToUTC(dateStr, toTimeStr(newEndHour), endTz);
-    onEntryTimeChange(entryId, newStartIso, newEndIso);
+    const isMove = dragType === 'move';
+
+    if (isMove && entry) {
+      // MOVE: preserve original UTC duration
+      const origDurationMs = new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime();
+      const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), startTz);
+      const newEndIso = new Date(new Date(newStartIso).getTime() + origDurationMs).toISOString();
+      onEntryTimeChange(entryId, newStartIso, newEndIso);
+    } else {
+      // RESIZE: convert start and end independently (existing behavior)
+      const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), startTz);
+      const newEndIso = localToUTC(dateStr, toTimeStr(newEndHour), endTz);
+      onEntryTimeChange(entryId, newStartIso, newEndIso);
+    }
 
     // Move linked processing entries if this is a flight
     if (entry) {
@@ -146,31 +156,27 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
       const fallbackTz = tz || activeTz || tripTimezone;
 
       linkedEntries.forEach(linked => {
-        // Check-in uses departure TZ, checkout uses arrival TZ
         const linkedTz = linked.linked_type === 'checkin'
           ? (linkedOpt?.departure_tz || fallbackTz)
           : (linkedOpt?.arrival_tz || fallbackTz);
 
-        const linkedStartHour = getHourInTimezone(linked.start_time, linkedTz);
-        const linkedEndHour = getHourInTimezone(linked.end_time, linkedTz);
-        const duration = linkedEndHour - linkedStartHour;
+        // Preserve linked entry's original UTC duration
+        const linkedDurationMs = new Date(linked.end_time).getTime() - new Date(linked.start_time).getTime();
 
-        let newLinkedStart: number;
-        let newLinkedEnd: number;
+        let newLinkedStartIso: string;
+        let newLinkedEndIso: string;
 
         if (linked.linked_type === 'checkin') {
-          newLinkedEnd = newStartHour;
-          newLinkedStart = newLinkedEnd - duration;
+          const newLinkedEndHour = newStartHour;
+          newLinkedEndIso = localToUTC(dateStr, toTimeStr(newLinkedEndHour), linkedTz);
+          newLinkedStartIso = new Date(new Date(newLinkedEndIso).getTime() - linkedDurationMs).toISOString();
         } else {
-          newLinkedStart = newEndHour;
-          newLinkedEnd = newLinkedStart + duration;
+          const newLinkedStartHour = newEndHour;
+          newLinkedStartIso = localToUTC(dateStr, toTimeStr(newLinkedStartHour), linkedTz);
+          newLinkedEndIso = new Date(new Date(newLinkedStartIso).getTime() + linkedDurationMs).toISOString();
         }
 
-        onEntryTimeChange(
-          linked.id,
-          localToUTC(dateStr, toTimeStr(newLinkedStart), linkedTz),
-          localToUTC(dateStr, toTimeStr(newLinkedEnd), linkedTz),
-        );
+        onEntryTimeChange(linked.id, newLinkedStartIso, newLinkedEndIso);
       });
     }
   }, [onEntryTimeChange, dayDate, tripTimezone, activeTz, sortedEntries, allEntries]);
