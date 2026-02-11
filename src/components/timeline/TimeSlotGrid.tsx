@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
+import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { localToUTC, getUtcOffsetMinutes, getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
 
 interface FlightTzInfo {
   originTz: string;
@@ -13,8 +15,8 @@ interface TimeSlotGridProps {
   endHour: number;
   pixelsPerHour: number;
   date: Date;
-  onClickSlot?: (time: Date) => void;
-  onDragSlot?: (startTime: Date, endTime: Date) => void;
+  onClickSlot?: (isoTime: string) => void;
+  onDragSlot?: (startIso: string, endIso: string) => void;
   activeTz?: string;
   flights?: FlightTzInfo[];
 }
@@ -97,13 +99,13 @@ const TimeSlotGrid = ({
     return startHour * 60 + minutesFromStart;
   }, [pixelsPerHour, startHour]);
 
-  const minutesToTime = useCallback((totalMinutes: number): Date => {
+  const minutesToIso = useCallback((totalMinutes: number): string => {
     const h = Math.floor(totalMinutes / 60);
     const m = totalMinutes % 60;
-    const time = new Date(date);
-    time.setHours(h, m, 0, 0);
-    return time;
-  }, [date]);
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    return localToUTC(dateStr, timeStr, activeTz || 'UTC');
+  }, [date, activeTz]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!onClickSlot && !onDragSlot) return;
@@ -133,10 +135,10 @@ const TimeSlotGrid = ({
       const s = Math.min(dragStart, dragEnd);
       const e = Math.max(dragStart, dragEnd);
       if (e - s >= SNAP_MINUTES) {
-        onDragSlot(minutesToTime(s), minutesToTime(e));
+        onDragSlot(minutesToIso(s), minutesToIso(e));
       }
     } else if (onClickSlot) {
-      onClickSlot(minutesToTime(dragStart));
+      onClickSlot(minutesToIso(dragStart));
     }
 
     setDragStart(null);
@@ -220,21 +222,6 @@ const TimeSlotGrid = ({
   );
 };
 
-export function getUtcOffsetMinutes(date: Date, tz: string): number {
-  const utcStr = date.toLocaleString('en-US', { timeZone: 'UTC' });
-  const tzStr = date.toLocaleString('en-US', { timeZone: tz });
-  return (new Date(tzStr).getTime() - new Date(utcStr).getTime()) / 60000;
-}
-
-export function getUtcOffsetHoursDiff(originTz: string, destTz: string): number {
-  try {
-    const now = new Date();
-    const originOffset = getUtcOffsetMinutes(now, originTz);
-    const destOffset = getUtcOffsetMinutes(now, destTz);
-    return (destOffset - originOffset) / 60;
-  } catch {
-    return 0;
-  }
-}
+export { getUtcOffsetMinutes, getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
 
 export default TimeSlotGrid;

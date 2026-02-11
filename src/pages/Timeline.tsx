@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
-import { getDateInTimezone, localToUTC } from '@/lib/timezoneUtils';
+import { getDateInTimezone, localToUTC, resolveDropTz } from '@/lib/timezoneUtils';
 import { findCategory } from '@/lib/categories';
 import { ArrowDown, LayoutList, ZoomIn, ZoomOut } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -417,9 +417,9 @@ const Timeline = () => {
     setSheetOpen(true);
   };
 
-  const handleDragSlot = (startTime: Date, endTime: Date) => {
-    setPrefillStartTime(startTime.toISOString());
-    setPrefillEndTime(endTime.toISOString());
+  const handleDragSlot = (startIso: string, endIso: string) => {
+    setPrefillStartTime(startIso);
+    setPrefillEndTime(endIso);
     setSheetMode('create');
     setSheetEntry(null);
     setSheetOption(null);
@@ -465,9 +465,11 @@ const Timeline = () => {
     const eH = Math.floor(endMinutes / 60);
     const eM = endMinutes % 60;
 
-    const { localToUTC } = await import('@/lib/timezoneUtils');
-    const startIso = localToUTC(dateStr, `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`, tripTimezone);
-    const endIso = localToUTC(dateStr, `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`, tripTimezone);
+    const dayKey = format(dayDate, 'yyyy-MM-dd');
+    const tzInfo = dayTimezoneMap.get(dayKey);
+    const resolvedTz = resolveDropTz(hourOffset, tzInfo, tripTimezone);
+    const startIso = localToUTC(dateStr, `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`, resolvedTz);
+    const endIso = localToUTC(dateStr, `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`, resolvedTz);
 
     // If already scheduled somewhere, create a copy instead of moving
     const alreadyScheduled = entry.is_scheduled !== false;
