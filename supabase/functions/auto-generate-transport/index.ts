@@ -245,8 +245,9 @@ Deno.serve(async (req) => {
 
         if (!optA || !optB) continue;
 
-        // Skip if either is already a transport entry
-        if (optA.category === 'transfer' || optB.category === 'transfer') continue;
+        // Guard A: Skip transport-like categories
+        const transportLike = ['transfer', 'travel', 'transport'];
+        if (transportLike.includes(optA.category) || transportLike.includes(optB.category)) continue;
 
         // Check if transport already exists between them
         const existingTransport = mainEntries.find((e: any) => {
@@ -276,6 +277,21 @@ Deno.serve(async (req) => {
         const deadlineTime = (optB.category === 'flight')
           ? (flightCheckinStart.get(entryB.id) || entryB.start_time)
           : entryB.start_time;
+
+        // Guard B: Skip if no effective gap (start >= deadline)
+        if (new Date(transportStartTime).getTime() >= new Date(deadlineTime).getTime()) {
+          console.log(`Skipping ${entryA.id} -> ${entryB.id}: no effective gap`);
+          continue;
+        }
+
+        // Guard C: Skip if entryB is a flight and its linked checkin already bridges the gap
+        if (optB.category === 'flight' && flightCheckinStart.has(entryB.id)) {
+          const checkinStart = new Date(flightCheckinStart.get(entryB.id)!).getTime();
+          if (checkinStart <= new Date(transportStartTime).getTime()) {
+            console.log(`Skipping ${entryA.id} -> ${entryB.id}: checkin already bridges gap`);
+            continue;
+          }
+        }
 
         // Fetch walking + transit directions
         const departureTime = transportStartTime;
