@@ -1,70 +1,109 @@
 
 
-# Implementation Plan: Transport Guards + Flight Time Fixes
+# Flight Overview Parity + Instant Save Feedback
 
-## Part 1: Edge Function - Skip Spurious Transport
+## What's Changing
 
-Three guards added to `supabase/functions/auto-generate-transport/index.ts` in the main pairing loop (around line 249):
+The flight view dialog will be upgraded to match the creation form's completeness, and edits will feel instant instead of having a noticeable delay.
 
-**Guard A - Transport-like categories**: Expand the existing `transfer` skip to also include `travel` and `transport` categories. The Coach (category `travel`) was being treated as a regular event.
+## 1. Add Missing Editable Fields to Flight View
 
-**Guard B - No effective gap**: After computing `transportStartTime` and `deadlineTime`, skip if start >= deadline. This prevents creating transport when there's no actual gap (e.g. Coach ends right when checkin begins).
+Currently the flight view only shows: name, departure/arrival airports, terminals (only if already set), departure/arrival times, and lock status.
 
-**Guard C - Checkin bridges flight**: If entryB is a flight and its linked checkin already starts before or at `transportStartTime`, the airport journey is already covered.
+**Missing fields to add (matching creation form):**
 
-## Part 2: Fix Flight Checkin Alignment
+- **Departure Terminal** -- always show, even when empty (currently hidden if null). Use InlineField with placeholder "Add terminal"
+- **Arrival Terminal** -- same treatment
+- **Check-in Duration** (hours before departure) -- editable InlineField that saves to `option.airport_checkin_hours` and cascades to the linked checkin entry times
+- **Checkout Duration** (minutes after arrival) -- editable InlineField that saves to `option.airport_checkout_min` and cascades to the linked checkout entry times
+- **Flight Date** -- show the date in the departure timezone, editable
 
-Current data shows:
-- Checkin: 06:30 - 08:15 UTC (1h45m)
-- Flight BA432: 09:15 - 09:50 UTC (departure_tz: Europe/London)
+These will be placed in the flight view section (lines 930-1000) as a new "Airport Processing" sub-section below the route display, styled similarly to the creation form's bordered panel.
 
-The checkin should end at flight departure (09:15 UTC) and start 2h before (07:15 UTC). Currently it's off by 1 hour -- the checkin was likely computed against the wrong time.
+## 2. Checkin/Checkout Duration Editing with Cascade
 
-**Fix**: The flight creation/editing code already has cascading logic per memory notes. The data fix is a one-time SQL update to correct the existing BA432 checkin entry:
-- Set checkin start_time to `2026-02-21 07:15:00+00` (2h before 09:15 departure)
-- Set checkin end_time to `2026-02-21 09:15:00+00` (matches flight departure)
+When checkin hours or checkout minutes are changed:
 
-## Part 3: Make Flight Departure/Arrival Times Editable
+- Save the new value to `entry_options` (`airport_checkin_hours` / `airport_checkout_min`)
+- Query linked entries by `linked_flight_id`
+- Recalculate linked checkin: `start_time = departure - newHours`, `end_time = departure`
+- Recalculate linked checkout: `start_time = arrival`, `end_time = arrival + newMinutes`
+- Call `onSaved()` to refresh
 
-In `src/components/timeline/EntrySheet.tsx`, the departure time (line 896) and arrival time (line 927) are rendered as plain `<p>` tags. They need to become `InlineField` components that:
+## 3. Instant Save Feedback (Optimistic UI)
 
-1. Show the formatted time (e.g. "09:15") as display
-2. Allow clicking to edit via a time input
-3. On save:
-   - Parse the new local time in the relevant timezone
-   - Update `entry.start_time` (for departure) or `entry.end_time` (for arrival)
-   - Cascade to linked checkin/checkout entries:
-     - Checkin: ends at new departure, starts `airport_checkin_hours` before
-     - Checkout: starts at new arrival, ends `airport_checkout_min` after
+The delay happens because `InlineField` saves to the DB, then calls `onSaved()` which triggers `fetchData()` (a full re-fetch), and only then does the parent re-render with new props. During the refetch, the old `value` is still displayed.
 
-**New helper function** `updateFlightLinkedTimes` added directly in EntrySheet.tsx:
-- Takes the flight entry ID, new start/end times, and checkin/checkout hours/min
-- Queries linked entries by `linked_flight_id`
-- Updates their times accordingly
+**Fix**: Update `InlineField` to optimistically show the draft value after save completes, rather than reverting to the old prop value. Specifically:
 
-## Part 4: Data Fix
+- After `onSave(draft)` succeeds, keep `draft` as the displayed value (don't revert to `value` prop)
+- Add a `useEffect` that syncs the display when the parent prop actually updates
+- This eliminates the visual "snap back" between save and refetch
 
-A one-time database update to fix the misaligned BA432 checkin:
+## Technical Details
 
-```sql
-UPDATE entries 
-SET start_time = '2026-02-21 07:15:00+00', 
-    end_time = '2026-02-21 09:15:00+00'
-WHERE id = 'aab2c6dc-bcae-4f04-8bfa-88eaf4d69838';
+### File: `src/components/timeline/EntrySheet.tsx`
+
+**InlineField optimistic update** (lines 45-89):
+- Add `displayValue` state initialized from `value` prop
+- After successful save, set `displayValue = draft` immediately
+- `useEffect` to sync `displayValue` when `value` prop changes
+
+**Flight view section** (after line 999, before the closing `</div>` of the flight card):
+
+```
+{/* Airport Processing - editable durations */}
+{isEditor && (
+  <div className="rounded-lg border border-border/50 bg-muted/30 p-3 space-y-2">
+    <p className="text-xs font-medium text-muted-foreground">Airport Processing</p>
+    <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-1">
+        <Label className="text-xs">Check-in (hours before)</Label>
+        <InlineField
+          value={String(option.airport_checkin_hours ?? defaultCheckinHours)}
+          canEdit={true}
+          inputType="number"
+          onSave={async (v) => {
+            const hrs = Math.max(0, Number(v) || 0);
+            await handleInlineSaveOption('airport_checkin_hours', String(hrs));
+            // Cascade to linked checkin entry
+            await cascadeCheckinDuration(hrs);
+          }}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Checkout (minutes after)</Label>
+        <InlineField
+          value={String(option.airport_checkout_min ?? defaultCheckoutMin)}
+          canEdit={true}
+          inputType="number"
+          onSave={async (v) => {
+            const mins = Math.max(0, Number(v) || 0);
+            await handleInlineSaveOption('airport_checkout_min', String(mins));
+            // Cascade to linked checkout entry
+            await cascadeCheckoutDuration(mins);
+          }}
+        />
+      </div>
+    </div>
+  </div>
+)}
 ```
 
-## Files Changed
+**Terminal fields** -- change from conditional rendering (`{option.departure_terminal && ...}`) to always render with a placeholder when empty.
 
-| File | Change |
+**New cascade helpers** added near `handleFlightTimeSave`:
+
+- `cascadeCheckinDuration(newHours)` -- queries linked checkin by `linked_flight_id`, sets `end_time = entry.start_time`, `start_time = start_time - newHours * 3600000`
+- `cascadeCheckoutDuration(newMinutes)` -- queries linked checkout, sets `start_time = entry.end_time`, `end_time = end_time + newMinutes * 60000`
+
+### Summary of Changes
+
+| Area | Change |
 |------|--------|
-| `supabase/functions/auto-generate-transport/index.ts` | Add 3 skip guards (transport-like categories, no-gap, checkin-bridged) |
-| `src/components/timeline/EntrySheet.tsx` | Replace plain departure/arrival time `<p>` with `InlineField` + cascade handler for linked checkin/checkout |
-| Database | One-time fix for BA432 checkin alignment |
-
-## Expected Results
-
-- No spurious transit between Coach and Flight
-- Checkin visually aligns flush against flight departure
-- Clicking departure/arrival times in the flight view dialog allows editing
-- Editing flight times automatically adjusts checkin/checkout entries
+| `InlineField` component | Add optimistic display so edits appear instant |
+| Flight view: terminals | Always show departure/arrival terminal fields (with "Add terminal" placeholder when empty) |
+| Flight view: processing | Add "Airport Processing" section with editable check-in hours and checkout minutes |
+| Flight view: date | Show flight date in departure timezone |
+| Cascade helpers | New `cascadeCheckinDuration` and `cascadeCheckoutDuration` functions |
 
