@@ -153,7 +153,7 @@ interface EntrySheetProps {
   prefillStartTime?: string;
   prefillEndTime?: string;
   prefillCategory?: string;
-  transportContext?: { fromAddress: string; toAddress: string; gapMinutes?: number; fromEntryId?: string; toEntryId?: string } | null;
+  transportContext?: { fromAddress: string; toAddress: string; gapMinutes?: number; fromEntryId?: string; toEntryId?: string; resolvedTz?: string } | null;
   onTransportConflict?: (blockDuration: number, gapMinutes: number) => void;
 }
 
@@ -284,11 +284,12 @@ const EntrySheet = ({
   useEffect(() => {
     if (mode !== 'create') return;
     if (prefillStartTime && open && !editEntry) {
-      const { date: d, time: t } = utcToLocal(prefillStartTime, tripTimezone);
+      const effectiveTz = transportContext?.resolvedTz || tripTimezone;
+      const { date: d, time: t } = utcToLocal(prefillStartTime, effectiveTz);
       setStartTime(t);
       if (!isUndated) setDate(d);
     }
-  }, [prefillStartTime, open, editEntry, isUndated, tripTimezone, mode]);
+  }, [prefillStartTime, open, editEntry, isUndated, tripTimezone, mode, transportContext]);
 
   useEffect(() => {
     if (mode !== 'create') return;
@@ -308,7 +309,8 @@ const EntrySheet = ({
     const h = cat.defaultStartHour;
     const m = cat.defaultStartMin;
     if (prefillStartTime && !isEditing) {
-      const { time: pTime } = utcToLocal(prefillStartTime, tripTimezone);
+      const effectiveTz = transportContext?.resolvedTz || tripTimezone;
+      const { time: pTime } = utcToLocal(prefillStartTime, effectiveTz);
       const [pH, pM] = pTime.split(':').map(Number);
       setStartTime(`${String(pH).padStart(2, '0')}:${String(pM).padStart(2, '0')}`);
       setDurationMin(cat.defaultDurationMin);
@@ -324,7 +326,7 @@ const EntrySheet = ({
       const endM = endTotalMin % 60;
       setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
     }
-  }, [prefillStartTime, isEditing, tripTimezone]);
+  }, [prefillStartTime, isEditing, tripTimezone, transportContext]);
 
   useEffect(() => {
     if (mode !== 'create') return;
