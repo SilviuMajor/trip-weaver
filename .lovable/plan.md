@@ -1,65 +1,69 @@
 
 
-# Align Left Gutter: Weather Between Hours + Inline TZ Badge
+# Fix TZ Badge Position + Improve Sizing
 
-## Current Layout Issues
+## Problem
 
-The left gutter currently has three independently positioned elements that don't align well:
-- Time labels at each hour line
-- Weather badges floating between hours (offset inconsistently)
-- TZ change badge floating at the flight midpoint, overlapping weather
+1. The TZ badge currently appears at `Math.ceil(flightEndHour)` -- the hour after landing. It should appear **between** the last origin-timezone hour and the first destination-timezone hour (i.e., at the flight arrival boundary).
+2. The TZ badge is rendered inline with the weather icon, which pushes weather out of alignment on that row.
+3. The TZ badge is too small (`text-[8px]`) and hard to read.
 
-## Proposed Layout
+## Solution
 
-The left column layout, from left to right:
-1. **TZ badge** (only at the hour where the timezone changes) -- sits far left
-2. **Weather emoji + temp** -- centered vertically between two hour lines
-3. **Time label** -- at each hour line (top-aligned as now)
-4. **Sun gradient line** -- stays where it is (rightmost, next to the content)
+### 1. Position TZ badge at flight arrival boundary
+
+Change from `Math.ceil(flightEndHour)` to `Math.floor(flightEndHour)` so the badge sits between hour N and hour N+1 where the timezone transition actually happens. For example, if the flight lands at 10:xx, the badge sits between 10:00 and 11:00.
+
+### 2. Separate TZ badge from weather layout
+
+Render the TZ badge as its own absolutely-positioned element (not inside the weather flex row). This way:
+- Weather icons stay perfectly aligned at the same left offset every hour
+- TZ badge sits to the left of the weather icon at the transition hour, independently positioned
+
+### 3. Make TZ badge bigger and clearer
+
+- Increase font size from `text-[8px]` to `text-[10px]`
+- Add slightly more padding (`px-2 py-0.5`)
+- Use stronger colors: `bg-primary/20 border-primary/30` instead of `/10` and `/20`
+- Include "TZ" prefix for clarity: `TZ +1h`
+
+## Technical Details
+
+### File: `src/components/timeline/CalendarDay.tsx` (lines 954-988)
+
+**Weather rendering** -- remove the TZ badge from inside the weather flex row. Weather goes back to simple absolute positioning without gap/flex concerns:
 
 ```text
- Left gutter (between hours)         At hour line
- ┌──────────────────────────┐       ┌──────────┐
- │  [TZ +1h]  [emoji 18deg] │       │  09:00   │
- └──────────────────────────┘       └──────────┘
+<div style={{ top: top + PIXELS_PER_HOUR/2 - 6 }}>
+  <WeatherBadge ... />
+</div>
 ```
 
-## Changes
+**TZ badge** -- render as a separate element before/outside the weather loop, positioned at `flightEndHour` boundary:
 
-### 1. Move TZ badge from `TimeSlotGrid.tsx` to `CalendarDay.tsx`
+```text
+{dayFlights?.length > 0 && (() => {
+  const f = dayFlights[0];
+  const tzHour = Math.floor(f.flightEndHour);
+  const offset = getUtcOffsetHoursDiff(f.originTz, f.destinationTz);
+  if (offset === 0) return null;
+  const top = (tzHour - startHour) * PIXELS_PER_HOUR + PIXELS_PER_HOUR/2 - 8;
+  return (
+    <div className="absolute z-[6]" style={{ top, left: -120, width: 46 }}>
+      <span className="rounded-full bg-primary/20 border border-primary/30
+        px-2 py-0.5 text-[10px] font-bold text-primary whitespace-nowrap">
+        TZ {offset > 0 ? '+' : ''}{offset}h
+      </span>
+    </div>
+  );
+})()}
+```
 
-Currently the TZ badge is rendered in `TimeSlotGrid` at the flight midpoint. It needs to move to `CalendarDay.tsx` so it can be rendered inline with the weather badge at the specific hour where the timezone transition occurs.
-
-- Remove the TZ badge rendering block from `TimeSlotGrid.tsx` (lines 218-234)
-- Export the `getUtcOffsetHoursDiff` and `getTzAbbr` helper functions from `TimeSlotGrid.tsx` so `CalendarDay.tsx` can use them (or duplicate them since they're small)
-
-### 2. Update weather rendering in `CalendarDay.tsx` (lines 954-967)
-
-Modify the weather column to render each hourly row as a flex container that holds both the TZ badge (when applicable) and the weather badge inline:
-
-- For each hour, determine if this is the "TZ change hour" (the hour at or after the flight arrival where the timezone switches)
-- Render a horizontal flex row: `[TZ badge (if this hour)] [Weather badge]`
-- Keep the vertical position the same: `top + PIXELS_PER_HOUR/2 - 6` (centered between hour lines)
-- Adjust the container positioning: use `left: -80` with enough width to fit both elements
-- Use `flex items-center gap-1` so TZ badge and weather sit snugly inline
-
-### 3. Determine TZ change hour
-
-Using the existing `flights` prop (already available in CalendarDay as `flightTzInfo`):
-- The TZ change hour = `Math.ceil(flight.flightEndHour)` (the first full hour after the flight lands)
-- Only show the TZ badge at this one hour slot
-- Compute offset using the existing `getUtcOffsetHoursDiff` helper
-
-### 4. Styling
-
-- TZ badge: keep existing pill style (`rounded-full bg-primary/10 border border-primary/20 px-1.5 py-0.5 text-[9px]`) but slightly smaller to fit inline
-- Weather badge: no changes to the component itself
-- The flex row ensures they naturally align horizontally
+The weather container reverts to its original narrower width since it no longer shares space with the TZ badge.
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/TimeSlotGrid.tsx` | Remove TZ badge rendering (lines 218-234), export helper functions |
-| `src/components/timeline/CalendarDay.tsx` | Render TZ badge inline with weather badge at the transition hour |
+| `src/components/timeline/CalendarDay.tsx` | Separate TZ badge from weather; reposition at flight arrival hour; increase badge size |
 
