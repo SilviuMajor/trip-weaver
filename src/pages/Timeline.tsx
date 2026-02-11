@@ -4,12 +4,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
 import { getDateInTimezone, localToUTC, resolveDropTz } from '@/lib/timezoneUtils';
 import { findCategory } from '@/lib/categories';
-import { ArrowDown, LayoutList, ZoomIn, ZoomOut } from 'lucide-react';
+import { LayoutList } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGeolocation } from '@/hooks/useGeolocation';
-import { useTimelineZoom } from '@/hooks/useTimelineZoom';
+
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { useTravelCalculation } from '@/hooks/useTravelCalculation';
 import { useUndoRedo } from '@/hooks/useUndoRedo';
@@ -87,11 +87,9 @@ const Timeline = () => {
   const fetchDataRef = useRef<() => Promise<void>>();
   const { canUndo, canRedo, undo, redo, pushAction } = useUndoRedo(async () => { await fetchDataRef.current?.(); });
 
-  // Zoom
   const scrollRef = useRef<HTMLDivElement>(null);
   const mainScrollRef = useRef<HTMLElement>(null);
   const dayRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
-  const { zoom, changeZoom, spacingClass, cardSizeClass, zoomLabel } = useTimelineZoom(scrollRef);
 
 
   // Redirect if no user
@@ -191,7 +189,7 @@ const Timeline = () => {
     }
   }, [loading]);
 
-  const scrollToToday = () => {
+  const _scrollToToday = () => {
     const todayEl = document.getElementById('today');
     if (todayEl) {
       todayEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1325,27 +1323,6 @@ const Timeline = () => {
             )}
           </div>
 
-          {/* Bottom controls */}
-          <div className="fixed bottom-6 right-6 z-40 flex flex-col gap-2">
-            <div className="flex items-center gap-1 rounded-full bg-card/90 px-2 py-1 shadow-lg backdrop-blur-sm border border-border">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => changeZoom(-1)}>
-                <ZoomIn className="h-3.5 w-3.5" />
-              </Button>
-              <span className="text-[10px] font-medium text-muted-foreground min-w-[36px] text-center">
-                {zoomLabel}
-              </span>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => changeZoom(1)}>
-                <ZoomOut className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-
-            {!isUndated && (
-              <Button onClick={scrollToToday} size="sm" className="rounded-full shadow-lg">
-                <ArrowDown className="mr-1 h-3.5 w-3.5" />
-                Today
-              </Button>
-            )}
-          </div>
 
           {/* Mobile FABs */}
           {isMobile && (
