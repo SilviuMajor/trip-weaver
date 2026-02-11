@@ -1,83 +1,37 @@
 
 
-# Reposition UI Elements on Cards and Transport Connector
+# Remove Zoom and Today Buttons (Keep Undo/Redo)
 
 ## Overview
 
-Three layout adjustments: move conflict warning badge to right-center of cards, move lock icon to left side of cards, and add inline Refresh + Delete buttons to the transport connector strip.
+Remove the zoom controls (ZoomIn/ZoomOut + label) and the "Today" scroll button from the bottom-right corner. The Undo/Redo floating pill (rendered by `UndoRedoButtons` component) stays untouched.
 
 ---
 
-## Change 1: Move Conflict Warning Badge to Right-Center
+## Changes
 
-### Current position
-`CalendarDay.tsx` line 692-695: `absolute -top-1 -right-1` -- top-right corner, overlapping with lock icon.
+### File: `src/pages/Timeline.tsx`
 
-### New position
-Change to `absolute right-1 top-1/2 -translate-y-1/2` -- vertically centered on the right edge of the card.
+1. **Remove the bottom controls block** (lines 1328-1348) -- the entire `fixed bottom-6 right-6` div containing:
+   - Zoom in/out buttons + zoom label
+   - "Today" scroll button
 
-Applies to the AlertTriangle badge at line 692. The red ring glow (`ring-2 ring-red-400/60` at line 690) stays unchanged as it covers the full card.
+2. **Clean up unused imports**:
+   - Remove `ZoomIn`, `ZoomOut`, `ArrowDown` from the lucide-react import (line 7)
+   - Remove `useTimelineZoom` import (line 12)
 
----
+3. **Remove zoom hook call** (line 94): `const { zoom, changeZoom, spacingClass, cardSizeClass, zoomLabel } = useTimelineZoom(scrollRef);`
 
-## Change 2: Move Lock Icon to Left Side
+4. **Remove `scrollToToday` function** if it exists and is only used by this button.
 
-### Current positions (two instances)
+5. **Remove references to `spacingClass`, `cardSizeClass`, `zoom`** wherever they're used in the JSX (these control card sizing based on zoom level). Replace with fixed defaults (the zoom=2 / "1hr" defaults: `space-y-3` and `min-h-[100px]`).
 
-1. **Flight lock icon** (line 789): `absolute -top-2 -right-2` -- move to `absolute -top-2 -left-2`
-2. **Regular card lock icon** (line 889): `absolute -top-2 -right-2` -- move to `absolute -top-2 -left-2`
+### File: `src/hooks/useTimelineZoom.ts`
 
-Both instances get the same position change. No other styling changes needed.
+No deletion needed immediately, but it becomes unused dead code. Can be cleaned up later.
 
----
+### What stays
 
-## Change 3: Transport Connector -- Inline Refresh and Delete Buttons
-
-### Current state
-`TransportConnector.tsx` has a Refresh button at `absolute top-1 right-1` (floating in the corner, separate from the mode icons row).
-
-### New layout
-Remove the absolute-positioned refresh button. Instead, add Refresh and X (delete) buttons inline in the mode icons row, to the right of the bicycle icon:
-
-```
-🚶 52m | 🚗 12m | 🚌 25m | 🚲 18m | 🔄 | ✕
-```
-
-- Refresh button: same RefreshCw icon, same behavior, styled consistently with mode buttons (muted, same size)
-- X (delete) button: `X` icon from lucide-react, with a two-tap confirmation:
-  - First tap: button turns red, icon changes to a checkmark or stays X with red background, indicating "tap again to confirm"
-  - Second tap (within 3 seconds): triggers `onDelete` callback
-  - After 3 seconds without second tap: reverts to normal X state
-- Both buttons use the same rounded-md padding as mode buttons for visual consistency
-
-### Props change
-Add `onDelete: () => void` prop to `TransportConnectorProps`.
-
-### CalendarDay integration
-Pass `onDelete` from CalendarDay, which calls a new `onDeleteTransport` prop (bubbles up to Timeline.tsx).
-
-### Timeline.tsx integration
-`onDeleteTransport(entryId)`:
-1. Record undo action with the full transport entry data (for undo = re-insert)
-2. Delete the entry from the database
-3. Next event stays in place (per user preference)
-4. Call `fetchData()` to refresh
-
----
-
-## Files Changed
-
-| File | Change |
-|------|--------|
-| `src/components/timeline/CalendarDay.tsx` | Move conflict badge to right-center; move lock icons to left side; pass `onDelete` to TransportConnector |
-| `src/components/timeline/TransportConnector.tsx` | Remove absolute refresh button; add inline Refresh + X delete buttons in mode row; add `onDelete` prop with 2-tap confirmation |
-| `src/pages/Timeline.tsx` | Add `handleDeleteTransport` with undo support |
-
-## What Is NOT Changed
-
-- Transport calculation logic
-- Event card styling (beyond icon repositioning)
-- Flight card behavior
-- Refresh recalculation behavior
-- Mode switching behavior
+- `UndoRedoButtons` component (fixed bottom-4 right-4) -- completely untouched
+- Mobile FABs (sidebar toggle, live panel) -- untouched
 
