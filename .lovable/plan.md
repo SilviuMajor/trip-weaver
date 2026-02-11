@@ -1,131 +1,198 @@
 
+# Connector Cards: Transport Non-Draggable, Flights Always Locked, Gap Detection Fix
 
-# Remove Side-by-Side Layout, Add Conflict Indicators
+## Overview
 
-## Problem
+Establish a clear distinction between "connector" cards (transport, flight) and regular event cards. Connectors have restricted drag behavior and are excluded from gap detection.
 
-When cards overlap or are adjacent, the `computeOverlapLayout` function splits them into columns (left half / right half). This is incorrect behavior -- cards should always be full width. Additionally, flight check-in + flight cards appear side-by-side with empty space.
+---
 
-## Changes
+## Database Change
 
-### File 1: `src/components/timeline/CalendarDay.tsx`
+### Add parent link columns to `entries` table
 
-**Change A: Remove column-based positioning (lines 587-591)**
+Transport entries (category `'transfer'`) currently don't store which two events they connect. We need to add two nullable columns:
 
-Replace:
-```typescript
-const layoutInfo = layoutMap.get(entry.id);
-const column = layoutInfo?.column ?? 0;
-const totalColumns = layoutInfo?.totalColumns ?? 1;
-const widthPercent = 100 / totalColumns;
-const leftPercent = column * widthPercent;
+- `from_entry_id` (UUID, FK to entries.id, ON DELETE CASCADE)
+- `to_entry_id` (UUID, FK to entries.id, ON DELETE CASCADE)
+
+The CASCADE delete means: if either parent event is deleted, the transport entry is automatically deleted by the database. No application code needed for auto-delete.
+
+Migration SQL:
+```sql
+ALTER TABLE public.entries
+  ADD COLUMN from_entry_id uuid REFERENCES public.entries(id) ON DELETE CASCADE,
+  ADD COLUMN to_entry_id uuid REFERENCES public.entries(id) ON DELETE CASCADE;
 ```
 
-With:
+---
+
+## Change 1: Transport Cards Become Non-Draggable Connectors
+
+### 1a. Store parent IDs on transport creation
+
+**File: `src/pages/Timeline.tsx`** -- In `handleAddTransport`, after creating the transport entry, update it with `from_entry_id` and `to_entry_id`. The `fromEntryId` and `toEntryId` are already passed as parameters.
+
+Also update `EntrySheet.tsx` save logic: when saving a transport entry created via `transportContext`, write `from_entry_id` and `to_entry_id` from the transport context into the entry.
+
+### 1b. Block drag on transport cards
+
+**File: `src/components/timeline/CalendarDay.tsx`** -- At line 604 where `canDrag` is computed:
+
 ```typescript
-const widthPercent = 100;
-const leftPercent = 0;
+// Current:
+const canDrag = onEntryTimeChange && !isLocked;
+
+// New:
+const isTransport = primaryOption.category === 'transfer';
+const isFlightCard = !!flightGroup;
+const canDrag = onEntryTimeChange && !isLocked && !isTransport && !isFlightCard;
 ```
 
-This makes every card full-width, regardless of overlap.
+Transport cards remain tappable/clickable (the `onClick` handler on `EntryCard` is unaffected). Users can still open the card to edit duration, transport method, etc.
 
-**Change B: Remove `computeOverlapLayout` usage (lines 8, 200-220)**
+### 1c. Auto-recalculate transport when parent moves
 
-- Remove the import of `computeOverlapLayout` from line 8
-- Remove the layout computation block (lines 200-220: `layoutEntries`, `layout`, `layoutMap`)
-- Remove `layoutMap` reference at line 587
+**File: `src/pages/Timeline.tsx`** -- In `handleEntryTimeChange` (line 429), after the entry update succeeds and before `fetchData()`:
 
-**Change C: Add conflict visual indicators using existing `overlapMap` (lines 222-248)**
+1. Query all transport entries where `from_entry_id = entryId` or `to_entry_id = entryId`
+2. For each transport found:
+   - Look up the "from" event's `end_time` (the new transport start)
+   - Look up the "to" event's `start_time` (constraint for transport end)
+   - Call the `google-directions` edge function to re-fetch travel duration between the two parent locations
+   - Update the transport entry with the new `start_time`, `end_time`, and duration
 
-The `overlapMap` already detects which entries overlap and from which side (top/bottom). Use this to:
+This re-fetch uses the existing Google Directions edge function that's already in the codebase.
 
-1. Add a red/orange border or ring glow to overlapping cards
-2. Add a small conflict badge (e.g., `AlertTriangle` icon) on overlapping cards
-3. Ensure later-starting overlapping cards get a higher z-index so they render on top
+### 1d. Auto-delete transport when parent is deleted
 
-At the card wrapper div (line 633-643), add conflict styling:
+This is handled automatically by the `ON DELETE CASCADE` foreign key constraint in the database. No application code changes needed.
+
+---
+
+## Change 2: Flight Cards Always Drag-Locked
+
+### 2a. Block move-drag on flight cards
+
+Already handled by the `canDrag` change above (`!isFlightCard`). Flight groups will never initiate a `'move'` drag.
+
+### 2b. Allow edge-resize on flight groups
+
+**File: `src/components/timeline/CalendarDay.tsx`** -- Currently, resize handles are rendered when `canDrag && !flightGroup` (lines 644, 790). We need to add flight-specific resize handles:
+
+- **Top resize handle on flight group**: Adjusts check-in duration. When dragged, it resizes the check-in entry (if present). The `onMouseDown`/`onTouchStart` should target the check-in entry ID with `'resize-top'`.
+- **Bottom resize handle on flight group**: Adjusts checkout duration. When dragged, it resizes the checkout entry (if present). Target the checkout entry ID with `'resize-bottom'`.
+
+Add after the `FlightGroupCard` rendering (around line 706):
 
 ```typescript
-const hasConflict = overlapMap.has(entry.id);
-
-// In the div style/className:
-className={cn(
-  'absolute z-10 pr-1 group',
-  isDragged && 'opacity-80 z-30',
-  hasConflict && !isDragged && 'z-[15]'  // Higher z for later entries
+{/* Flight group resize handles */}
+{onEntryTimeChange && flightGroup?.checkin && (
+  <div
+    className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
+    onMouseDown={(e) => onMouseDown(e, flightGroup.checkin!.id, 'resize-top', groupStartHour, groupStartHour + ciDurationH, dragTz, dayDate)}
+    onTouchStart={(e) => onTouchStart(e, flightGroup.checkin!.id, 'resize-top', groupStartHour, groupStartHour + ciDurationH, dragTz, dayDate)}
+    onTouchMove={onTouchMove}
+    onTouchEnd={onTouchEnd}
+  />
+)}
+{onEntryTimeChange && flightGroup?.checkout && (
+  <div
+    className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
+    onMouseDown={(e) => onMouseDown(e, flightGroup.checkout!.id, 'resize-bottom', groupEndHour - coDurationH, groupEndHour, dragTz, dayDate)}
+    onTouchStart={(e) => onTouchStart(e, flightGroup.checkout!.id, 'resize-bottom', groupEndHour - coDurationH, groupEndHour, dragTz, dayDate)}
+    onTouchMove={onTouchMove}
+    onTouchEnd={onTouchEnd}
+  />
 )}
 ```
 
-Add a conflict ring around the card itself. Inside the card rendering area (around line 645), wrap with conflict indicator:
+### 2c. Lock icon always shown as locked on flights
+
+**File: `src/components/timeline/CalendarDay.tsx`** -- In the flight group lock icon section (lines 708-722), the lock icon currently toggles. Change it so that for flights, it always shows the locked icon and clicking does nothing (or shows a toast "Flight position is fixed"):
 
 ```typescript
-{hasConflict && !isDragged && (
-  <div className="absolute inset-0 rounded-xl ring-2 ring-red-400/60 pointer-events-none z-20" />
+{isEditor && onToggleLock && (
+  <button
+    onClick={(e) => {
+      e.stopPropagation();
+      if (flightGroup) {
+        toast.info('Flight position is fixed — edit times inside the card');
+      } else {
+        onToggleLock(entry.id, !!isLocked);
+      }
+    }}
+    className="absolute -top-2 -right-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+  >
+    {(isLocked || flightGroup) ? (
+      <Lock className="h-3 w-3 text-amber-500" />
+    ) : (
+      <LockOpen className="h-3 w-3 text-muted-foreground/50" />
+    )}
+  </button>
 )}
 ```
 
-Add a small conflict badge icon (top-right corner of the card):
+### 2d. Flight locked attempt feedback
+
+Update `handleLockedAttempt` or the flight drag start handler to show a specific toast for flights: "Flight position is fixed — edit times inside the card" instead of the generic "Cannot drag a locked event".
+
+In the `onDragStart` for `FlightGroupCard` (lines 691-696), always show the flight-specific message:
 
 ```typescript
-{hasConflict && !isDragged && (
-  <div className="absolute -top-1 -right-1 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow-md">
-    <AlertTriangle className="h-3 w-3" />
-  </div>
-)}
-```
-
-**Change D: Show toast on overlap detection**
-
-Add a `useEffect` or inline check: when `overlapMap.size > 0`, show a toast. Use a ref to avoid repeated toasts for the same set of conflicts.
-
-```typescript
-const prevConflictCountRef = useRef(0);
-useEffect(() => {
-  const conflictCount = overlapMap.size;
-  if (conflictCount > 0 && conflictCount !== prevConflictCountRef.current) {
-    toast.warning('Time conflict -- drag to adjust');
-  }
-  prevConflictCountRef.current = conflictCount;
-}, [overlapMap]);
-```
-
-**Change E: Z-index for stacking order**
-
-For overlapping cards, the one with the later start time should render on top. Since `sortedEntries` is already sorted by start time, later entries naturally have a higher index. Use the array index to set z-index:
-
-```typescript
-style={{
-  top,
-  height,
-  left: '0%',
-  width: '100%',
-  zIndex: hasConflict ? 10 + index : 10,
+onDragStart={(e) => {
+  e.stopPropagation();
+  toast.info('Flight position is fixed — edit times inside the card');
 }}
 ```
 
-### File 2: `src/lib/overlapLayout.ts`
+---
 
-No changes needed to the file itself. It can remain in the codebase (it's not harmful), but its import will be removed from `CalendarDay.tsx`. If desired, it can be deleted entirely since nothing else imports it.
+## Change 3: Gap Detection Ignores Connector Cards
 
-## Import Changes in CalendarDay.tsx
+### Current behavior
 
-- Remove: `import { computeOverlapLayout } from '@/lib/overlapLayout';`
-- Add: `import { AlertTriangle } from 'lucide-react';`
-- Add: `import { useEffect, useRef } from 'react';` (useRef may need to be added to the existing import)
+The gap detection (lines 407-410) filters `visibleEntries` by excluding `airport_processing` and linked flight entries:
+
+```typescript
+const visibleEntries = sortedEntries.filter(e => {
+  const opt = e.options[0];
+  return opt && opt.category !== 'airport_processing' && !e.linked_flight_id;
+});
+```
+
+### Fix
+
+Add transport (`'transfer'`) to the exclusion filter:
+
+```typescript
+const visibleEntries = sortedEntries.filter(e => {
+  const opt = e.options[0];
+  return opt
+    && opt.category !== 'airport_processing'
+    && opt.category !== 'transfer'
+    && !e.linked_flight_id;
+});
+```
+
+This means gap detection only looks at gaps between real event cards (activities, restaurants, hotels, etc.) and flight parent cards. Transport cards sitting between two events won't cause extra "Transport" or "Add something" buttons.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| **Database migration** | Add `from_entry_id` and `to_entry_id` columns with CASCADE delete |
+| `src/types/trip.ts` | Add `from_entry_id` and `to_entry_id` to `Entry` interface |
+| `src/pages/Timeline.tsx` | Save parent IDs on transport creation; auto-recalculate transport on parent move |
+| `src/components/timeline/CalendarDay.tsx` | Block drag on transport/flight; add flight resize handles; fix gap detection filter; always-locked icon for flights |
+| `src/components/timeline/EntrySheet.tsx` | Pass `from_entry_id`/`to_entry_id` when saving transport entries |
 
 ## What Is NOT Changed
 
-- Card sizing, height, or duration rendering
-- Drag/drop behavior
-- Transport or flight card rendering
-- The `overlapMap` computation (it stays for conflict detection)
-- `FlightGroupCard` rendering (flight groups already render as a single card)
-
-## Test Cases
-
-1. Two overlapping events should both render full-width, stacked with a red ring and conflict badge
-2. Flight check-in + flight card should render full-width (no side-by-side split)
-3. Non-overlapping events should render normally with no conflict indicators
-4. When overlap is first detected, a toast "Time conflict -- drag to adjust" should appear
-5. The later-starting card should appear on top of the earlier one
-
+- Hotel cards -- fully draggable and resizable
+- Regular event cards -- fully draggable and resizable
+- Transport calculation logic itself (Google Directions edge function)
+- Visual styling of any cards
+- EntryCard click/tap behavior (transport cards remain tappable to edit)
