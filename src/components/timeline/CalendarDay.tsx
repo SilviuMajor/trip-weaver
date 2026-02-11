@@ -53,7 +53,7 @@ interface CalendarDayProps {
   dayIndex?: number;
   isFirstDay?: boolean;
   isLastDay?: boolean;
-  onAddBetween?: (prefillTime: string) => void;
+  onAddBetween?: (prefillTime: string, gapContext?: { fromName: string; toName: string; fromAddress: string; toAddress: string }) => void;
   onAddTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string, resolvedTz?: string) => void;
   onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
   onDropFromPanel?: (entryId: string, hourOffset: number) => void;
@@ -484,7 +484,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                             style={{ top: remainingGapTopPx, height: remainingGapHeight }}
                           />
                           <button
-                            onClick={(e) => { e.stopPropagation(); onAddBetween?.(transferEntry.end_time); }}
+                            onClick={(e) => { e.stopPropagation(); onAddBetween?.(transferEntry.end_time, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' }); }}
                             className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
                             style={{ top: remainingBtnTop }}
                           >
@@ -528,7 +528,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                           })();
                           onAddTransport(entry.id, nextEntry.id, entry.end_time, fromResolvedTz);
                         } else if (onAddBetween) {
-                          onAddBetween(entry.end_time);
+                          onAddBetween(entry.end_time, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
                         }
                       }}
                       className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"

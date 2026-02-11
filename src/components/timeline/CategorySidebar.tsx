@@ -44,7 +44,7 @@ const CategorySidebar = ({
 
   // Build full category list
   const allCategories = useMemo(() => {
-    const cats: CategoryDef[] = PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing' && c.id !== 'transport');
+    const cats: CategoryDef[] = PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing' && c.id !== 'transport' && c.id !== 'transfer');
     const custom = (trip?.category_presets as CategoryPreset[] | null) ?? [];
     custom.forEach((c, i) => {
       cats.push({
@@ -120,7 +120,7 @@ const CategorySidebar = ({
 
     for (const entry of filteredEntries) {
       const catId = entry.options[0]?.category;
-      if (catId === 'airport_processing' || catId === 'transport') continue;
+      if (catId === 'airport_processing' || catId === 'transport' || catId === 'transfer') continue;
       if (catId && map.has(catId)) {
         map.get(catId)!.push(entry);
       } else if (catId) {
@@ -139,7 +139,7 @@ const CategorySidebar = ({
   const scheduledCount = entries.filter(e => e.is_scheduled !== false).length;
   const totalCount = entries.filter(e => {
     const catId = e.options[0]?.category;
-    return catId !== 'airport_processing' && catId !== 'transport';
+    return catId !== 'airport_processing' && catId !== 'transport' && catId !== 'transfer';
   }).length;
 
   const filterTabs: { key: FilterTab; label: string; count: number }[] = [

@@ -385,11 +385,13 @@ const Timeline = () => {
 
   // Transport context for gap button
   const [transportContext, setTransportContext] = useState<{ fromAddress: string; toAddress: string; gapMinutes?: number; fromEntryId?: string; toEntryId?: string; resolvedTz?: string } | null>(null);
+  const [gapContext, setGapContext] = useState<{ fromName: string; toName: string; fromAddress: string; toAddress: string } | null>(null);
 
-  const handleAddBetween = (prefillTime: string) => {
+  const handleAddBetween = (prefillTime: string, ctx?: { fromName: string; toName: string; fromAddress: string; toAddress: string }) => {
     setPrefillStartTime(prefillTime);
     setPrefillEndTime(undefined);
     setTransportContext(null);
+    setGapContext(ctx ?? null);
     setSheetMode('create');
     setSheetEntry(null);
     setSheetOption(null);
@@ -1383,6 +1385,7 @@ const Timeline = () => {
                 setPrefillEndTime(undefined);
                 setPrefillCategory(undefined);
                 setTransportContext(null);
+                setGapContext(null);
               }
             }}
             tripId={trip.id}
@@ -1403,6 +1406,7 @@ const Timeline = () => {
             prefillEndTime={prefillEndTime}
             prefillCategory={prefillCategory}
             transportContext={transportContext}
+            gapContext={gapContext}
             onTransportConflict={(blockDuration, gapMinutes) => {
               const overflow = blockDuration - gapMinutes;
               if (overflow > 0) {
