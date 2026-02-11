@@ -1,131 +1,256 @@
 
-# Fix Auto-Generate Transport Placement
 
-## Problems Found
+# Fix Auto-Schedule Transport + Add Auto-Scroll & Cross-Day Drag
 
-Three bugs cause transport entries to be placed incorrectly and events not to snap together:
+## Three Problems to Solve
 
-### Bug 1: Transport starts at flight end, ignoring checkout
-The edge function filters out checkin/checkout entries from `mainEntries` (line 219-221) so it doesn't create transport between checkout and cafe. But when it processes Flight -> Cafe, it sets `startTime = entryA.end_time` (flight end = 09:50 UTC). The checkout runs until 10:20 UTC, so the transport overlaps with checkout by 30 minutes.
+### Problem 1: Snap is pulling events across days
+The current snap logic in `handleAutoGenerateTransport` indiscriminately pulls forward ANY unlocked event after a transport entry, regardless of which day it belongs to. Events are grouped by ISO date string (`start_time.substring(0, 10)`), but if a Sunday event falls into a group due to timezone differences or if the snap logic crosses day boundaries, it gets pulled into Saturday's schedule.
 
-**Fix**: When entryA is a flight, find its linked checkout entry and use the checkout's `end_time` as the transport start time. Similarly, when entryB is a flight, find its linked checkin entry and use the checkin's `start_time` as the transport destination arrival deadline.
+**Root cause**: The `dayStr` grouping uses raw ISO date which may not match the trip timezone day. Also, the cascade push doesn't check whether pushing an event would cross midnight into the next day.
 
-### Bug 2: Transport doesn't snap the next event forward
-The cafe starts at 11:15, and the transport ends around ~10:40. There's a 35-minute gap. The user expects the cafe to be pulled forward to connect with the transport end. The current push algorithm only handles overlaps (transport end > next event start), not gaps.
+### Problem 2: No auto-scroll when dragging to screen edge
+The `useDragResize` hook handles vertical drag movement within a single day's CalendarDay container but has no awareness of the scroll container or viewport edges. When you drag to the bottom of the screen, nothing scrolls.
 
-**Fix**: After creating transport entries, add a "snap" step that pulls the next unlocked event forward to start at the transport's end time (preserving its duration).
-
-### Bug 3: Push algorithm doesn't cascade after snapping
-After snapping the cafe forward to 10:40, we need to check if this creates overlap or gap with the next event (hotel at 14:00). Events should only be snapped if they're the immediate next event after transport.
-
-**Fix**: The snap logic should only apply to the event immediately after each transport entry, not cascade further. Subsequent events keep their original times unless they overlap.
+### Problem 3: Can't drag entries between different day timelines
+Each `CalendarDay` component is an isolated drag context. The `useDragResize` hook tracks `clientY` relative to a single day's pixel grid and commits back to the same day. There's no mechanism to detect that a drag has moved into an adjacent day's area and update the target day accordingly.
 
 ---
 
-## File Changes
+## Solution Design
 
-### 1. Edge Function: `supabase/functions/auto-generate-transport/index.ts`
+### Fix 1: Guard snap/push against cross-day and cross-midnight shifts
 
-**Account for checkin/checkout when determining transport start/end times:**
+**Changes to `src/pages/Timeline.tsx` (`handleAutoGenerateTransport`)**:
 
-```typescript
-// Before processing pairs, build a map of flight -> checkout end times
-const flightCheckoutEnd = new Map<string, string>();
-const flightCheckinStart = new Map<string, string>();
-for (const e of dayEntries) {
-  if (e.linked_type === 'checkout') {
-    // Find the flight this checkout belongs to
-    const flightEntry = dayEntries.find(f => {
-      const fOpt = optionsByEntry.get(f.id);
-      return fOpt?.category === 'flight' && 
-             new Date(f.end_time).getTime() === new Date(e.start_time).getTime();
-    });
-    if (flightEntry) flightCheckoutEnd.set(flightEntry.id, e.end_time);
-  }
-  if (e.linked_type === 'checkin') {
-    const flightEntry = dayEntries.find(f => {
-      const fOpt = optionsByEntry.get(f.id);
-      return fOpt?.category === 'flight' && 
-             new Date(f.start_time).getTime() === new Date(e.end_time).getTime();
-    });
-    if (flightEntry) flightCheckinStart.set(flightEntry.id, e.start_time);
-  }
-}
+- Use the trip timezone to determine the calendar day for each entry (not raw ISO substring)
+- Add a midnight guard: never snap or push an entry if doing so would move it across midnight into a different calendar day
+- Only snap events that are on the SAME calendar day as the transport entry
+- Only snap the FIRST non-transport unlocked event after each transport (already correct, just needs the day guard)
 
-// When determining startTime:
-const startTime = flightCheckoutEnd.get(entryA.id) || entryA.end_time;
+```
+Before snap/push:
+  entryDay = getDateInTimezone(entry.start_time, tripTimezone)
+  transportDay = getDateInTimezone(transport.end_time, tripTimezone)
+  if entryDay !== transportDay -> skip this entry entirely
+  
+Before push:
+  newStart = currentEnd (the pushed time)
+  newDay = getDateInTimezone(newStart, tripTimezone)  
+  if newDay !== originalDay -> skip, don't push across midnight
 ```
 
-This ensures transport from a flight starts after checkout (10:20), not at flight end (09:50).
+### Fix 2: Auto-scroll with acceleration when dragging near viewport edges
 
-**Add snap information to the response:**
+**Changes to `src/hooks/useDragResize.ts`**:
 
-Return the `to_entry_id` and `transport_end_time` for each created transport so the client knows which event to snap.
+Add an auto-scroll mechanism that activates during drag:
 
-### 2. Client Push Algorithm: `src/pages/Timeline.tsx`
+- Define an edge zone (80px from top/bottom of the scroll container)
+- When the pointer is within the edge zone during a drag, scroll the container
+- Use accelerating speed: the closer to the edge, the faster it scrolls (200px/s at zone boundary, up to 800px/s at the very edge)
+- Use `requestAnimationFrame` for smooth scrolling
+- Clean up the animation frame on drag end
 
-**Add snap-forward logic after transport creation:**
-
-After refreshing data, for each transport entry created:
-1. Find the next non-transport, non-locked entry after it
-2. If there's a gap between transport end and next entry start, snap the next entry forward (move its start to transport end, preserve duration)
-3. Then run the existing cascade push for any resulting overlaps
+The hook needs a new parameter: `scrollContainerRef` pointing to the main timeline scroll container (`scrollRef` in Timeline.tsx).
 
 ```typescript
-// Snap: pull next unlocked event to connect with transport end
-for (const transport of data.created) {
-  const nextEntry = dayEnts.find(e => 
-    new Date(e.start_time).getTime() > new Date(transport.end_time).getTime() &&
-    !e.is_locked &&
-    optMap.get(e.id) !== 'transfer'
-  );
-  if (nextEntry) {
-    const gap = new Date(nextEntry.start_time).getTime() - new Date(transport.end_time).getTime();
-    if (gap > 0) {
-      const duration = new Date(nextEntry.end_time).getTime() - new Date(nextEntry.start_time).getTime();
-      nextEntry.start_time = transport.end_time;
-      nextEntry.end_time = new Date(new Date(transport.end_time).getTime() + duration).toISOString();
-      updates.push({ id: nextEntry.id, start_time: nextEntry.start_time, end_time: nextEntry.end_time });
+// During drag, check if pointer is near edge
+const EDGE_ZONE = 80; // px from edge
+const MIN_SPEED = 200; // px/s
+const MAX_SPEED = 800; // px/s
+
+// In rAF loop:
+const rect = scrollContainer.getBoundingClientRect();
+const distFromBottom = rect.bottom - clientY;
+const distFromTop = clientY - rect.top;
+
+if (distFromBottom < EDGE_ZONE) {
+  const ratio = 1 - (distFromBottom / EDGE_ZONE); // 0 at zone edge, 1 at screen edge
+  const speed = MIN_SPEED + ratio * (MAX_SPEED - MIN_SPEED);
+  scrollContainer.scrollTop += speed * deltaTime;
+}
+// Similar for top edge (scroll up)
+```
+
+### Fix 3: Cross-day drag-and-drop
+
+**Changes to `src/hooks/useDragResize.ts`**:
+
+Add a new parameter `dayBoundaries` -- an array of `{ dayDate: Date, topPx: number, bottomPx: number }` representing where each day's timeline sits in the scroll container. During drag:
+
+- Track which day the pointer is currently over
+- If the pointer crosses into a different day, update a `targetDay` field in `dragState`
+- On commit, pass the target day along with the new hour offsets
+
+**Changes to `src/components/timeline/CalendarDay.tsx`**:
+
+- Accept a `ref` or expose its container element position so Timeline.tsx can build the `dayBoundaries` array
+- When rendering, respect `dragState.targetDay` to show the ghost/preview in the correct day
+
+**Changes to `src/pages/Timeline.tsx`**:
+
+- Collect refs from each CalendarDay to build the boundaries array
+- Pass `scrollRef` and boundaries to `useDragResize`
+- Update `handleEntryTimeChange` (the commit handler) to also handle day changes:
+  - Compute new `start_time` and `end_time` using the TARGET day + hour offset
+  - Update the entry in the database
+
+```typescript
+// In onCommit callback:
+onCommit: (entryId, newStartHour, newEndHour, tz, targetDayDate) => {
+  // If targetDayDate differs from original day, recompute ISO times for new day
+  const newStart = localToUTC(targetDayDate, newStartHour, tz);
+  const newEnd = localToUTC(targetDayDate, newEndHour, tz);
+  handleEntryTimeChange(entryId, newStart, newEnd);
+}
+```
+
+---
+
+## File Changes Summary
+
+| File | Changes |
+|------|---------|
+| `src/pages/Timeline.tsx` | Fix day grouping in snap/push to use trip timezone; add midnight guard; collect day refs for cross-day drag; pass scrollRef to useDragResize; update commit handler for cross-day moves |
+| `src/hooks/useDragResize.ts` | Add `scrollContainerRef` param for auto-scroll; add `dayBoundaries` param for cross-day detection; implement accelerating edge-scroll in rAF loop; add `targetDay` to DragState; clean up rAF on unmount |
+| `src/components/timeline/CalendarDay.tsx` | Forward ref on the day container div so Timeline can measure its position for dayBoundaries |
+
+---
+
+## Technical Details
+
+### Auto-scroll implementation in useDragResize.ts
+
+```typescript
+interface UseDragResizeOptions {
+  pixelsPerHour: number;
+  startHour: number;
+  onCommit: (entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date) => void;
+  scrollContainerRef?: React.RefObject<HTMLElement>;
+  dayBoundaries?: Array<{ dayDate: Date; topPx: number; bottomPx: number }>;
+}
+
+// New fields in DragState:
+interface DragState {
+  // ...existing fields...
+  targetDay?: Date;  // which day the drag is currently over
+}
+
+// Auto-scroll loop (started on drag start, stopped on commit):
+const scrollRafRef = useRef<number>(0);
+const lastFrameRef = useRef<number>(0);
+
+const autoScrollLoop = useCallback((timestamp: number) => {
+  if (!isDraggingRef.current || !scrollContainerRef?.current) return;
+  
+  const dt = (timestamp - lastFrameRef.current) / 1000;
+  lastFrameRef.current = timestamp;
+  
+  const container = scrollContainerRef.current;
+  const rect = container.getBoundingClientRect();
+  const clientY = lastClientYRef.current;  // track last known pointer Y
+  
+  const EDGE = 80;
+  const distBottom = rect.bottom - clientY;
+  const distTop = clientY - rect.top;
+  
+  if (distBottom < EDGE && distBottom > 0) {
+    const ratio = 1 - distBottom / EDGE;
+    container.scrollTop += (200 + ratio * 600) * dt;
+  } else if (distTop < EDGE && distTop > 0) {
+    const ratio = 1 - distTop / EDGE;
+    container.scrollTop -= (200 + ratio * 600) * dt;
+  }
+  
+  scrollRafRef.current = requestAnimationFrame(autoScrollLoop);
+}, [scrollContainerRef]);
+```
+
+### Cross-day detection in useDragResize.ts
+
+```typescript
+// During handlePointerMove, after computing new hours:
+if (dayBoundaries && dayBoundaries.length > 0) {
+  const scrollTop = scrollContainerRef?.current?.scrollTop ?? 0;
+  const containerTop = scrollContainerRef?.current?.getBoundingClientRect().top ?? 0;
+  const absoluteY = clientY - containerTop + scrollTop;
+  
+  for (const boundary of dayBoundaries) {
+    if (absoluteY >= boundary.topPx && absoluteY < boundary.bottomPx) {
+      // Update target day and recalculate hour within this day's grid
+      const hourWithinDay = startHourForDay + (absoluteY - boundary.topPx) / pixelsPerHour;
+      // ...update dragState with targetDay and recalculated hours
+      break;
     }
   }
 }
-
-// Then run existing cascade push for any remaining overlaps
 ```
 
----
+### Midnight guard in Timeline.tsx snap/push
 
-## Expected Result
+```typescript
+// Helper to get calendar day string in trip timezone
+const getDayKey = (isoTime: string) => {
+  return getDateInTimezone(isoTime, tripTimezone)
+    .toISOString().substring(0, 10);
+};
 
-For the user's scenario (Day 1):
+// In SNAP phase:
+for (const transport of data.created) {
+  const transportDayKey = getDayKey(transport.end_time);
+  const nextEntry = dayEnts.find((e) => {
+    // Must be same calendar day
+    if (getDayKey(e.start_time) !== transportDayKey) return false;
+    // ...existing filters (not locked, not transfer, etc.)
+  });
+  // ...
+}
 
-```text
-BEFORE:
-  Coach         06:00 - 07:30 UTC
-  [Checkin]     06:30 - 08:15 UTC  
-  Flight BA432  09:15 - 09:50 UTC  
-  [Checkout]    09:50 - 10:20 UTC
-  -- 55 min gap --
-  Café          11:15 - 12:15 UTC
-  -- 1h45m gap --
-  Hotel         14:00 - 15:00 UTC
-
-AFTER:
-  Coach         06:00 - 07:30 UTC
-  [Checkin]     06:30 - 08:15 UTC
-  Flight BA432  09:15 - 09:50 UTC
-  [Checkout]    09:50 - 10:20 UTC
-  Transit       10:20 - 10:40 UTC  (transport starts at checkout end)
-  Café          10:40 - 11:40 UTC  (snapped forward to transport end, duration preserved)
-  -- gap --
-  Hotel         14:00 - 15:00 UTC  (not moved, no overlap)
+// In CASCADE PUSH phase:
+if (currentEnd > nextStart && !dayEnts[i + 1].is_locked) {
+  const newStartTime = new Date(currentEnd).toISOString();
+  // Guard: don't push across midnight
+  if (getDayKey(newStartTime) !== getDayKey(dayEnts[i].start_time)) {
+    continue; // skip, would cross into next day
+  }
+  // ...existing push/compress logic
+}
 ```
 
----
+### CalendarDay ref forwarding
 
-## Technical Summary
+```typescript
+// CalendarDay.tsx - wrap the outer container with forwardRef
+const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({ ... }, ref) => {
+  return (
+    <div ref={ref} className="relative">
+      {/* ...existing content */}
+    </div>
+  );
+});
+```
 
-| File | Change |
-|------|--------|
-| `supabase/functions/auto-generate-transport/index.ts` | Use checkout end_time (not flight end_time) as transport start; use checkin start_time as transport deadline for destination flights |
-| `src/pages/Timeline.tsx` | Add snap-forward logic to pull next unlocked event to transport end; then run cascade push for remaining overlaps |
+### Timeline.tsx - collecting day boundaries
+
+```typescript
+const dayRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+// After render, compute boundaries:
+const dayBoundaries = useMemo(() => {
+  if (!scrollRef.current) return [];
+  const scrollRect = scrollRef.current.getBoundingClientRect();
+  return days.map(day => {
+    const key = format(day, 'yyyy-MM-dd');
+    const el = dayRefs.current.get(key);
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return {
+      dayDate: day,
+      topPx: rect.top - scrollRect.top + scrollRef.current!.scrollTop,
+      bottomPx: rect.bottom - scrollRect.top + scrollRef.current!.scrollTop,
+    };
+  }).filter(Boolean);
+}, [days, entries]); // recalc when entries change (affects heights)
+```
+
