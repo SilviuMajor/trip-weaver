@@ -83,6 +83,8 @@ const Timeline = () => {
 
   // Zoom
   const scrollRef = useRef<HTMLDivElement>(null);
+  const mainScrollRef = useRef<HTMLElement>(null);
+  const dayRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
   const { zoom, changeZoom, spacingClass, cardSizeClass, zoomLabel } = useTimelineZoom(scrollRef);
 
 
@@ -851,41 +853,53 @@ const Timeline = () => {
           if (!optMap.has(o.entry_id)) optMap.set(o.entry_id, o.category ?? '');
         }
 
-        // Group by day
+        // Helper: get calendar day key in trip timezone
+        const getDayKey = (isoTime: string) => getDateInTimezone(isoTime, tripTimezone);
+
+        // Group by calendar day in trip timezone
         const dayGroupsForPush = new Map<string, any[]>();
         for (const e of freshEntries) {
-          const dayStr = e.start_time.substring(0, 10);
+          const dayStr = getDayKey(e.start_time);
           if (!dayGroupsForPush.has(dayStr)) dayGroupsForPush.set(dayStr, []);
           dayGroupsForPush.get(dayStr)!.push(e);
         }
 
         const updates: Array<{ id: string; start_time: string; end_time: string }> = [];
 
-        for (const [, dayEnts] of dayGroupsForPush) {
+        for (const [dayKey, dayEnts] of dayGroupsForPush) {
           // Sort by start_time
           dayEnts.sort((a: any, b: any) =>
             new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
           );
 
           // SNAP: For each newly created transport, pull the next unlocked non-transport event forward
+          // ONLY if both transport and next event are on the SAME calendar day
           if (data?.created?.length > 0) {
             for (const transport of data.created) {
+              // Only process transports that belong to this day
+              if (getDayKey(transport.end_time) !== dayKey) continue;
+
               const transportEnd = new Date(transport.end_time).getTime();
-              // Find the next non-transport, non-locked entry after this transport
+              // Find the next non-transport, non-locked entry after this transport ON THE SAME DAY
               const nextEntry = dayEnts.find((e: any) => {
                 const eStart = new Date(e.start_time).getTime();
-                return eStart > transportEnd - 1 && // starts at or after transport end (with 1ms tolerance)
+                return eStart > transportEnd - 1 &&
                   !e.is_locked &&
                   e.linked_type !== 'checkin' && e.linked_type !== 'checkout' &&
                   optMap.get(e.id) !== 'transfer' &&
-                  e.id !== transport.id;
+                  e.id !== transport.id &&
+                  getDayKey(e.start_time) === dayKey; // same day guard
               });
               if (nextEntry) {
                 const gap = new Date(nextEntry.start_time).getTime() - transportEnd;
                 if (gap > 0) {
                   const duration = new Date(nextEntry.end_time).getTime() - new Date(nextEntry.start_time).getTime();
-                  nextEntry.start_time = new Date(transportEnd).toISOString();
-                  nextEntry.end_time = new Date(transportEnd + duration).toISOString();
+                  const newStart = new Date(transportEnd).toISOString();
+                  const newEnd = new Date(transportEnd + duration).toISOString();
+                  // Midnight guard: don't snap if it would change the calendar day
+                  if (getDayKey(newStart) !== dayKey) continue;
+                  nextEntry.start_time = newStart;
+                  nextEntry.end_time = newEnd;
                   updates.push({
                     id: nextEntry.id,
                     start_time: nextEntry.start_time,
@@ -896,7 +910,7 @@ const Timeline = () => {
             }
           }
 
-          // CASCADE PUSH: resolve any remaining overlaps
+          // CASCADE PUSH: resolve any remaining overlaps (same-day only)
           for (let i = 0; i < dayEnts.length - 1; i++) {
             const currentEnd = new Date(dayEnts[i].end_time).getTime();
             const nextStart = new Date(dayEnts[i + 1].start_time).getTime();
@@ -905,15 +919,24 @@ const Timeline = () => {
               const overlapMs = currentEnd - nextStart;
               const nextDuration = new Date(dayEnts[i + 1].end_time).getTime() - new Date(dayEnts[i + 1].start_time).getTime();
 
+              let newStartTime: string;
+              let newEndTime: string;
+
               // Check if next entry is overnight (> 6 hours, likely hotel)
               if (nextDuration > 6 * 3600000) {
-                // Compress from start: move start_time forward, keep end_time
-                dayEnts[i + 1].start_time = new Date(currentEnd).toISOString();
+                newStartTime = new Date(currentEnd).toISOString();
+                newEndTime = dayEnts[i + 1].end_time;
               } else {
-                // Push: shift both start and end
-                dayEnts[i + 1].start_time = new Date(new Date(dayEnts[i + 1].start_time).getTime() + overlapMs).toISOString();
-                dayEnts[i + 1].end_time = new Date(new Date(dayEnts[i + 1].end_time).getTime() + overlapMs).toISOString();
+                newStartTime = new Date(new Date(dayEnts[i + 1].start_time).getTime() + overlapMs).toISOString();
+                newEndTime = new Date(new Date(dayEnts[i + 1].end_time).getTime() + overlapMs).toISOString();
               }
+
+              // Midnight guard: don't push across midnight into a different calendar day
+              if (getDayKey(newStartTime) !== dayKey) continue;
+
+              dayEnts[i + 1].start_time = newStartTime;
+              dayEnts[i + 1].end_time = newEndTime;
+
               // Only add to updates if not already there
               if (!updates.find(u => u.id === dayEnts[i + 1].id)) {
                 updates.push({
@@ -922,7 +945,6 @@ const Timeline = () => {
                   end_time: dayEnts[i + 1].end_time,
                 });
               } else {
-                // Update existing entry in updates array
                 const existing = updates.find(u => u.id === dayEnts[i + 1].id)!;
                 existing.start_time = dayEnts[i + 1].start_time;
                 existing.end_time = dayEnts[i + 1].end_time;
@@ -958,6 +980,43 @@ const Timeline = () => {
   };
 
   const days = getDays();
+
+  // Compute day boundaries for cross-day drag
+  const [dayBoundaries, setDayBoundaries] = useState<Array<{ dayDate: Date; topPx: number; bottomPx: number }>>([]);
+
+  useEffect(() => {
+    if (!mainScrollRef.current || days.length === 0) return;
+    // Recompute boundaries after layout settles
+    const timer = setTimeout(() => {
+      const container = mainScrollRef.current;
+      if (!container) return;
+      const containerRect = container.getBoundingClientRect();
+      const boundaries: Array<{ dayDate: Date; topPx: number; bottomPx: number }> = [];
+      for (const day of days) {
+        const key = format(day, 'yyyy-MM-dd');
+        const el = dayRefsMap.current.get(key);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        boundaries.push({
+          dayDate: day,
+          topPx: rect.top - containerRect.top + container.scrollTop,
+          bottomPx: rect.bottom - containerRect.top + container.scrollTop,
+        });
+      }
+      setDayBoundaries(boundaries);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [days, entries, loading]);
+
+  // Ref callback for day elements
+  const setDayRef = useCallback((day: Date) => (el: HTMLDivElement | null) => {
+    const key = format(day, 'yyyy-MM-dd');
+    if (el) {
+      dayRefsMap.current.set(key, el);
+    } else {
+      dayRefsMap.current.delete(key);
+    }
+  }, []);
 
   if (!currentUser) return null;
 
@@ -1010,13 +1069,14 @@ const Timeline = () => {
               <LivePanel open={liveOpen} onOpenChange={setLiveOpen} />
             )}
 
-            <main className="flex-1 overflow-y-auto pb-20">
+            <main ref={mainScrollRef} className="flex-1 overflow-y-auto pb-20">
               {days.map((day, index) => {
                 const dayStr = format(day, 'yyyy-MM-dd');
                 const tzInfo = dayTimezoneMap.get(dayStr);
                 const dayLoc = dayLocationMap.get(dayStr);
                 return (
                   <CalendarDay
+                    ref={setDayRef(day)}
                     key={day.toISOString()}
                     date={day}
                     entries={getEntriesForDay(day)}
@@ -1045,6 +1105,8 @@ const Timeline = () => {
                     dayFlights={tzInfo?.flights}
                     isEditor={isEditor}
                     onToggleLock={handleToggleLock}
+                    scrollContainerRef={mainScrollRef}
+                    dayBoundaries={dayBoundaries}
                   />
                 );
               })}

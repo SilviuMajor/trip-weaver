@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, forwardRef } from 'react';
 import { format, isToday, isPast, addMinutes } from 'date-fns';
 import { calculateSunTimes } from '@/lib/sunCalc';
 import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData } from '@/types/trip';
@@ -23,6 +23,12 @@ interface FlightTzInfo {
   flightStartHour: number;
   flightEndHour: number;
   flightEndUtc?: string;
+}
+
+interface DayBoundary {
+  dayDate: Date;
+  topPx: number;
+  bottomPx: number;
 }
 
 interface CalendarDayProps {
@@ -54,7 +60,8 @@ interface CalendarDayProps {
   activeTz?: string;
   isEditor?: boolean;
   onToggleLock?: (entryId: string, currentLocked: boolean) => void;
-  
+  scrollContainerRef?: React.RefObject<HTMLElement>;
+  dayBoundaries?: DayBoundary[];
 }
 
 /** Resolve the timezone(s) to use for positioning an entry on the grid */
@@ -90,7 +97,7 @@ function getHourInTimezone(isoString: string, tzName: string): number {
   return hour + minute / 60;
 }
 
-const CalendarDay = ({
+const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
   date: dayDate,
   entries,
   allEntries = [],
@@ -119,7 +126,9 @@ const CalendarDay = ({
   activeTz,
   isEditor,
   onToggleLock,
-}: CalendarDayProps) => {
+  scrollContainerRef,
+  dayBoundaries,
+}, ref) => {
   const isUndated = !!dayLabel;
   const today = !isUndated && isToday(dayDate);
   const dayPast = !isUndated && isPast(dayDate) && !today;
@@ -136,12 +145,13 @@ const CalendarDay = ({
   const containerHeight = totalHours * PIXELS_PER_HOUR;
 
   // Drag-to-resize/move
-  const handleDragCommit = useCallback((entryId: string, newStartHour: number, newEndHour: number, tz?: string) => {
+  const handleDragCommit = useCallback((entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date) => {
     if (!onEntryTimeChange) return;
     const entry = sortedEntries.find(e => e.id === entryId);
     if (entry?.is_locked) return;
 
-    const dateStr = format(dayDate, 'yyyy-MM-dd');
+    const effectiveDay = targetDay || dayDate;
+    const dateStr = format(effectiveDay, 'yyyy-MM-dd');
 
     const toTimeStr = (hour: number) => {
       const minutes = Math.round(hour * 60);
@@ -200,6 +210,8 @@ const CalendarDay = ({
     pixelsPerHour: PIXELS_PER_HOUR,
     startHour,
     onCommit: handleDragCommit,
+    scrollContainerRef,
+    dayBoundaries,
   });
 
   // Locked-entry drag feedback
@@ -287,7 +299,7 @@ const CalendarDay = ({
   };
 
   return (
-    <div className="relative" data-day-index={dayIndex}>
+    <div ref={ref} className="relative" data-day-index={dayIndex}>
       {/* Day header */}
       <div
         className={cn(
@@ -660,8 +672,8 @@ const CalendarDay = ({
                         {canDrag && !flightGroup && (
                           <div
                             className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
-                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartHour, origEndHour, dragTz)}
-                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartHour, origEndHour, dragTz)}
+                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartHour, origEndHour, dragTz, dayDate)}
+                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartHour, origEndHour, dragTz, dayDate)}
                             onTouchMove={onTouchMove}
                             onTouchEnd={onTouchEnd}
                           />
@@ -705,13 +717,13 @@ const CalendarDay = ({
                                 if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
                               }}
                               onDragStart={canDrag ? (e) => {
-                                onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                                onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz, dayDate);
                               } : isLocked ? (e) => {
                                 e.stopPropagation();
                                 handleLockedAttempt(entry.id);
                               } : undefined}
                               onTouchDragStart={canDrag ? (e) => {
-                                onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                                onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz, dayDate);
                               } : isLocked ? (e) => {
                                 e.stopPropagation();
                                 handleLockedAttempt(entry.id);
@@ -768,13 +780,13 @@ const CalendarDay = ({
                               linkedType={entry.linked_type}
                               canEdit={isEditor}
                               onDragStart={canDrag ? (e) => {
-                                onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                                onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz, dayDate);
                               } : isLocked ? (e) => {
                                 e.stopPropagation();
                                 handleLockedAttempt(entry.id);
                               } : undefined}
                               onTouchDragStart={canDrag ? (e) => {
-                                onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
+                                onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz, dayDate);
                               } : isLocked ? (e) => {
                                 e.stopPropagation();
                                 handleLockedAttempt(entry.id);
@@ -806,8 +818,8 @@ const CalendarDay = ({
                         {canDrag && !flightGroup && (
                           <div
                             className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
-                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz)}
-                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz)}
+                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz, dayDate)}
+                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz, dayDate)}
                             onTouchMove={onTouchMove}
                             onTouchEnd={onTouchEnd}
                           />
@@ -967,6 +979,9 @@ const CalendarDay = ({
       )}
     </div>
   );
-};
+});
+
+CalendarDay.displayName = 'CalendarDay';
 
 export default CalendarDay;
+
