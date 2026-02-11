@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, useEffect, useRef, forwardRef } from 'react';
 import { format, isToday, isPast, addMinutes } from 'date-fns';
 import { calculateSunTimes } from '@/lib/sunCalc';
-import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData } from '@/types/trip';
+import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData, TransportMode } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
 import { localToUTC, getHourInTimezone, resolveEntryTz } from '@/lib/timezoneUtils';
@@ -11,8 +11,10 @@ import TimeSlotGrid, { getUtcOffsetHoursDiff } from './TimeSlotGrid';
 import EntryCard from './EntryCard';
 import FlightGroupCard from './FlightGroupCard';
 import TravelSegmentCard from './TravelSegmentCard';
+import TransportConnector from './TransportConnector';
 import WeatherBadge from './WeatherBadge';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 
 const PIXELS_PER_HOUR = 80;
 
@@ -55,6 +57,7 @@ interface CalendarDayProps {
   onAddTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string) => void;
   onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
   onDropFromPanel?: (entryId: string, hourOffset: number) => void;
+  onModeSwitchConfirm?: (entryId: string, mode: string, newDurationMin: number, distanceKm: number, polyline?: string | null) => Promise<void>;
   dayFlights?: FlightTzInfo[];
   activeTz?: string;
   isEditor?: boolean;
@@ -90,6 +93,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
   onAddTransport,
   onEntryTimeChange,
   onDropFromPanel,
+  onModeSwitchConfirm,
   dayFlights = [],
   activeTz,
   isEditor,
@@ -190,6 +194,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
 
   // Locked-entry drag feedback
   const [shakeEntryId, setShakeEntryId] = useState<string | null>(null);
+  const [pendingModeSwitch, setPendingModeSwitch] = useState<{ entryId: string; mode: string; newDurationMin: number; distanceKm: number; polyline?: string | null } | null>(null);
+  const [refreshingTransportId, setRefreshingTransportId] = useState<string | null>(null);
   const handleLockedAttempt = useCallback((entryId: string) => {
     toast.error('Cannot drag a locked event');
     setShakeEntryId(entryId);
@@ -447,9 +453,50 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
 
                 if (gapMin <= 5) return null; // too small
 
+                // Check if transport already exists between these entries
+                if (hasTransferBetween(entry, nextEntry)) {
+                  // Find the transport entry to check for remaining gap after it
+                  const transferEntry = sortedEntries.find(e => {
+                    const opt = e.options[0];
+                    if (!opt || opt.category !== 'transfer') return false;
+                    const eStart = new Date(e.start_time).getTime();
+                    const aEnd = new Date(entry.end_time).getTime();
+                    const bStart = new Date(nextEntry.start_time).getTime();
+                    return eStart >= aEnd && eStart <= bStart;
+                  });
+                  if (transferEntry) {
+                    // Check remaining gap after transport
+                    const transportEndHour = getHourInTimezone(transferEntry.end_time, aTzs.endTz);
+                    const remainingGapMin = Math.round((bStartHour - transportEndHour) * 60);
+                    if (remainingGapMin > 5) {
+                      const remainingGapTopPx = (transportEndHour - startHour) * PIXELS_PER_HOUR;
+                      const remainingGapHeight = (bStartHour - startHour) * PIXELS_PER_HOUR - remainingGapTopPx;
+                      const remainingMidHour = (transportEndHour + bStartHour) / 2;
+                      const remainingBtnTop = (remainingMidHour - startHour) * PIXELS_PER_HOUR - 12;
+                      return (
+                        <div key={`gap-${entry.id}-${nextEntry.id}`}>
+                          <div
+                            className="absolute left-1/2 border-l-2 border-dashed border-primary/20 pointer-events-none"
+                            style={{ top: remainingGapTopPx, height: remainingGapHeight }}
+                          />
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onAddBetween?.(transferEntry.end_time); }}
+                            className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                            style={{ top: remainingBtnTop }}
+                          >
+                            <Plus className="h-3 w-3" />
+                            <span>+ Add something</span>
+                          </button>
+                        </div>
+                      );
+                    }
+                  }
+                  return null;
+                }
+
                 const gapTopPx = (aEndHour - startHour) * PIXELS_PER_HOUR;
-                const gapBottomPx = (bStartHour - startHour) * PIXELS_PER_HOUR;
-                const gapHeight = gapBottomPx - gapTopPx;
+                const gapBottomPx2 = (bStartHour - startHour) * PIXELS_PER_HOUR;
+                const gapHeight = gapBottomPx2 - gapTopPx;
                 const midHour = (aEndHour + bStartHour) / 2;
                 const btnTop = (midHour - startHour) * PIXELS_PER_HOUR - 12;
                 const isTransportGap = gapMin < 120;
@@ -744,7 +791,61 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                             )}
                           </div>
                           );
-                        })() : (
+                        })() : isTransport ? (
+                          /* Transport Connector (slim inline strip) */
+                          <div className="relative h-full">
+                            <TransportConnector
+                              entry={entry}
+                              option={primaryOption}
+                              height={height}
+                              fromLabel={primaryOption.departure_location || undefined}
+                              toLabel={primaryOption.arrival_location || undefined}
+                              isRefreshing={refreshingTransportId === entry.id}
+                              pendingMode={pendingModeSwitch?.entryId === entry.id ? pendingModeSwitch.mode : null}
+                              onModeSelect={(mode, durationMin, distanceKm, polyline) => {
+                                setPendingModeSwitch({ entryId: entry.id, mode, newDurationMin: durationMin, distanceKm, polyline });
+                              }}
+                              onRefresh={async () => {
+                                setRefreshingTransportId(entry.id);
+                                try {
+                                  const { data, error } = await supabase.functions.invoke('google-directions', {
+                                    body: {
+                                      fromAddress: primaryOption.departure_location,
+                                      toAddress: primaryOption.arrival_location,
+                                      modes: ['walk', 'transit', 'drive', 'bicycle'],
+                                      departureTime: entry.start_time,
+                                    },
+                                  });
+                                  if (!error && data?.results) {
+                                    await supabase.from('entry_options').update({
+                                      transport_modes: data.results,
+                                    } as any).eq('id', primaryOption.id);
+                                    onVoteChange();
+                                  }
+                                } catch (err) {
+                                  console.error('Transport refresh failed:', err);
+                                } finally {
+                                  setRefreshingTransportId(null);
+                                }
+                              }}
+                              onConfirmSwitch={pendingModeSwitch?.entryId === entry.id ? async () => {
+                                if (onModeSwitchConfirm && pendingModeSwitch) {
+                                  await onModeSwitchConfirm(
+                                    pendingModeSwitch.entryId,
+                                    pendingModeSwitch.mode,
+                                    pendingModeSwitch.newDurationMin,
+                                    pendingModeSwitch.distanceKm,
+                                    pendingModeSwitch.polyline
+                                  );
+                                  setPendingModeSwitch(null);
+                                }
+                              } : undefined}
+                              onCancelSwitch={pendingModeSwitch?.entryId === entry.id ? () => {
+                                setPendingModeSwitch(null);
+                              } : undefined}
+                            />
+                          </div>
+                        ) : (
                           <div className="relative h-full">
                             <EntryCard
                               overlapMinutes={overlapMap.get(entry.id)?.minutes}
@@ -808,8 +909,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                           </div>
                         )}
 
-                        {/* Bottom resize handle */}
-                        {canDrag && !flightGroup && (
+                        {/* Bottom resize handle — not for transport */}
+                        {canDrag && !flightGroup && !isTransport && (
                           <div
                             className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
                             onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz, dayDate)}
@@ -818,7 +919,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                             onTouchEnd={onTouchEnd}
                           />
                         )}
-                        {!canDrag && isLocked && !flightGroup && (
+                        {!canDrag && isLocked && !flightGroup && !isTransport && (
                           <div
                             className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-not-allowed"
                             onMouseDown={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
@@ -826,8 +927,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                           />
                         )}
 
-                        {/* + button: top-left corner (insert before) */}
-                        {onAddBetween && (
+                        {/* + buttons — not for transport */}
+                        {onAddBetween && !isTransport && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -840,9 +941,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                             <Plus className="h-3 w-3" />
                           </button>
                         )}
-
-                        {/* + button: bottom-left corner (insert after) */}
-                        {onAddBetween && (
+                        {onAddBetween && !isTransport && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

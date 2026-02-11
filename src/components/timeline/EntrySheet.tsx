@@ -705,6 +705,7 @@ const EntrySheet = ({
         airport_checkout_min: isFlight ? checkoutMin : null,
         route_polyline: isTransfer ? (selectedPolyline || null) : null,
         distance_km: isTransfer ? (transportResults.find(r => r.mode === transferMode)?.distance_km ?? null) : null,
+        transport_modes: isTransfer && transportResults.length > 0 ? transportResults : null,
       };
 
       let optionId: string | null = null;

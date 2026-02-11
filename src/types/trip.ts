@@ -77,6 +77,14 @@ export interface EntryOption {
   updated_at: string;
   vote_count?: number;
   images?: OptionImage[];
+  transport_modes?: TransportMode[] | null;
+}
+
+export interface TransportMode {
+  mode: string;
+  duration_min: number;
+  distance_km: number;
+  polyline?: string | null;
 }
 
 export interface OptionImage {
