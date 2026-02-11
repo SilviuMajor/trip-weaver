@@ -959,7 +959,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
               if (offset === 0) return null;
               const badgeTop = (tzHour - startHour) * PIXELS_PER_HOUR + PIXELS_PER_HOUR / 2 - 8;
               return (
-                <div className="absolute z-[6]" style={{ top: badgeTop, left: -120, width: 46 }}>
+                <div className="absolute z-[6]" style={{ top: badgeTop, left: -140, width: 46 }}>
                   <span className="rounded-full bg-primary/20 border border-primary/30 px-2 py-0.5 text-[10px] font-bold text-primary whitespace-nowrap">
                     TZ {offset > 0 ? '+' : ''}{offset}h
                   </span>
@@ -968,7 +968,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
             })()}
 
             {/* Weather column — between time labels */}
-            <div className="absolute top-0 bottom-0 z-[5]" style={{ left: -74, width: 50 }}>
+            <div className="absolute top-0 bottom-0 z-[5]" style={{ left: -50, width: 50 }}>
               {Array.from({ length: endHour - startHour }, (_, i) => startHour + i).map(hour => {
                 const dateStr = format(dayDate, 'yyyy-MM-dd');
                 const w = weatherData.find(wd => wd.date === dateStr && wd.hour === hour);
