@@ -1,12 +1,11 @@
-import { useCallback, useMemo, useState, forwardRef } from 'react';
+import { useCallback, useMemo, useState, useEffect, useRef, forwardRef } from 'react';
 import { format, isToday, isPast, addMinutes } from 'date-fns';
 import { calculateSunTimes } from '@/lib/sunCalc';
 import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
 import { localToUTC, getHourInTimezone, resolveEntryTz } from '@/lib/timezoneUtils';
-import { computeOverlapLayout } from '@/lib/overlapLayout';
-import { Plus, Bus, Lock, LockOpen } from 'lucide-react';
+import { Plus, Bus, Lock, LockOpen, AlertTriangle } from 'lucide-react';
 import { useDragResize, type DragType } from '@/hooks/useDragResize';
 import TimeSlotGrid, { getUtcOffsetHoursDiff } from './TimeSlotGrid';
 import EntryCard from './EntryCard';
@@ -197,27 +196,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
     setTimeout(() => setShakeEntryId(null), 400);
   }, []);
 
-  // Compute overlap layout
-  const layoutEntries = sortedEntries.map(e => {
-    const { startTz, endTz } = resolveEntryTz(e, dayFlights, activeTz, tripTimezone);
-    const opt = e.options[0];
-    const isFlight = opt?.category === 'flight' && opt.departure_tz && opt.arrival_tz;
-    const sHour = getHourInTimezone(e.start_time, startTz);
-    let eHour: number;
-    if (isFlight) {
-      const utcDurH = (new Date(e.end_time).getTime() - new Date(e.start_time).getTime()) / 3600000;
-      eHour = sHour + utcDurH;
-    } else {
-      eHour = getHourInTimezone(e.end_time, endTz);
-    }
-    const s = (sHour - startHour) * 60;
-    let en = (eHour - startHour) * 60;
-    if (en <= s) en = s + 120;
-    return { id: e.id, startMinutes: s, endMinutes: en };
-  });
-
-  const layout = computeOverlapLayout(layoutEntries);
-  const layoutMap = new Map(layout.map(l => [l.entryId, l]));
+  // Conflict toast
+  const prevConflictCountRef = useRef(0);
 
   // Compute pairwise overlaps for consecutive entries
   const overlapMap = useMemo(() => {
@@ -246,6 +226,14 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
     }
     return map;
   }, [sortedEntries, dayFlights, activeTz, tripTimezone]);
+
+  useEffect(() => {
+    const conflictCount = overlapMap.size;
+    if (conflictCount > 0 && conflictCount !== prevConflictCountRef.current) {
+      toast.warning('Time conflict — drag to adjust');
+    }
+    prevConflictCountRef.current = conflictCount;
+  }, [overlapMap]);
 
   const getWeatherForEntry = (entry: EntryWithOptions) => {
     const hour = Math.floor(getHourInTimezone(entry.start_time, tripTimezone));
@@ -584,11 +572,9 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                 const isMedium = height >= 40 && height < 80 && !flightGroup;
                 const isCondensed = height >= 80 && height < 160 && !flightGroup;
 
-                const layoutInfo = layoutMap.get(entry.id);
-                const column = layoutInfo?.column ?? 0;
-                const totalColumns = layoutInfo?.totalColumns ?? 1;
-                const widthPercent = 100 / totalColumns;
-                const leftPercent = column * widthPercent;
+                const hasConflict = overlapMap.has(entry.id);
+                const widthPercent = 100;
+                const leftPercent = 0;
 
                 const distanceKm =
                   userLat != null && userLng != null && primaryOption.latitude != null && primaryOption.longitude != null
@@ -632,17 +618,28 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                   <div key={entry.id}>
                     <div
                       className={cn(
-                        'absolute z-10 pr-1 group',
-                        isDragged && 'opacity-80 z-30'
+                        'absolute pr-1 group',
+                        isDragged && 'opacity-80 z-30',
+                        !isDragged && 'z-10'
                       )}
                       style={{
                         top,
                         height,
                         left: `${leftPercent}%`,
                         width: `${widthPercent}%`,
+                        zIndex: isDragged ? 30 : hasConflict ? 10 + index : 10,
                       }}
                     >
                       <div className="relative h-full">
+                        {/* Conflict indicators */}
+                        {hasConflict && !isDragged && (
+                          <div className="absolute inset-0 rounded-xl ring-2 ring-red-400/60 pointer-events-none z-20" />
+                        )}
+                        {hasConflict && !isDragged && (
+                          <div className="absolute -top-1 -right-1 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow-md">
+                            <AlertTriangle className="h-3 w-3" />
+                          </div>
+                        )}
                         {/* Top resize handle */}
                         {canDrag && !flightGroup && (
                           <div
