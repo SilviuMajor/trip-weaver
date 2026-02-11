@@ -1,4 +1,4 @@
-import { RefreshCw, Loader2, Check, X } from 'lucide-react';
+import { RefreshCw, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { EntryWithOptions, EntryOption, TransportMode } from '@/types/trip';
 
@@ -33,9 +33,6 @@ interface TransportConnectorProps {
   onRefresh: () => void;
   isRefreshing?: boolean;
   selectedMode?: string;
-  pendingMode?: string | null;
-  onConfirmSwitch?: () => void;
-  onCancelSwitch?: () => void;
 }
 
 const TransportConnector = ({
@@ -48,9 +45,6 @@ const TransportConnector = ({
   onRefresh,
   isRefreshing,
   selectedMode: selectedModeProp,
-  pendingMode,
-  onConfirmSwitch,
-  onCancelSwitch,
 }: TransportConnectorProps) => {
   const transportModes: TransportMode[] = (option as any).transport_modes ?? [];
   
@@ -65,9 +59,9 @@ const TransportConnector = ({
     return 'transit';
   };
 
-  const currentMode = pendingMode || detectCurrentMode();
+  const currentMode = detectCurrentMode();
   const isCompact = height < 40;
-  const showLabels = height >= 100;
+  const showLabels = height >= 160; // Fix 3: show labels only for tall connectors (2+ hours)
 
   // Find the selected mode data
   const selectedData = transportModes.find(m => m.mode === currentMode);
@@ -145,23 +139,6 @@ const TransportConnector = ({
         <span className="text-[9px] text-muted-foreground/50 mt-0.5">{selectedDistance}</span>
       )}
 
-      {/* Pending mode switch confirm/cancel */}
-      {pendingMode && onConfirmSwitch && onCancelSwitch && (
-        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-1 z-10">
-          <button
-            onClick={(e) => { e.stopPropagation(); onConfirmSwitch(); }}
-            className="flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-white shadow-sm hover:bg-green-600 transition-colors"
-          >
-            <Check className="h-3 w-3" />
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); onCancelSwitch(); }}
-            className="flex h-5 w-5 items-center justify-center rounded-full bg-stone-400 text-white shadow-sm hover:bg-stone-500 transition-colors"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        </div>
-      )}
     </div>
   );
 };

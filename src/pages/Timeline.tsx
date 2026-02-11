@@ -12,6 +12,7 @@ import { useGeolocation } from '@/hooks/useGeolocation';
 import { useTimelineZoom } from '@/hooks/useTimelineZoom';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { useTravelCalculation } from '@/hooks/useTravelCalculation';
+import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { analyzeConflict, generateRecommendations } from '@/lib/conflictEngine';
 import { toast } from '@/hooks/use-toast';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
@@ -22,6 +23,7 @@ import LivePanel from '@/components/timeline/LivePanel';
 import ConflictResolver from '@/components/timeline/ConflictResolver';
 import DayPickerDialog from '@/components/timeline/DayPickerDialog';
 import HotelWizard from '@/components/timeline/HotelWizard';
+import UndoRedoButtons from '@/components/timeline/UndoRedoButtons';
 import type { Trip, Entry, EntryOption, EntryWithOptions, TravelSegment, WeatherData } from '@/types/trip';
 import type { ConflictInfo, Recommendation } from '@/lib/conflictEngine';
 
@@ -80,6 +82,10 @@ const Timeline = () => {
 
   // Travel calculation
   const { calculateTravel } = useTravelCalculation();
+
+  // Undo/Redo (fetchData ref will be set after declaration)
+  const fetchDataRef = useRef<() => Promise<void>>();
+  const { canUndo, canRedo, undo, redo, pushAction } = useUndoRedo(async () => { await fetchDataRef.current?.(); });
 
   // Zoom
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -165,6 +171,8 @@ const Timeline = () => {
     setEntries(entriesWithOptions);
     setLoading(false);
   }, [currentUser, tripId]);
+
+  fetchDataRef.current = fetchData;
 
   useEffect(() => {
     fetchData();
@@ -400,15 +408,19 @@ const Timeline = () => {
     const fromAddr = fromOpt?.location_name || fromOpt?.arrival_location || '';
     const toAddr = toOpt?.location_name || toOpt?.departure_location || '';
 
+    // Fix 1: Use actual end time of departing event (accounting for flight checkout)
+    const fromCheckout = entries.find(e => e.linked_flight_id === fromEntryId && e.linked_type === 'checkout');
+    const actualEndTime = fromCheckout?.end_time ?? fromEntry?.end_time ?? prefillTime;
+
     // Calculate gap in minutes
     let gapMinutes: number | undefined;
     if (fromEntry && toEntry) {
-      const gapMs = new Date(toEntry.start_time).getTime() - new Date(fromEntry.end_time).getTime();
+      const gapMs = new Date(toEntry.start_time).getTime() - new Date(actualEndTime).getTime();
       gapMinutes = Math.round(gapMs / 60000);
     }
 
     setTransportContext({ fromAddress: fromAddr, toAddress: toAddr, gapMinutes, fromEntryId, toEntryId });
-    setPrefillStartTime(prefillTime);
+    setPrefillStartTime(actualEndTime);
     setPrefillEndTime(undefined);
     setPrefillCategory('transfer');
     setSheetMode('create');
@@ -427,6 +439,23 @@ const Timeline = () => {
   };
 
   const handleEntryTimeChange = async (entryId: string, newStartIso: string, newEndIso: string) => {
+    // Record undo action
+    const entry = entries.find(e => e.id === entryId);
+    if (entry) {
+      const oldStart = entry.start_time;
+      const oldEnd = entry.end_time;
+      const desc = `Move ${entry.options[0]?.name || 'entry'}`;
+      pushAction({
+        description: desc,
+        undo: async () => {
+          await supabase.from('entries').update({ start_time: oldStart, end_time: oldEnd }).eq('id', entryId);
+        },
+        redo: async () => {
+          await supabase.from('entries').update({ start_time: newStartIso, end_time: newEndIso }).eq('id', entryId);
+        },
+      });
+    }
+
     const { error } = await supabase
       .from('entries')
       .update({ start_time: newStartIso, end_time: newEndIso })
@@ -462,6 +491,20 @@ const Timeline = () => {
           const newTransportStart = fromEntry.end_time;
           const newTransportEnd = new Date(new Date(newTransportStart).getTime() + transportDurationMs).toISOString();
           await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
+
+          // Fix 2: Auto-pull the "to" event to meet transport end
+          if (transport.to_entry_id) {
+            const { data: toEntry } = await supabase.from('entries')
+              .select('id, start_time, end_time, is_locked')
+              .eq('id', transport.to_entry_id).single();
+            if (toEntry && !toEntry.is_locked) {
+              const teDur = new Date(toEntry.end_time).getTime() - new Date(toEntry.start_time).getTime();
+              await supabase.from('entries').update({
+                start_time: newTransportEnd,
+                end_time: new Date(new Date(newTransportEnd).getTime() + teDur).toISOString(),
+              }).eq('id', toEntry.id);
+            }
+          }
         }
       }
     } catch (err) {
@@ -495,18 +538,16 @@ const Timeline = () => {
       } as any).eq('id', opt.id);
     }
 
-    // Push the next event (to_entry_id) if needed
+    // Fix 2 & 4: Always pull/push the next event to meet transport end
     if (entry.to_entry_id) {
       const { data: nextEntry } = await supabase.from('entries').select('id, start_time, end_time, is_locked').eq('id', entry.to_entry_id).single();
       if (nextEntry && !nextEntry.is_locked) {
         const newTransportEnd = new Date(new Date(entry.start_time).getTime() + blockDur * 60000);
-        const nextStart = new Date(nextEntry.start_time);
-        if (newTransportEnd.getTime() > nextStart.getTime()) {
-          const pushMs = newTransportEnd.getTime() - nextStart.getTime();
-          const newNextStart = new Date(nextStart.getTime() + pushMs).toISOString();
-          const newNextEnd = new Date(new Date(nextEntry.end_time).getTime() + pushMs).toISOString();
-          await supabase.from('entries').update({ start_time: newNextStart, end_time: newNextEnd }).eq('id', nextEntry.id);
-        }
+        const nextDuration = new Date(nextEntry.end_time).getTime() - new Date(nextEntry.start_time).getTime();
+        await supabase.from('entries').update({
+          start_time: newTransportEnd.toISOString(),
+          end_time: new Date(newTransportEnd.getTime() + nextDuration).toISOString(),
+        }).eq('id', nextEntry.id);
       }
     }
 
@@ -1378,6 +1419,9 @@ const Timeline = () => {
           />
         </>
       )}
+
+      {/* Undo/Redo floating buttons */}
+      <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} />
     </div>
   );
 };
