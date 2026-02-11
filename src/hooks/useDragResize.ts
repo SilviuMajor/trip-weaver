@@ -15,6 +15,8 @@ interface DragState {
   targetDay?: Date;
   /** The original day date the entry started on */
   originDay?: Date;
+  /** Offset in hours between cursor position and card top at grab time */
+  grabOffsetHours: number;
 }
 
 interface DayBoundary {
@@ -109,6 +111,21 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
     tz?: string,
     originDay?: Date,
   ) => {
+    let grabOffsetHours = 0;
+    if (dayBoundaries && scrollContainerRef?.current) {
+      const container = scrollContainerRef.current;
+      const containerRect = container.getBoundingClientRect();
+      const absoluteY = clientY - containerRect.top + container.scrollTop;
+      for (const boundary of dayBoundaries) {
+        if (absoluteY >= boundary.topPx && absoluteY < boundary.bottomPx) {
+          const relativeY = absoluteY - boundary.topPx;
+          const cursorHour = startHour + relativeY / pixelsPerHour;
+          grabOffsetHours = cursorHour - entryStartHour;
+          break;
+        }
+      }
+    }
+
     const state: DragState = {
       entryId,
       type,
@@ -120,6 +137,7 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
       tz,
       originDay,
       targetDay: originDay,
+      grabOffsetHours,
     };
     setDragState(state);
     dragStateRef.current = state;
@@ -153,7 +171,7 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
           // Calculate hour within this day's grid
           const relativeY = absoluteY - boundary.topPx;
           const duration = state.originalEndHour - state.originalStartHour;
-          const rawHour = startHour + relativeY / pixelsPerHour;
+          const rawHour = startHour + relativeY / pixelsPerHour - state.grabOffsetHours;
           let newStart = snapToGrid(rawHour);
           let newEnd = newStart + duration;
 
