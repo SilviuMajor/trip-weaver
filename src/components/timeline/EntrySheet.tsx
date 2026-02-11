@@ -154,6 +154,7 @@ interface EntrySheetProps {
   prefillEndTime?: string;
   prefillCategory?: string;
   transportContext?: { fromAddress: string; toAddress: string; gapMinutes?: number; fromEntryId?: string; toEntryId?: string; resolvedTz?: string } | null;
+  gapContext?: { fromName: string; toName: string; fromAddress: string; toAddress: string } | null;
   onTransportConflict?: (blockDuration: number, gapMinutes: number) => void;
 }
 
@@ -164,6 +165,7 @@ const EntrySheet = ({
   entry, option, formatTime: formatTimeProp, userLat, userLng,
   votingLocked, userVotes = [], onVoteChange, onMoveToIdeas,
   editEntry, editOption, prefillStartTime, prefillEndTime, prefillCategory, transportContext,
+  gapContext,
   onTransportConflict,
 }: EntrySheetProps) => {
   const { currentUser, isEditor } = useCurrentUser();
@@ -231,7 +233,7 @@ const EntrySheet = ({
 
   const customCategories = (trip?.category_presets as CategoryPreset[] | null) ?? [];
   const allCategories: CategoryDef[] = [
-    ...PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing'),
+    ...PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing' && c.id !== 'transfer'),
     ...customCategories.map((c, i) => ({
       id: `custom_${i}`,
       name: c.name,
@@ -426,7 +428,12 @@ const EntrySheet = ({
       setTransferTo(transportContext.toAddress);
       fetchAllRoutes(transportContext.fromAddress, transportContext.toAddress);
     }
-  }, [transportContext, open, categoryId, fetchAllRoutes, mode]);
+    // Also trigger for gapContext-based transport suggestion
+    if (!transportContext && gapContext && open && !transportFetchedRef.current && categoryId === 'transfer' && transferFrom && transferTo) {
+      transportFetchedRef.current = true;
+      fetchAllRoutes(transferFrom, transferTo);
+    }
+  }, [transportContext, gapContext, open, categoryId, fetchAllRoutes, mode, transferFrom, transferTo]);
 
   const handleSelectTransportMode = (result: TransportResult) => {
     setTransferMode(result.mode);
@@ -1374,7 +1381,7 @@ const EntrySheet = ({
                   {isLocked ? <><Unlock className="mr-1.5 h-3.5 w-3.5" /> Unlock</> : <><Lock className="mr-1.5 h-3.5 w-3.5" /> Lock</>}
                 </Button>
 
-                {onMoveToIdeas && (
+                {onMoveToIdeas && option?.category !== 'transfer' && (
                   <Button variant="outline" size="sm" onClick={() => onMoveToIdeas(entry.id)}>
                     <Lightbulb className="mr-1.5 h-3.5 w-3.5" /> Move to ideas
                   </Button>
@@ -1430,18 +1437,46 @@ const EntrySheet = ({
           </DialogHeader>
 
           {step === 'category' && (
-            <div className="grid grid-cols-3 gap-2">
-              {allCategories.map((cat) => (
+            <div className="space-y-3">
+              {/* Contextual transport suggestion */}
+              {gapContext && gapContext.fromName && gapContext.toName && (
                 <button
-                  key={cat.id}
                   type="button"
-                  onClick={() => handleCategorySelect(cat.id)}
-                  className="flex flex-col items-center gap-1.5 rounded-xl border border-border bg-card p-3 text-center transition-all hover:border-primary hover:bg-primary/5"
+                  onClick={() => {
+                    setCategoryId('transfer');
+                    setTransferFrom(gapContext.fromAddress);
+                    setTransferTo(gapContext.toAddress);
+                    setName('');
+                    applySmartDefaults({ id: 'transfer', name: 'Transfer', emoji: '🚐', color: 'hsl(200, 60%, 45%)', defaultDurationMin: 60, defaultStartHour: 9, defaultStartMin: 0 });
+                    setStep('details');
+                    // Trigger route fetch
+                    if (gapContext.fromAddress && gapContext.toAddress) {
+                      transportFetchedRef.current = false;
+                    }
+                  }}
+                  className="flex w-full items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-left transition-all hover:border-primary hover:bg-primary/10"
                 >
-                  <span className="text-2xl">{cat.emoji}</span>
-                  <span className="text-xs font-medium">{cat.name}</span>
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-lg">🚐</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground">Transport</p>
+                    <p className="truncate text-xs text-muted-foreground">{gapContext.fromName} → {gapContext.toName}</p>
+                  </div>
                 </button>
-              ))}
+              )}
+
+              <div className="grid grid-cols-3 gap-2">
+                {allCategories.map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => handleCategorySelect(cat.id)}
+                    className="flex flex-col items-center gap-1.5 rounded-xl border border-border bg-card p-3 text-center transition-all hover:border-primary hover:bg-primary/5"
+                  >
+                    <span className="text-2xl">{cat.emoji}</span>
+                    <span className="text-xs font-medium">{cat.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
