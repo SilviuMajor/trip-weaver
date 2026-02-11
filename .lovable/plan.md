@@ -1,115 +1,129 @@
 
 
-# Fix Timeline Card Positioning: Timezone-Aware Visual Slots
+# Fix: Preserve Card Duration on Move (Including Linked Entries)
 
-## Overview
+## File 1: `src/hooks/useDragResize.ts`
 
-Audit and fix the card positioning system so visual placement always uses the visual hour slot on the 24-hour grid, never raw timezone-converted timestamps. Extract shared utilities into `src/lib/timezoneUtils.ts` as the single source of truth.
+### Change A: Fix cross-day clamping (lines 160-162)
 
----
-
-## Step 1: Fix `handleDropOnTimeline` in `src/pages/Timeline.tsx`
-
-**Problem:** Line 469 uses `tripTimezone` for all drops. On a flight day, slots after the flight represent the destination TZ, not the trip TZ. A +1h TZ difference causes the card to land 1 hour off.
-
-**Fix:**
-- Look up `dayTimezoneMap` for the target day using `format(dayDate, 'yyyy-MM-dd')`
-- If the day has flights, determine whether `hourOffset` falls before or after the flight's visual end hour
-- Use the resolved TZ (origin or destination) in `localToUTC()` instead of `tripTimezone`
-
+Replace:
 ```typescript
-// Before (line 469):
-const startIso = localToUTC(dateStr, timeStr, tripTimezone);
-
-// After:
-const dayStr = format(dayDate, 'yyyy-MM-dd');
-const tzInfo = dayTimezoneMap.get(dayStr);
-const resolvedTz = resolveDropTz(hourOffset, tzInfo, tripTimezone);
-const startIso = localToUTC(dateStr, timeStr, resolvedTz);
+if (newStart < 0) { newEnd -= newStart; }
+const clampedStart = Math.max(0, newStart);
+const clampedEnd = Math.min(24, newEnd);
 ```
 
-The `resolveDropTz` helper will check if `hourOffset` is past the flight's visual end hour; if so, use destination TZ, otherwise origin TZ.
-
----
-
-## Step 2: Fix `TimeSlotGrid.minutesToTime` in `src/components/timeline/TimeSlotGrid.tsx`
-
-**Problem:** `minutesToTime` (line 100-106) creates a `Date` using `new Date(date).setHours(h, m)`, which uses the **browser's local timezone**. If the user's browser is in a different TZ than the trip, the resulting ISO string will be offset when used as a prefill for `EntrySheet`.
-
-**Fix:**
-- Accept `activeTz` (already a prop) and use the new shared `localToUTC` utility to produce correct UTC ISO strings
-- Change `onClickSlot` and `onDragSlot` callbacks to pass ISO strings instead of raw Date objects
-- Update the callback signatures: `onClickSlot?: (isoTime: string) => void` and `onDragSlot?: (startIso: string, endIso: string) => void`
-- Update `CalendarDay.tsx` and `Timeline.tsx` to match the new signatures (minimal change since both just call `.toISOString()` on the Date anyway)
-
+With:
 ```typescript
-// Before:
-const minutesToTime = (totalMinutes: number): Date => {
-  const time = new Date(date);
-  time.setHours(h, m, 0, 0);
-  return time;
-};
-
-// After:
-const minutesToIso = (totalMinutes: number): string => {
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  const dateStr = format(date, 'yyyy-MM-dd');
-  const timeStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-  return localToUTC(dateStr, timeStr, activeTz || 'UTC');
-};
+if (newStart < 0) { newEnd -= newStart; newStart = 0; }
+if (newEnd > 24) { newStart -= (newEnd - 24); newEnd = 24; }
+newStart = Math.max(0, newStart);
+newEnd = Math.min(24, newEnd);
 ```
 
-Update `handleDragSlot` in Timeline.tsx to accept strings directly (it already calls `.toISOString()` so the change is trivial).
+Then update the `updated` object on lines 164-167 to use `newStart`/`newEnd` instead of `clampedStart`/`clampedEnd`.
 
----
+### Change B: Pass `dragType` through `onCommit` (line 29 and line 208)
 
-## Step 3: Fix edge function day grouping in `supabase/functions/auto-generate-transport/index.ts`
-
-**Problem:** Line 208 groups entries by UTC date substring: `entry.start_time.substring(0, 10)`. Entries near midnight in the trip timezone get grouped on the wrong day.
-
-**Fix:**
-- Add a `getDateInTimezone` helper in the edge function (cannot import from `src/lib`)
-- Use the trip's `timezone` variable (already available at line 175) to extract the local date
-
+Update the `onCommit` signature to include `dragType`:
 ```typescript
-// Helper at top of function:
-function getDateInTz(isoString: string, tz: string): string {
-  const d = new Date(isoString);
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-  });
-  const parts = formatter.formatToParts(d);
-  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '00';
-  return `${get('year')}-${get('month')}-${get('day')}`;
-}
+onCommit: (entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date, dragType?: DragType) => void;
+```
 
-// Line 208 change:
-const dayStr = getDateInTz(entry.start_time, timezone);
+In `commitDrag` (line 208), pass `state.type`:
+```typescript
+onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz, state.targetDay, state.type);
 ```
 
 ---
 
-## Step 4: Extract shared utilities to `src/lib/timezoneUtils.ts`
+## File 2: `src/components/timeline/CalendarDay.tsx`
 
-Move the following functions from `CalendarDay.tsx` into `src/lib/timezoneUtils.ts` so all components use a single source of truth:
+### Change: Rewrite `handleDragCommit` (lines 117-176) to preserve duration on moves
 
-### Functions to extract/add:
+The updated function:
 
-1. **`getHourInTimezone(isoString, tz)`** -- currently defined at CalendarDay.tsx line 87-98. Converts a UTC ISO string to a fractional hour (e.g., 14.5 for 2:30 PM) in a given timezone.
+```typescript
+const handleDragCommit = useCallback((entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date, dragType?: DragType) => {
+  if (!onEntryTimeChange) return;
+  const entry = sortedEntries.find(e => e.id === entryId);
+  if (entry?.is_locked) return;
 
-2. **`resolveEntryTz(entry, dayFlights, activeTz, tripTimezone)`** -- currently defined at CalendarDay.tsx line 68-85. Determines which timezone to use for positioning an entry based on whether it's before/after a flight.
+  const effectiveDay = targetDay || dayDate;
+  const dateStr = format(effectiveDay, 'yyyy-MM-dd');
 
-3. **`resolveDropTz(hourOffset, tzInfo, tripTimezone)`** -- new helper for Step 1. Given a visual hour offset and day TZ info, returns the correct timezone for that position on the grid.
+  const toTimeStr = (hour: number) => {
+    const minutes = Math.round(hour * 60);
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  };
 
-4. **`getUtcOffsetMinutes(date, tz)`** and **`getUtcOffsetHoursDiff(originTz, destTz)`** -- currently in `TimeSlotGrid.tsx` (lines 218-237). Move to shared utils.
+  const primaryOpt = entry?.options[0];
+  const isFlight = primaryOpt?.category === 'flight' && primaryOpt?.departure_tz && primaryOpt?.arrival_tz;
+  const startTz = isFlight ? primaryOpt.departure_tz! : (tz || activeTz || tripTimezone);
+  const endTz = isFlight ? primaryOpt.arrival_tz! : startTz;
 
-### After extraction:
+  const isMove = dragType === 'move';
 
-- `CalendarDay.tsx` will import `getHourInTimezone` and `resolveEntryTz` from `@/lib/timezoneUtils`
-- `Timeline.tsx` will import `resolveDropTz` from `@/lib/timezoneUtils`
-- `TimeSlotGrid.tsx` will import `getUtcOffsetMinutes` and `getUtcOffsetHoursDiff` from `@/lib/timezoneUtils`
-- Remove the local definitions from each component
+  if (isMove && entry) {
+    // MOVE: preserve original UTC duration
+    const origDurationMs = new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime();
+    const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), startTz);
+    const newEndIso = new Date(new Date(newStartIso).getTime() + origDurationMs).toISOString();
+    onEntryTimeChange(entryId, newStartIso, newEndIso);
+  } else {
+    // RESIZE: convert start and end independently (existing behavior)
+    const newStartIso = localToUTC(dateStr, toTimeStr(newStartHour), startTz);
+    const newEndIso = localToUTC(dateStr, toTimeStr(newEndHour), endTz);
+    onEntryTimeChange(entryId, newStartIso, newEndIso);
+  }
+
+  // Move linked processing entries if this is a flight
+  if (entry) {
+    const linkedOpt = entry.options[0];
+    const linkedEntries = allEntries.filter(e => e.linked_flight_id === entry.id);
+    const fallbackTz = tz || activeTz || tripTimezone;
+
+    linkedEntries.forEach(linked => {
+      const linkedTz = linked.linked_type === 'checkin'
+        ? (linkedOpt?.departure_tz || fallbackTz)
+        : (linkedOpt?.arrival_tz || fallbackTz);
+
+      // Preserve linked entry's original UTC duration
+      const linkedDurationMs = new Date(linked.end_time).getTime() - new Date(linked.start_time).getTime();
+
+      let newLinkedStartIso: string;
+      let newLinkedEndIso: string;
+
+      if (linked.linked_type === 'checkin') {
+        // Check-in ends at flight start
+        const newLinkedEndHour = newStartHour;
+        newLinkedEndIso = localToUTC(dateStr, toTimeStr(newLinkedEndHour), linkedTz);
+        newLinkedStartIso = new Date(new Date(newLinkedEndIso).getTime() - linkedDurationMs).toISOString();
+      } else {
+        // Checkout starts at flight end
+        const newLinkedStartHour = newEndHour;
+        newLinkedStartIso = localToUTC(dateStr, toTimeStr(newLinkedStartHour), linkedTz);
+        newLinkedEndIso = new Date(new Date(newLinkedStartIso).getTime() + linkedDurationMs).toISOString();
+      }
+
+      onEntryTimeChange(linked.id, newLinkedStartIso, newLinkedEndIso);
+    });
+  }
+}, [onEntryTimeChange, dayDate, tripTimezone, activeTz, sortedEntries, allEntries]);
+```
+
+Key changes:
+- Accepts `dragType` parameter (new 6th argument from `useDragResize`)
+- For **moves**: calculates `origDurationMs` from the entry's existing UTC timestamps, converts only the new start hour to ISO, then adds the original duration to get the end. This guarantees no duration drift regardless of timezone differences.
+- For **resizes**: keeps the existing independent conversion behavior (user intentionally changing duration).
+- For **linked entries**: always uses UTC duration preservation. Captures `linkedDurationMs` from the linked entry's existing timestamps, then anchors to the flight's new start/end hour and applies the duration. This prevents linked check-in/checkout cards from drifting.
+
+Also add the `DragType` import at the top of CalendarDay.tsx:
+```typescript
+import { useDragResize, type DragType } from '@/hooks/useDragResize';
+```
 
 ---
 
@@ -117,18 +131,6 @@ Move the following functions from `CalendarDay.tsx` into `src/lib/timezoneUtils.
 
 | File | Change |
 |------|--------|
-| `src/lib/timezoneUtils.ts` | Add `getHourInTimezone`, `resolveEntryTz`, `resolveDropTz`, `getUtcOffsetMinutes`, `getUtcOffsetHoursDiff` |
-| `src/pages/Timeline.tsx` | Use `resolveDropTz` in `handleDropOnTimeline`; update `handleDragSlot` to accept ISO strings |
-| `src/components/timeline/TimeSlotGrid.tsx` | Fix `minutesToTime` to use `localToUTC` with `activeTz`; change callbacks to pass ISO strings; import shared utils |
-| `src/components/timeline/CalendarDay.tsx` | Import `getHourInTimezone`, `resolveEntryTz` from shared utils; remove local definitions; update slot callback types |
-| `supabase/functions/auto-generate-transport/index.ts` | Add `getDateInTz` helper; use it for day grouping instead of UTC substring |
-
----
-
-## Test Cases
-
-1. **Drop on flight day**: Drop an entry at visual slot 14 on a day with a +1h TZ flight. Verify it renders at slot 14.
-2. **Auto-generate transport**: Run "Route" on a flight day. Transport entries should appear in the correct gap, no 1-hour offset.
-3. **Drag-select slot**: Click/drag a time slot from a browser in a different TZ than the trip. The created entry should appear at the clicked visual position.
-4. **Near-midnight grouping**: An entry at 23:30 local time should be grouped on the correct calendar day when auto-generating transport.
+| `src/hooks/useDragResize.ts` | Fix cross-day clamping to shift as block; pass `dragType` in `onCommit` |
+| `src/components/timeline/CalendarDay.tsx` | Import `DragType`; rewrite `handleDragCommit` with move vs resize branching and UTC duration preservation for both primary and linked entries |
 
