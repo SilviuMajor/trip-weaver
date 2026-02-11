@@ -4,7 +4,7 @@ import { calculateSunTimes } from '@/lib/sunCalc';
 import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
-import { localToUTC } from '@/lib/timezoneUtils';
+import { localToUTC, getHourInTimezone, resolveEntryTz } from '@/lib/timezoneUtils';
 import { computeOverlapLayout } from '@/lib/overlapLayout';
 import { Plus, Bus, Lock, LockOpen } from 'lucide-react';
 import { useDragResize } from '@/hooks/useDragResize';
@@ -46,8 +46,8 @@ interface CalendarDayProps {
   onCardTap: (entry: EntryWithOptions, option: EntryOption) => void;
   travelSegments?: TravelSegment[];
   weatherData?: WeatherData[];
-  onClickSlot?: (time: Date) => void;
-  onDragSlot?: (startTime: Date, endTime: Date) => void;
+  onClickSlot?: (isoTime: string) => void;
+  onDragSlot?: (startIso: string, endIso: string) => void;
   dayLabel?: string;
   dayIndex?: number;
   isFirstDay?: boolean;
@@ -64,38 +64,7 @@ interface CalendarDayProps {
   dayBoundaries?: DayBoundary[];
 }
 
-/** Resolve the timezone(s) to use for positioning an entry on the grid */
-function resolveEntryTz(
-  entry: EntryWithOptions,
-  dayFlights: FlightTzInfo[],
-  activeTz: string | undefined,
-  tripTimezone: string
-): { startTz: string; endTz: string } {
-  const opt = entry.options[0];
-  if (opt?.category === 'flight' && opt.departure_tz && opt.arrival_tz) {
-    return { startTz: opt.departure_tz, endTz: opt.arrival_tz };
-  }
-  let tz = activeTz || tripTimezone;
-  if (dayFlights.length > 0 && dayFlights[0].flightEndUtc) {
-    const entryMs = new Date(entry.start_time).getTime();
-    const flightEndMs = new Date(dayFlights[0].flightEndUtc).getTime();
-    tz = entryMs >= flightEndMs ? dayFlights[0].destinationTz : dayFlights[0].originTz;
-  }
-  return { startTz: tz, endTz: tz };
-}
-
-function getHourInTimezone(isoString: string, tzName: string): number {
-  const date = new Date(isoString);
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: tzName,
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: false,
-  }).formatToParts(date);
-  const hour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0');
-  const minute = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0');
-  return hour + minute / 60;
-}
+// resolveEntryTz and getHourInTimezone are now imported from @/lib/timezoneUtils
 
 const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
   date: dayDate,

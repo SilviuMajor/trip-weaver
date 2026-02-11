@@ -202,10 +202,20 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 3. Group entries by day (using UTC date from start_time for simplicity)
+    // 3. Group entries by day using trip timezone (not UTC substring)
+    function getDateInTz(isoString: string, tz: string): string {
+      const d = new Date(isoString);
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      });
+      const parts = formatter.formatToParts(d);
+      const get = (type: string) => parts.find(p => p.type === type)?.value ?? '00';
+      return `${get('year')}-${get('month')}-${get('day')}`;
+    }
+
     const dayGroups = new Map<string, any[]>();
     for (const entry of entries) {
-      const dayStr = entry.start_time.substring(0, 10);
+      const dayStr = getDateInTz(entry.start_time, timezone);
       if (!dayGroups.has(dayStr)) dayGroups.set(dayStr, []);
       dayGroups.get(dayStr)!.push(entry);
     }
