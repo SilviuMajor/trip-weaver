@@ -985,11 +985,9 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                     {/* SNAP button below transport cards */}
                     {primaryOption.category === 'transfer' && (() => {
                       // Find the next non-linked entry in sortedEntries
-                      const nextVisible = sortedEntries.find((e, i) => {
-                        if (i <= index) return false;
-                        if (linkedEntryIds.has(e.id)) return false;
-                        return true;
-                      });
+                      const nextVisible = entry.to_entry_id
+                        ? sortedEntries.find(e => e.id === entry.to_entry_id)
+                        : null;
                       if (!nextVisible) return null;
 
                       const transportEnd = new Date(entry.end_time).getTime();

@@ -503,9 +503,32 @@ const Timeline = () => {
         transport_modes: data.results,
       } as any);
 
+      // Auto-snap destination event to meet transport end
+      let destOrigStart: string | null = null;
+      let destOrigEnd: string | null = null;
+      const destEntry = entries.find(e => e.id === toEntryId);
+      if (destEntry && !destEntry.is_locked) {
+        destOrigStart = destEntry.start_time;
+        destOrigEnd = destEntry.end_time;
+        const destDuration = new Date(destEntry.end_time).getTime() - new Date(destEntry.start_time).getTime();
+        const newDestStart = endTime;
+        const newDestEnd = new Date(new Date(endTime).getTime() + destDuration).toISOString();
+        await supabase.from('entries').update({
+          start_time: newDestStart,
+          end_time: newDestEnd,
+        }).eq('id', toEntryId);
+      }
+
       pushAction({
         description: `Add ${name}`,
         undo: async () => {
+          // Restore destination event times if snapped
+          if (destOrigStart && destOrigEnd) {
+            await supabase.from('entries').update({
+              start_time: destOrigStart,
+              end_time: destOrigEnd,
+            }).eq('id', toEntryId);
+          }
           await supabase.from('entry_options').delete().eq('entry_id', newEntry.id);
           await supabase.from('entries').delete().eq('id', newEntry.id);
           await fetchData();
