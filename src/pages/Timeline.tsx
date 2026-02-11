@@ -435,6 +435,72 @@ const Timeline = () => {
       console.error('Failed to update entry time:', error);
       return;
     }
+
+    // Auto-recalculate linked transport entries
+    try {
+      const { data: linkedTransports } = await supabase
+        .from('entries')
+        .select('id, from_entry_id, to_entry_id')
+        .or(`from_entry_id.eq.${entryId},to_entry_id.eq.${entryId}`);
+
+      if (linkedTransports && linkedTransports.length > 0) {
+        for (const transport of linkedTransports) {
+          const fromId = transport.from_entry_id;
+          const toId = transport.to_entry_id;
+          if (!fromId || !toId) continue;
+
+          // Get the parent entries with their options
+          const [fromRes, toRes] = await Promise.all([
+            supabase.from('entries').select('id, end_time').eq('id', fromId).single(),
+            supabase.from('entries').select('id, start_time').eq('id', toId).single(),
+          ]);
+
+          const fromEntry = fromRes.data;
+          const toEntry = toRes.data;
+          if (!fromEntry || !toEntry) continue;
+
+          // Get locations from options
+          const [fromOptRes, toOptRes] = await Promise.all([
+            supabase.from('entry_options').select('location_name, arrival_location').eq('entry_id', fromId).limit(1).single(),
+            supabase.from('entry_options').select('location_name, departure_location').eq('entry_id', toId).limit(1).single(),
+          ]);
+
+          const fromAddr = fromOptRes.data?.location_name || fromOptRes.data?.arrival_location || '';
+          const toAddr = toOptRes.data?.location_name || toOptRes.data?.departure_location || '';
+
+          // New transport start = from entry's end
+          const newTransportStart = fromEntry.end_time;
+
+          if (fromAddr && toAddr) {
+            // Re-fetch directions
+            const { data: dirData } = await supabase.functions.invoke('google-directions', {
+              body: { fromAddress: fromAddr, toAddress: toAddr, mode: 'transit' },
+            });
+            if (dirData?.duration_min) {
+              const blockDur = Math.ceil(dirData.duration_min / 5) * 5;
+              const newTransportEnd = new Date(new Date(newTransportStart).getTime() + blockDur * 60000).toISOString();
+              await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
+
+              // Update distance on the option
+              if (dirData.distance_km != null) {
+                await supabase.from('entry_options').update({ distance_km: dirData.distance_km }).eq('entry_id', transport.id);
+              }
+            }
+          } else {
+            // No addresses — just shift position, keep duration
+            const transportRes = await supabase.from('entries').select('start_time, end_time').eq('id', transport.id).single();
+            if (transportRes.data) {
+              const dur = new Date(transportRes.data.end_time).getTime() - new Date(transportRes.data.start_time).getTime();
+              const newTransportEnd = new Date(new Date(newTransportStart).getTime() + dur).toISOString();
+              await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to recalculate transport:', err);
+    }
+
     await fetchData();
   };
 
