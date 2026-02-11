@@ -46,11 +46,19 @@ const InlineField = ({ value, canEdit, onSave, renderDisplay, renderInput, class
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
+  const [displayValue, setDisplayValue] = useState(value);
+
+  // Sync displayValue when the prop actually updates (after refetch)
+  useEffect(() => {
+    setDisplayValue(value);
+  }, [value]);
 
   const handleDone = async () => {
-    if (draft !== value) {
+    if (draft !== displayValue) {
       setSaving(true);
       await onSave(draft);
+      // Optimistically show the saved value immediately
+      setDisplayValue(draft);
       setSaving(false);
     }
     setEditing(false);
@@ -66,7 +74,7 @@ const InlineField = ({ value, canEdit, onSave, renderDisplay, renderInput, class
         value={draft}
         onChange={e => setDraft(e.target.value)}
         onBlur={handleDone}
-        onKeyDown={e => { if (e.key === 'Enter') handleDone(); if (e.key === 'Escape') { setDraft(value); setEditing(false); } }}
+        onKeyDown={e => { if (e.key === 'Enter') handleDone(); if (e.key === 'Escape') { setDraft(displayValue); setEditing(false); } }}
         autoFocus
         disabled={saving}
         placeholder={placeholder}
@@ -75,14 +83,14 @@ const InlineField = ({ value, canEdit, onSave, renderDisplay, renderInput, class
     );
   }
 
-  const display = renderDisplay ? renderDisplay(value) : <span>{value || <span className="text-muted-foreground italic">{placeholder || 'Empty'}</span>}</span>;
+  const shown = renderDisplay ? renderDisplay(displayValue) : <span>{displayValue || <span className="text-muted-foreground italic">{placeholder || 'Empty'}</span>}</span>;
 
   return (
     <div
       className={cn('group inline-flex items-center gap-1.5', canEdit && 'cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1 transition-colors', className)}
-      onClick={() => { if (canEdit) { setDraft(value); setEditing(true); } }}
+      onClick={() => { if (canEdit) { setDraft(displayValue); setEditing(true); } }}
     >
-      {display}
+      {shown}
       {canEdit && <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />}
     </div>
   );
@@ -875,6 +883,48 @@ const EntrySheet = ({
     onSaved();
   };
 
+  // Cascade checkin duration change
+  const cascadeCheckinDuration = async (newHours: number) => {
+    if (!entry) return;
+    const depMs = new Date(entry.start_time).getTime();
+    const { data: linkedEntries } = await supabase
+      .from('entries')
+      .select('*')
+      .eq('linked_flight_id', entry.id)
+      .eq('linked_type', 'checkin');
+    if (linkedEntries) {
+      for (const linked of linkedEntries) {
+        const checkinStart = new Date(depMs - newHours * 3600000).toISOString();
+        await supabase.from('entries').update({
+          start_time: checkinStart,
+          end_time: entry.start_time,
+        } as any).eq('id', linked.id);
+      }
+    }
+    onSaved();
+  };
+
+  // Cascade checkout duration change
+  const cascadeCheckoutDuration = async (newMinutes: number) => {
+    if (!entry) return;
+    const arrMs = new Date(entry.end_time).getTime();
+    const { data: linkedEntries } = await supabase
+      .from('entries')
+      .select('*')
+      .eq('linked_flight_id', entry.id)
+      .eq('linked_type', 'checkout');
+    if (linkedEntries) {
+      for (const linked of linkedEntries) {
+        const checkoutEnd = new Date(arrMs + newMinutes * 60000).toISOString();
+        await supabase.from('entries').update({
+          start_time: entry.end_time,
+          end_time: checkoutEnd,
+        } as any).eq('id', linked.id);
+      }
+    }
+    onSaved();
+  };
+
   const handleInlineSaveEntry = async (field: string, value: string) => {
     if (!entry) return;
     const { error } = await supabase.from('entries').update({ [field]: value } as any).eq('id', entry.id);
@@ -937,15 +987,13 @@ const EntrySheet = ({
                       onSave={async (v) => handleInlineSaveOption('departure_location', v)}
                       renderDisplay={(val) => <p className="text-sm font-bold text-foreground">{val}</p>}
                     />
-                    {option.departure_terminal && (
-                      <InlineField
-                        value={option.departure_terminal}
-                        canEdit={isEditor}
-                        onSave={async (v) => handleInlineSaveOption('departure_terminal', v)}
-                        renderDisplay={(val) => <p className="text-xs text-muted-foreground">{val}</p>}
-                        placeholder="Terminal"
-                      />
-                    )}
+                    <InlineField
+                      value={option.departure_terminal || ''}
+                      canEdit={isEditor}
+                      onSave={async (v) => handleInlineSaveOption('departure_terminal', v)}
+                      renderDisplay={(val) => <p className="text-xs text-muted-foreground">{val || <span className="italic">Add terminal</span>}</p>}
+                      placeholder="Add terminal"
+                    />
                     <InlineField
                       value={formatTimeInTz(entry.start_time, option.departure_tz!)}
                       canEdit={isEditor}
@@ -971,15 +1019,13 @@ const EntrySheet = ({
                       onSave={async (v) => handleInlineSaveOption('arrival_location', v)}
                       renderDisplay={(val) => <p className="text-sm font-bold text-foreground">{val}</p>}
                     />
-                    {option.arrival_terminal && (
-                      <InlineField
-                        value={option.arrival_terminal}
-                        canEdit={isEditor}
-                        onSave={async (v) => handleInlineSaveOption('arrival_terminal', v)}
-                        renderDisplay={(val) => <p className="text-xs text-muted-foreground">{val}</p>}
-                        placeholder="Terminal"
-                      />
-                    )}
+                    <InlineField
+                      value={option.arrival_terminal || ''}
+                      canEdit={isEditor}
+                      onSave={async (v) => handleInlineSaveOption('arrival_terminal', v)}
+                      renderDisplay={(val) => <p className="text-xs text-muted-foreground">{val || <span className="italic">Add terminal</span>}</p>}
+                      placeholder="Add terminal"
+                    />
                     <InlineField
                       value={formatTimeInTz(entry.end_time, option.arrival_tz!)}
                       canEdit={isEditor}
@@ -992,9 +1038,48 @@ const EntrySheet = ({
                     </p>
                   </div>
                 </div>
+                {/* Flight date */}
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Clock className="h-3 w-3" />
+                  <span>{new Date(entry.start_time).toLocaleDateString('en-GB', { timeZone: option.departure_tz!, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                </div>
                 {isLocked && (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Lock className="h-3 w-3" /> Locked
+                  </div>
+                )}
+                {/* Airport Processing - editable durations */}
+                {isEditor && (
+                  <div className="rounded-lg border border-border/50 bg-muted/30 p-3 space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">Airport Processing</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Check-in (hrs before)</Label>
+                        <InlineField
+                          value={String(option.airport_checkin_hours ?? defaultCheckinHours)}
+                          canEdit={true}
+                          inputType="number"
+                          onSave={async (v) => {
+                            const hrs = Math.max(0, Number(v) || 0);
+                            await handleInlineSaveOption('airport_checkin_hours', String(hrs));
+                            await cascadeCheckinDuration(hrs);
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Checkout (mins after)</Label>
+                        <InlineField
+                          value={String(option.airport_checkout_min ?? defaultCheckoutMin)}
+                          canEdit={true}
+                          inputType="number"
+                          onSave={async (v) => {
+                            const mins = Math.max(0, Number(v) || 0);
+                            await handleInlineSaveOption('airport_checkout_min', String(mins));
+                            await cascadeCheckoutDuration(mins);
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
