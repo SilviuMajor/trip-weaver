@@ -978,6 +978,15 @@ const EntrySheet = ({
 
             {/* Flight layout */}
             {isFlightView ? (
+              <div className="space-y-3">
+                {/* Default plane image when no photos uploaded */}
+                {images.length === 0 && (
+                  <img
+                    src="https://images.unsplash.com/photo-1436491865332-7a61a109db05?w=600&h=200&fit=crop"
+                    alt="Flight"
+                    className="w-full h-32 object-cover rounded-xl"
+                  />
+                )}
               <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex-1 text-left space-y-0.5">
@@ -991,7 +1000,13 @@ const EntrySheet = ({
                       value={option.departure_terminal || ''}
                       canEdit={isEditor}
                       onSave={async (v) => handleInlineSaveOption('departure_terminal', v)}
-                      renderDisplay={(val) => <p className="text-xs text-muted-foreground">{val || <span className="italic">Add terminal</span>}</p>}
+                      renderDisplay={(val) => {
+                        if (!val) return <p className="text-xs text-muted-foreground italic">Add terminal</p>;
+                        const formatted = /^\d+$/.test(val.trim()) || /^T\d+$/i.test(val.trim())
+                          ? `Terminal - ${val.trim().replace(/^T/i, '')}`
+                          : val;
+                        return <p className="text-xs text-muted-foreground">{formatted}</p>;
+                      }}
                       placeholder="Add terminal"
                     />
                     <InlineField
@@ -1023,7 +1038,13 @@ const EntrySheet = ({
                       value={option.arrival_terminal || ''}
                       canEdit={isEditor}
                       onSave={async (v) => handleInlineSaveOption('arrival_terminal', v)}
-                      renderDisplay={(val) => <p className="text-xs text-muted-foreground">{val || <span className="italic">Add terminal</span>}</p>}
+                      renderDisplay={(val) => {
+                        if (!val) return <p className="text-xs text-muted-foreground italic">Add terminal</p>;
+                        const formatted = /^\d+$/.test(val.trim()) || /^T\d+$/i.test(val.trim())
+                          ? `Terminal - ${val.trim().replace(/^T/i, '')}`
+                          : val;
+                        return <p className="text-xs text-muted-foreground">{formatted}</p>;
+                      }}
                       placeholder="Add terminal"
                     />
                     <InlineField
@@ -1054,34 +1075,43 @@ const EntrySheet = ({
                     <p className="text-xs font-medium text-muted-foreground">Airport Processing</p>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <Label className="text-xs">Check-in (hrs before)</Label>
-                        <InlineField
-                          value={String(option.airport_checkin_hours ?? defaultCheckinHours)}
-                          canEdit={true}
-                          inputType="number"
-                          onSave={async (v) => {
-                            const hrs = Math.max(0, Number(v) || 0);
-                            await handleInlineSaveOption('airport_checkin_hours', String(hrs));
-                            await cascadeCheckinDuration(hrs);
-                          }}
-                        />
+                        <Label className="text-xs text-muted-foreground">Check-in</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            min={0}
+                            className="h-8 w-16 text-sm text-center"
+                            defaultValue={option.airport_checkin_hours ?? defaultCheckinHours}
+                            onBlur={async (e) => {
+                              const hrs = Math.max(0, Number(e.target.value) || 0);
+                              await handleInlineSaveOption('airport_checkin_hours', String(hrs));
+                              await cascadeCheckinDuration(hrs);
+                            }}
+                          />
+                          <span className="text-xs text-muted-foreground">hrs before</span>
+                        </div>
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Checkout (mins after)</Label>
-                        <InlineField
-                          value={String(option.airport_checkout_min ?? defaultCheckoutMin)}
-                          canEdit={true}
-                          inputType="number"
-                          onSave={async (v) => {
-                            const mins = Math.max(0, Number(v) || 0);
-                            await handleInlineSaveOption('airport_checkout_min', String(mins));
-                            await cascadeCheckoutDuration(mins);
-                          }}
-                        />
+                        <Label className="text-xs text-muted-foreground">Checkout</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            min={0}
+                            className="h-8 w-16 text-sm text-center"
+                            defaultValue={option.airport_checkout_min ?? defaultCheckoutMin}
+                            onBlur={async (e) => {
+                              const mins = Math.max(0, Number(e.target.value) || 0);
+                              await handleInlineSaveOption('airport_checkout_min', String(mins));
+                              await cascadeCheckoutDuration(mins);
+                            }}
+                          />
+                          <span className="text-xs text-muted-foreground">mins after</span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 )}
+              </div>
               </div>
             ) : option.category === 'transfer' ? (
               <>
@@ -1260,7 +1290,7 @@ const EntrySheet = ({
             )}
 
             {/* Website (hidden for transport) */}
-            {option.category !== 'transfer' && (option.website || isEditor) && (
+            {option.category !== 'transfer' && option.category !== 'flight' && (option.website || isEditor) && (
               <InlineField
                 value={option.website || ''}
                 canEdit={isEditor}
