@@ -215,36 +215,18 @@ const TimeSlotGrid = ({
         );
       })}
 
-      {/* TZ Change badge at flight midpoint */}
-      {tzInfo && (() => {
-        const midpointPx = (tzInfo.midpoint - startHour) * pixelsPerHour;
-        if (midpointPx < 0 || midpointPx > (endHour - startHour) * pixelsPerHour) return null;
-        const offset = tzInfo.offsetHours;
-        if (offset === 0) return null;
-        return (
-          <div
-            className="absolute z-[16] flex items-center justify-center pointer-events-none"
-            style={{ top: midpointPx - 8, left: -72, width: 56 }}
-          >
-            <span className="rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[9px] font-bold text-primary whitespace-nowrap">
-              TZ {offset > 0 ? '+' : ''}{offset}h
-            </span>
-          </div>
-        );
-      })()}
-
       {renderPreview()}
     </div>
   );
 };
 
-function getUtcOffsetMinutes(date: Date, tz: string): number {
+export function getUtcOffsetMinutes(date: Date, tz: string): number {
   const utcStr = date.toLocaleString('en-US', { timeZone: 'UTC' });
   const tzStr = date.toLocaleString('en-US', { timeZone: tz });
   return (new Date(tzStr).getTime() - new Date(utcStr).getTime()) / 60000;
 }
 
-function getUtcOffsetHoursDiff(originTz: string, destTz: string): number {
+export function getUtcOffsetHoursDiff(originTz: string, destTz: string): number {
   try {
     const now = new Date();
     const originOffset = getUtcOffsetMinutes(now, originTz);
