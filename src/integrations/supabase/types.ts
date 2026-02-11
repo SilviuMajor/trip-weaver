@@ -122,6 +122,7 @@ export type Database = {
           longitude: number | null
           name: string
           route_polyline: string | null
+          transport_modes: Json | null
           updated_at: string
           website: string | null
         }
@@ -145,6 +146,7 @@ export type Database = {
           longitude?: number | null
           name: string
           route_polyline?: string | null
+          transport_modes?: Json | null
           updated_at?: string
           website?: string | null
         }
@@ -168,6 +170,7 @@ export type Database = {
           longitude?: number | null
           name?: string
           route_polyline?: string | null
+          transport_modes?: Json | null
           updated_at?: string
           website?: string | null
         }

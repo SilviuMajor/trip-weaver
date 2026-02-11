@@ -136,7 +136,7 @@ const Timeline = () => {
       supabase.from('votes').select('option_id, user_id'),
     ]);
 
-    const options = (optionsRes.data ?? []) as EntryOption[];
+    const options = (optionsRes.data ?? []) as unknown as EntryOption[];
     const images = imagesRes.data ?? [];
     const votes = votesRes.data ?? [];
 
@@ -436,69 +436,78 @@ const Timeline = () => {
       return;
     }
 
-    // Auto-recalculate linked transport entries
+    // Auto-reposition linked transport entries (preserve duration, don't re-fetch)
     try {
       const { data: linkedTransports } = await supabase
         .from('entries')
-        .select('id, from_entry_id, to_entry_id')
+        .select('id, from_entry_id, to_entry_id, start_time, end_time')
         .or(`from_entry_id.eq.${entryId},to_entry_id.eq.${entryId}`);
 
       if (linkedTransports && linkedTransports.length > 0) {
         for (const transport of linkedTransports) {
           const fromId = transport.from_entry_id;
-          const toId = transport.to_entry_id;
-          if (!fromId || !toId) continue;
+          if (!fromId) continue;
 
-          // Get the parent entries with their options
-          const [fromRes, toRes] = await Promise.all([
-            supabase.from('entries').select('id, end_time').eq('id', fromId).single(),
-            supabase.from('entries').select('id, start_time').eq('id', toId).single(),
-          ]);
+          // Get the "from" entry's new end time
+          const { data: fromEntry } = await supabase
+            .from('entries')
+            .select('end_time')
+            .eq('id', fromId)
+            .single();
 
-          const fromEntry = fromRes.data;
-          const toEntry = toRes.data;
-          if (!fromEntry || !toEntry) continue;
+          if (!fromEntry) continue;
 
-          // Get locations from options
-          const [fromOptRes, toOptRes] = await Promise.all([
-            supabase.from('entry_options').select('location_name, arrival_location').eq('entry_id', fromId).limit(1).single(),
-            supabase.from('entry_options').select('location_name, departure_location').eq('entry_id', toId).limit(1).single(),
-          ]);
-
-          const fromAddr = fromOptRes.data?.location_name || fromOptRes.data?.arrival_location || '';
-          const toAddr = toOptRes.data?.location_name || toOptRes.data?.departure_location || '';
-
-          // New transport start = from entry's end
+          // Preserve existing transport duration, just reposition
+          const transportDurationMs = new Date(transport.end_time).getTime() - new Date(transport.start_time).getTime();
           const newTransportStart = fromEntry.end_time;
-
-          if (fromAddr && toAddr) {
-            // Re-fetch directions
-            const { data: dirData } = await supabase.functions.invoke('google-directions', {
-              body: { fromAddress: fromAddr, toAddress: toAddr, mode: 'transit' },
-            });
-            if (dirData?.duration_min) {
-              const blockDur = Math.ceil(dirData.duration_min / 5) * 5;
-              const newTransportEnd = new Date(new Date(newTransportStart).getTime() + blockDur * 60000).toISOString();
-              await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
-
-              // Update distance on the option
-              if (dirData.distance_km != null) {
-                await supabase.from('entry_options').update({ distance_km: dirData.distance_km }).eq('entry_id', transport.id);
-              }
-            }
-          } else {
-            // No addresses — just shift position, keep duration
-            const transportRes = await supabase.from('entries').select('start_time, end_time').eq('id', transport.id).single();
-            if (transportRes.data) {
-              const dur = new Date(transportRes.data.end_time).getTime() - new Date(transportRes.data.start_time).getTime();
-              const newTransportEnd = new Date(new Date(newTransportStart).getTime() + dur).toISOString();
-              await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
-            }
-          }
+          const newTransportEnd = new Date(new Date(newTransportStart).getTime() + transportDurationMs).toISOString();
+          await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
         }
       }
     } catch (err) {
-      console.error('Failed to recalculate transport:', err);
+      console.error('Failed to reposition transport:', err);
+    }
+
+    await fetchData();
+  };
+
+  // Handle mode switch confirm from TransportConnector
+  const handleModeSwitchConfirm = async (entryId: string, mode: string, newDurationMin: number, distanceKm: number, polyline?: string | null) => {
+    const entry = entries.find(e => e.id === entryId);
+    if (!entry) return;
+
+    const blockDur = Math.ceil(newDurationMin / 5) * 5;
+    const newEndIso = new Date(new Date(entry.start_time).getTime() + blockDur * 60000).toISOString();
+
+    // Update entry times
+    await supabase.from('entries').update({ end_time: newEndIso }).eq('id', entryId);
+
+    // Update option name, distance, polyline
+    const opt = entry.options[0];
+    if (opt) {
+      const modeLabels: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', bicycle: 'Cycle' };
+      const toShort = (opt.arrival_location || '').split(',')[0].trim();
+      const newName = `${modeLabels[mode] || mode} to ${toShort}`;
+      await supabase.from('entry_options').update({
+        name: newName,
+        distance_km: distanceKm,
+        route_polyline: polyline ?? null,
+      } as any).eq('id', opt.id);
+    }
+
+    // Push the next event (to_entry_id) if needed
+    if (entry.to_entry_id) {
+      const { data: nextEntry } = await supabase.from('entries').select('id, start_time, end_time, is_locked').eq('id', entry.to_entry_id).single();
+      if (nextEntry && !nextEntry.is_locked) {
+        const newTransportEnd = new Date(new Date(entry.start_time).getTime() + blockDur * 60000);
+        const nextStart = new Date(nextEntry.start_time);
+        if (newTransportEnd.getTime() > nextStart.getTime()) {
+          const pushMs = newTransportEnd.getTime() - nextStart.getTime();
+          const newNextStart = new Date(nextStart.getTime() + pushMs).toISOString();
+          const newNextEnd = new Date(new Date(nextEntry.end_time).getTime() + pushMs).toISOString();
+          await supabase.from('entries').update({ start_time: newNextStart, end_time: newNextEnd }).eq('id', nextEntry.id);
+        }
+      }
     }
 
     await fetchData();
@@ -1169,6 +1178,7 @@ const Timeline = () => {
                     onDragSlot={handleDragSlot}
                     onEntryTimeChange={handleEntryTimeChange}
                     onDropFromPanel={(entryId, hourOffset) => handleDropOnTimeline(entryId, day, hourOffset)}
+                    onModeSwitchConfirm={handleModeSwitchConfirm}
                     activeTz={tzInfo?.activeTz}
                     dayFlights={tzInfo?.flights}
                     isEditor={isEditor}
