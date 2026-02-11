@@ -951,37 +951,36 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
               );
             })()}
 
-            {/* Weather column + inline TZ badge — between time labels */}
-            <div className="absolute top-0 bottom-0 z-[5]" style={{ left: -80, width: 64 }}>
+            {/* TZ change badge — separate from weather, at flight arrival boundary */}
+            {dayFlights && dayFlights.length > 0 && (() => {
+              const f = dayFlights[0];
+              const tzHour = Math.floor(f.flightEndHour);
+              const offset = getUtcOffsetHoursDiff(f.originTz, f.destinationTz);
+              if (offset === 0) return null;
+              const badgeTop = (tzHour - startHour) * PIXELS_PER_HOUR + PIXELS_PER_HOUR / 2 - 8;
+              return (
+                <div className="absolute z-[6]" style={{ top: badgeTop, left: -120, width: 46 }}>
+                  <span className="rounded-full bg-primary/20 border border-primary/30 px-2 py-0.5 text-[10px] font-bold text-primary whitespace-nowrap">
+                    TZ {offset > 0 ? '+' : ''}{offset}h
+                  </span>
+                </div>
+              );
+            })()}
+
+            {/* Weather column — between time labels */}
+            <div className="absolute top-0 bottom-0 z-[5]" style={{ left: -74, width: 50 }}>
               {Array.from({ length: endHour - startHour }, (_, i) => startHour + i).map(hour => {
                 const dateStr = format(dayDate, 'yyyy-MM-dd');
                 const w = weatherData.find(wd => wd.date === dateStr && wd.hour === hour);
-
-                // Determine if TZ change badge should show at this hour
-                const tzChangeHour = dayFlights && dayFlights.length > 0
-                  ? Math.ceil(dayFlights[0].flightEndHour)
-                  : null;
-                const isTzChangeHour = tzChangeHour !== null && hour === tzChangeHour;
-                const tzOffset = isTzChangeHour && dayFlights && dayFlights.length > 0
-                  ? getUtcOffsetHoursDiff(dayFlights[0].originTz, dayFlights[0].destinationTz)
-                  : 0;
-
-                if (!w && !isTzChangeHour) return null;
+                if (!w) return null;
                 const top = (hour - startHour) * PIXELS_PER_HOUR;
                 return (
                   <div
                     key={hour}
-                    className="absolute left-0 flex items-center gap-1"
+                    className="absolute left-0"
                     style={{ top: top + (PIXELS_PER_HOUR / 2) - 6 }}
                   >
-                    {isTzChangeHour && tzOffset !== 0 && (
-                      <span className="rounded-full bg-primary/10 border border-primary/20 px-1.5 py-0.5 text-[8px] font-bold text-primary whitespace-nowrap">
-                        {tzOffset > 0 ? '+' : ''}{tzOffset}h
-                      </span>
-                    )}
-                    {w && (
-                      <WeatherBadge temp={w.temp_c} condition={w.condition} hour={hour} date={dayDate} />
-                    )}
+                    <WeatherBadge temp={w.temp_c} condition={w.condition} hour={hour} date={dayDate} />
                   </div>
                 );
               })}
