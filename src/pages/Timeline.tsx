@@ -90,8 +90,6 @@ const Timeline = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const mainScrollRef = useRef<HTMLElement>(null);
   const dayRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
-
-
   // Redirect if no user
   useEffect(() => {
     if (!currentUser) {
@@ -429,6 +427,101 @@ const Timeline = () => {
     setSheetOpen(true);
   };
 
+  // Direct transport generation (for ≤2hr gap buttons — bypasses modal)
+  const handleGenerateTransportDirect = async (fromEntryId: string, toEntryId: string, prefillTime: string, resolvedTz?: string) => {
+    const fromEntry = entries.find(e => e.id === fromEntryId);
+    const toEntry = entries.find(e => e.id === toEntryId);
+    if (!fromEntry || !toEntry || !tripId) return;
+
+    const fromOpt = fromEntry.options[0];
+    const toOpt = toEntry.options[0];
+    const fromAddr = fromOpt?.location_name || fromOpt?.arrival_location || '';
+    const toAddr = toOpt?.location_name || toOpt?.departure_location || '';
+
+    if (!fromAddr || !toAddr) {
+      handleAddTransport(fromEntryId, toEntryId, prefillTime, resolvedTz);
+      return;
+    }
+
+    try {
+      toast({ title: 'Generating transport…' });
+
+      const fromCheckout = entries.find(e => e.linked_flight_id === fromEntryId && e.linked_type === 'checkout');
+      const departureTime = fromCheckout?.end_time ?? fromEntry.end_time;
+
+      const { data, error } = await supabase.functions.invoke('google-directions', {
+        body: {
+          fromAddress: fromAddr,
+          toAddress: toAddr,
+          modes: ['walk', 'transit', 'drive', 'bicycle'],
+          departureTime,
+        },
+      });
+
+      if (error || !data?.results?.length) {
+        toast({ title: 'Could not calculate route', variant: 'destructive' });
+        return;
+      }
+
+      const walkThreshold = trip?.walk_threshold_min ?? 10;
+      const walkResult = data.results.find((r: any) => r.mode === 'walk');
+      const transitResult = data.results.find((r: any) => r.mode === 'transit');
+
+      let chosen = transitResult || data.results[0];
+      if (walkResult && walkResult.duration_min <= walkThreshold) {
+        chosen = walkResult;
+      }
+
+      const blockDur = Math.ceil(chosen.duration_min / 5) * 5;
+      const startTime = departureTime;
+      const endTime = new Date(new Date(startTime).getTime() + blockDur * 60000).toISOString();
+
+      const modeLabels: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', bicycle: 'Cycle' };
+      const toShort = toAddr.split(',')[0].trim();
+      const name = `${modeLabels[chosen.mode] || chosen.mode} to ${toShort}`;
+
+      const { data: newEntry, error: entryErr } = await supabase.from('entries').insert({
+        trip_id: tripId,
+        start_time: startTime,
+        end_time: endTime,
+        from_entry_id: fromEntryId,
+        to_entry_id: toEntryId,
+        is_scheduled: true,
+      } as any).select('id').single();
+
+      if (entryErr || !newEntry) throw entryErr;
+
+      await supabase.from('entry_options').insert({
+        entry_id: newEntry.id,
+        name,
+        category: 'transfer',
+        category_color: '#6B7280',
+        departure_location: fromAddr,
+        arrival_location: toAddr,
+        distance_km: chosen.distance_km,
+        route_polyline: chosen.polyline,
+        transport_modes: data.results,
+      } as any);
+
+      pushAction({
+        description: `Add ${name}`,
+        undo: async () => {
+          await supabase.from('entry_options').delete().eq('entry_id', newEntry.id);
+          await supabase.from('entries').delete().eq('id', newEntry.id);
+          await fetchData();
+        },
+        redo: async () => {
+          await fetchData();
+        },
+      });
+
+      toast({ title: `Added ${name}` });
+      await fetchData();
+    } catch (err: any) {
+      toast({ title: 'Failed to generate transport', description: err?.message, variant: 'destructive' });
+    }
+  };
+
   const handleDragSlot = (startIso: string, endIso: string) => {
     setPrefillStartTime(startIso);
     setPrefillEndTime(endIso);
@@ -492,19 +585,7 @@ const Timeline = () => {
           const newTransportEnd = new Date(new Date(newTransportStart).getTime() + transportDurationMs).toISOString();
           await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
 
-          // Fix 2: Auto-pull the "to" event to meet transport end
-          if (transport.to_entry_id) {
-            const { data: toEntry } = await supabase.from('entries')
-              .select('id, start_time, end_time, is_locked')
-              .eq('id', transport.to_entry_id).single();
-            if (toEntry && !toEntry.is_locked) {
-              const teDur = new Date(toEntry.end_time).getTime() - new Date(toEntry.start_time).getTime();
-              await supabase.from('entries').update({
-                start_time: newTransportEnd,
-                end_time: new Date(new Date(newTransportEnd).getTime() + teDur).toISOString(),
-              }).eq('id', toEntry.id);
-            }
-          }
+          // Gap left intentionally — next event stays in place (Issue 3: no chain drag)
         }
       }
     } catch (err) {
@@ -1162,7 +1243,7 @@ const Timeline = () => {
   const days = getDays();
 
   // Compute day boundaries for cross-day drag
-  const [dayBoundaries, setDayBoundaries] = useState<Array<{ dayDate: Date; topPx: number; bottomPx: number }>>([]);
+  const [dayBoundaries, setDayBoundaries] = useState<Array<{ dayDate: Date; topPx: number; bottomPx: number; gridTopPx?: number }>>([]);
 
   useEffect(() => {
     if (!mainScrollRef.current || days.length === 0) return;
@@ -1171,16 +1252,19 @@ const Timeline = () => {
       const container = mainScrollRef.current;
       if (!container) return;
       const containerRect = container.getBoundingClientRect();
-      const boundaries: Array<{ dayDate: Date; topPx: number; bottomPx: number }> = [];
+      const boundaries: Array<{ dayDate: Date; topPx: number; bottomPx: number; gridTopPx?: number }> = [];
       for (const day of days) {
         const key = format(day, 'yyyy-MM-dd');
         const el = dayRefsMap.current.get(key);
         if (!el) continue;
         const rect = el.getBoundingClientRect();
+        const gridEl = el.querySelector('[data-grid-top]');
+        const gridRect = gridEl ? gridEl.getBoundingClientRect() : rect;
         boundaries.push({
           dayDate: day,
           topPx: rect.top - containerRect.top + container.scrollTop,
           bottomPx: rect.bottom - containerRect.top + container.scrollTop,
+          gridTopPx: gridRect.top - containerRect.top + container.scrollTop,
         });
       }
       setDayBoundaries(boundaries);
@@ -1278,6 +1362,7 @@ const Timeline = () => {
                     isLastDay={index === days.length - 1}
                     onAddBetween={handleAddBetween}
                     onAddTransport={handleAddTransport}
+                    onGenerateTransport={handleGenerateTransportDirect}
                     onDragSlot={handleDragSlot}
                     onEntryTimeChange={handleEntryTimeChange}
                     onDropFromPanel={(entryId, hourOffset) => handleDropOnTimeline(entryId, day, hourOffset)}

@@ -27,6 +27,7 @@ export interface Trip {
   default_checkout_min: number;
   emoji: string | null;
   image_url: string | null;
+  walk_threshold_min: number;
   created_at: string;
   updated_at: string;
 }
