@@ -194,7 +194,6 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
 
   // Locked-entry drag feedback
   const [shakeEntryId, setShakeEntryId] = useState<string | null>(null);
-  const [pendingModeSwitch, setPendingModeSwitch] = useState<{ entryId: string; mode: string; newDurationMin: number; distanceKm: number; polyline?: string | null } | null>(null);
   const [refreshingTransportId, setRefreshingTransportId] = useState<string | null>(null);
   const handleLockedAttempt = useCallback((entryId: string) => {
     toast.error('Cannot drag a locked event');
@@ -262,6 +261,9 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
     return sortedEntries.some(e => {
       const opt = e.options[0];
       if (!opt || opt.category !== 'transfer') return false;
+      // Check by parent IDs first
+      if (e.from_entry_id === entryA.id && e.to_entry_id === entryB.id) return true;
+      // Fallback: check by time position
       const eStart = new Date(e.start_time).getTime();
       return eStart >= aEnd && eStart <= bStart;
     });
@@ -801,9 +803,11 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                               fromLabel={primaryOption.departure_location || undefined}
                               toLabel={primaryOption.arrival_location || undefined}
                               isRefreshing={refreshingTransportId === entry.id}
-                              pendingMode={pendingModeSwitch?.entryId === entry.id ? pendingModeSwitch.mode : null}
-                              onModeSelect={(mode, durationMin, distanceKm, polyline) => {
-                                setPendingModeSwitch({ entryId: entry.id, mode, newDurationMin: durationMin, distanceKm, polyline });
+                              onModeSelect={async (mode, durationMin, distanceKm, polyline) => {
+                                // Fix 4: Apply instantly, no confirmation
+                                if (onModeSwitchConfirm) {
+                                  await onModeSwitchConfirm(entry.id, mode, durationMin, distanceKm, polyline);
+                                }
                               }}
                               onRefresh={async () => {
                                 setRefreshingTransportId(entry.id);
@@ -828,21 +832,6 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                                   setRefreshingTransportId(null);
                                 }
                               }}
-                              onConfirmSwitch={pendingModeSwitch?.entryId === entry.id ? async () => {
-                                if (onModeSwitchConfirm && pendingModeSwitch) {
-                                  await onModeSwitchConfirm(
-                                    pendingModeSwitch.entryId,
-                                    pendingModeSwitch.mode,
-                                    pendingModeSwitch.newDurationMin,
-                                    pendingModeSwitch.distanceKm,
-                                    pendingModeSwitch.polyline
-                                  );
-                                  setPendingModeSwitch(null);
-                                }
-                              } : undefined}
-                              onCancelSwitch={pendingModeSwitch?.entryId === entry.id ? () => {
-                                setPendingModeSwitch(null);
-                              } : undefined}
                             />
                           </div>
                         ) : (
@@ -927,32 +916,42 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                           />
                         )}
 
-                        {/* + buttons — not for transport */}
-                        {onAddBetween && !isTransport && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const prefillDate = addMinutes(new Date(entry.start_time), -60);
-                              onAddBetween(prefillDate.toISOString());
-                            }}
-                            className="absolute z-20 flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 opacity-0 transition-all group-hover:opacity-100 hover:border-primary hover:bg-primary/10 hover:text-primary"
-                            style={{ top: -10, left: -10 }}
-                          >
-                            <Plus className="h-3 w-3" />
-                          </button>
-                        )}
-                        {onAddBetween && !isTransport && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onAddBetween(entry.end_time);
-                            }}
-                            className="absolute z-20 flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 opacity-0 transition-all group-hover:opacity-100 hover:border-primary hover:bg-primary/10 hover:text-primary"
-                            style={{ bottom: -10, left: -10 }}
-                          >
-                            <Plus className="h-3 w-3" />
-                          </button>
-                        )}
+                        {/* + buttons — not for transport, not adjacent to transport (Fix 5) */}
+                        {onAddBetween && !isTransport && (() => {
+                          const prevIdx = sortedEntries.findIndex(e => e.id === entry.id) - 1;
+                          const prevE = prevIdx >= 0 ? sortedEntries[prevIdx] : null;
+                          if (prevE?.options[0]?.category === 'transfer') return null;
+                          return (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const prefillDate = addMinutes(new Date(entry.start_time), -60);
+                                onAddBetween(prefillDate.toISOString());
+                              }}
+                              className="absolute z-20 flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 opacity-0 transition-all group-hover:opacity-100 hover:border-primary hover:bg-primary/10 hover:text-primary"
+                              style={{ top: -10, left: -10 }}
+                            >
+                              <Plus className="h-3 w-3" />
+                            </button>
+                          );
+                        })()}
+                        {onAddBetween && !isTransport && (() => {
+                          const nextIdx = sortedEntries.findIndex(e => e.id === entry.id) + 1;
+                          const nextE = nextIdx < sortedEntries.length ? sortedEntries[nextIdx] : null;
+                          if (nextE?.options[0]?.category === 'transfer') return null;
+                          return (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onAddBetween(entry.end_time);
+                              }}
+                              className="absolute z-20 flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 opacity-0 transition-all group-hover:opacity-100 hover:border-primary hover:bg-primary/10 hover:text-primary"
+                              style={{ bottom: -10, left: -10 }}
+                            >
+                              <Plus className="h-3 w-3" />
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
 

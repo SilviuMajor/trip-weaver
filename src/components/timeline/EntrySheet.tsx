@@ -664,11 +664,10 @@ const EntrySheet = ({
           endIso = localToUTC(format(addDays(parseISO(entryDate), 1), 'yyyy-MM-dd'), endTime, arrivalTz);
         }
       } else if (isTransfer && transportContext) {
-        // For transport with context, use block duration (rounded up to 5 min)
+        // Fix 1: Use prefillStartTime directly (already ISO from departing event's end)
         const blockDur = Math.ceil(durationMin / 5) * 5;
-        startIso = localToUTC(entryDate, startTime, tripTimezone);
-        const startDt = new Date(startIso);
-        endIso = new Date(startDt.getTime() + blockDur * 60000).toISOString();
+        startIso = prefillStartTime || localToUTC(entryDate, startTime, tripTimezone);
+        endIso = new Date(new Date(startIso).getTime() + blockDur * 60000).toISOString();
       } else {
         startIso = localToUTC(entryDate, startTime, tripTimezone);
         endIso = localToUTC(entryDate, endTime, tripTimezone);
@@ -759,6 +758,29 @@ const EntrySheet = ({
 
       if (isFlight && isUndated && !isEditing && date) {
         await autoDetectTripDates(date, Number(selectedDay));
+      }
+
+      // Fix 2: Auto-pull the next event to meet transport end
+      if (isTransfer && !isEditing && transportContext?.toEntryId) {
+        try {
+          const { data: nextEntry } = await supabase
+            .from('entries')
+            .select('id, start_time, end_time, is_locked')
+            .eq('id', transportContext.toEntryId)
+            .single();
+          if (nextEntry && !nextEntry.is_locked) {
+            const transportEndDt = new Date(endIso);
+            const nextDuration = new Date(nextEntry.end_time).getTime() - new Date(nextEntry.start_time).getTime();
+            if (transportEndDt.getTime() !== new Date(nextEntry.start_time).getTime()) {
+              await supabase.from('entries').update({
+                start_time: endIso,
+                end_time: new Date(transportEndDt.getTime() + nextDuration).toISOString(),
+              }).eq('id', nextEntry.id);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to pull next event:', err);
+        }
       }
 
       onSaved();
