@@ -1,94 +1,65 @@
 
-
 # Fix Drag Offset, Transport Button, Drag Chain, and SNAP Button
 
 ## Issue 1: Drag Hold Offset Regression
 
-### Root Cause
-The `dayBoundaries` are computed from the outer `CalendarDay` wrapper div (which includes the day header and padding), but the grab offset calculation assumes `boundary.topPx` aligns with the start of the time grid. The day header, padding, and "Trip Begins" marker add vertical offset that is not accounted for, causing the cursor-to-card offset to be miscalculated.
+**Root cause**: `dayBoundaries` are measured from the outer CalendarDay wrapper div (which includes the sticky day header, "Trip Begins" marker, and padding), but the grab offset calculation in `useDragResize.ts` line 121 uses `boundary.topPx` as if it's the grid top. The header/padding offset causes the cursor-to-card offset to be wrong.
 
-### Fix
-**File: `src/components/timeline/CalendarDay.tsx`**
-- Add a second ref for the actual grid container (the `div` with `ml-20` and `height: containerHeight`).
-- Expose this grid ref position via a callback or data attribute so boundaries can reference the grid top, not the wrapper top.
+**Fix**: Add a `gridTopPx` field to each boundary. In `CalendarDay.tsx`, attach a `data-grid-top` attribute to the grid container div (the `div.ml-20` at line 364). In `Timeline.tsx`, read this attribute when computing boundaries. In `useDragResize.ts`, use `gridTopPx` for hour calculations, and add missing deps to `startDrag`.
 
-**File: `src/pages/Timeline.tsx`**
-- When computing `dayBoundaries`, measure the grid container position (not the day wrapper). Use a separate ref map for grid containers, or compute the offset from data attributes.
+## Issue 2: Transport Button Reverted
 
-**File: `src/hooks/useDragResize.ts`**
-- Add missing dependencies (`dayBoundaries`, `scrollContainerRef`, `startHour`, `pixelsPerHour`) to the `startDrag` useCallback to prevent stale closure values.
+**Root cause**: `handleAddTransport` in Timeline.tsx (line 401) opens the EntrySheet modal with `prefillCategory='transfer'`. For gaps under 2 hours, the transport button should directly generate transport.
 
-### Alternative simpler approach
-Instead of refactoring refs, compute a `gridOffset` inside CalendarDay by measuring the distance from the day wrapper top to the grid container top, and pass it alongside dayBoundaries. Then in `useDragResize`, subtract this offset when computing `relativeY`.
+**Fix**: Add a new `handleGenerateTransportDirect` function in Timeline.tsx that:
+1. Fetches walk + transit directions via the `google-directions` edge function
+2. Creates an entry + option directly in the database (same logic as `auto-generate-transport`)
+3. Sets `from_entry_id` and `to_entry_id` on the new entry
+4. Calls `fetchData()` to refresh
 
-**Chosen approach**: Add a `gridTopPx` field to each day boundary entry. In Timeline.tsx, measure both the day wrapper and the grid container (via a second ref map) to populate `gridTopPx`. In `useDragResize.ts`, use `gridTopPx` instead of `topPx` for hour calculations.
-
----
-
-## Issue 2: Transport Button Between Events Reverted
-
-### Root Cause
-The recent modal rework changed `onAddTransport` in Timeline.tsx to open the EntrySheet (modal) with prefillCategory='transfer'. For gaps under 2 hours, the transport button should directly generate transport without opening a modal.
-
-### Fix
-**File: `src/pages/Timeline.tsx`**
-- Split `handleAddTransport` into two paths:
-  - **Direct generation** (for the transport gap button in gaps under 2 hours): Directly invoke the `auto-generate-transport` edge function or create the transport entry inline (same logic as the "Route" button), bypassing the modal entirely.
-  - **Modal path** (for the contextual suggestion in the "Add Something" modal): Keep existing behavior.
-- Rename or add a new handler `handleGenerateTransport` that creates the transport entry directly.
-
-**File: `src/components/timeline/CalendarDay.tsx`**
-- The gap button's `onClick` for `isTransportGap` already calls `onAddTransport` -- this callback will now point to the direct-generation handler instead of the modal opener.
-
----
+Pass this as a separate `onGenerateTransport` prop to CalendarDay, used by the transport gap button (under 2hr gaps). The existing `onAddTransport` remains for the modal path but is no longer called from the gap button.
 
 ## Issue 3: Drag Chain Behavior
 
-### Current Behavior
-In `handleEntryTimeChange` (Timeline.tsx lines 496-507), after repositioning trailing transport, the code also auto-pulls the next event (`to_entry_id`) to meet the transport end. This moves the entire chain.
+**Root cause**: Lines 495-507 in Timeline.tsx auto-pull the `to_entry_id` event after repositioning trailing transport. This moves the chain.
 
-### New Behavior
-Only the dragged event and its trailing transport move. The next event stays put, creating a gap.
-
-### Fix
-**File: `src/pages/Timeline.tsx`**
-- Remove lines 496-507 (the block that auto-pulls the `to_entry_id` event after transport repositioning) from `handleEntryTimeChange`.
-- Keep the transport repositioning logic (lines 489-493) intact -- trailing transport still moves with its parent event.
-
----
+**Fix**: Remove lines 495-507 (the block that pulls the next event forward after transport repositioning). Transport still moves with the dragged event, but the next event stays put, creating a gap.
 
 ## Issue 4: SNAP Button Improvements
 
-### Current State
-A SNAP button already exists at CalendarDay.tsx lines 982-1020 but:
-- Returns null for locked next events (should show with warning)
-- Uses orange styling (should be green)
-- Does not recalculate transport after snapping
+**Current state**: SNAP button at CalendarDay.tsx lines 982-1020:
+- Returns null for locked events (line 990)
+- Uses orange styling (line 1014)
+- No transport recalculation after snap
 
-### Fix
-**File: `src/components/timeline/CalendarDay.tsx`**
-
-1. **Show for locked events**: Change line 990 from `if (!nextVisible || nextVisible.is_locked) return null;` to only return null when `!nextVisible`. When `nextVisible.is_locked`, show the button but on click show a warning toast and do not execute the snap.
-
-2. **Green styling**: Change the button classes from `bg-orange-100 text-orange-600 border-orange-200` to `bg-green-100 text-green-600 border-green-200` (and corresponding dark mode variants).
-
-3. **Transport recalculation after snap**: After snapping the next event, trigger a transport recalculation if the transport connector between the events exists. Call `onVoteChange()` (already done) to refresh data, which will trigger re-render with updated positions.
+**Fixes**:
+1. Show for locked events with warning toast instead of hiding
+2. Green styling
+3. After snapping, invoke `google-directions` to recalculate transport duration for the selected mode, then update the transport entry's end time and option
 
 ---
 
-## Files Changed
+## Technical Details
+
+### Files Changed
 
 | File | Changes |
 |------|---------|
-| `src/hooks/useDragResize.ts` | Fix stale closure in `startDrag` deps; use `gridTopPx` from boundaries for offset calculation |
-| `src/components/timeline/CalendarDay.tsx` | Add grid ref for boundary measurement; fix SNAP button for locked events + green styling; keep transport button calling direct-generation handler |
-| `src/pages/Timeline.tsx` | Add grid ref map for boundary measurement; add `handleGenerateTransport` for direct transport creation; remove next-event auto-pull from `handleEntryTimeChange` |
+| `src/hooks/useDragResize.ts` | Add `gridTopPx` to DayBoundary interface; use it in startDrag + handlePointerMove; add missing deps to startDrag |
+| `src/components/timeline/CalendarDay.tsx` | Add `data-grid-top` to grid div; add `onGenerateTransport` prop; SNAP button: green styling, locked event support, transport recalculation after snap |
+| `src/pages/Timeline.tsx` | Read `data-grid-top` in boundary computation; add `handleGenerateTransportDirect`; remove chain-pull in `handleEntryTimeChange` lines 495-507 |
 
-## What Is NOT Changed
+### SNAP Transport Recalculation Detail
+After snapping the next event, the SNAP handler will:
+1. Get the transport entry's current mode from `transport_modes` or parse from option name
+2. Call `google-directions` with the from/to addresses and the new departure time
+3. Update the transport entry's `end_time` based on the new duration
+4. Update the option's `distance_km` and `route_polyline`
+5. Re-snap the next event if the transport duration changed
 
+### What Is NOT Changed
 - Transport connector inline editing (mode switching, refresh, delete)
 - Flight card behavior (permanently drag-locked)
 - The "Add Something" modal's contextual transport suggestion
 - Event card rendering/styling
 - Gap detection logic for when buttons appear
-
