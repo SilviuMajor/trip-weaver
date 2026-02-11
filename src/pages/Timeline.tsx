@@ -384,7 +384,7 @@ const Timeline = () => {
   };
 
   // Transport context for gap button
-  const [transportContext, setTransportContext] = useState<{ fromAddress: string; toAddress: string; gapMinutes?: number; fromEntryId?: string; toEntryId?: string } | null>(null);
+  const [transportContext, setTransportContext] = useState<{ fromAddress: string; toAddress: string; gapMinutes?: number; fromEntryId?: string; toEntryId?: string; resolvedTz?: string } | null>(null);
 
   const handleAddBetween = (prefillTime: string) => {
     setPrefillStartTime(prefillTime);
@@ -396,7 +396,7 @@ const Timeline = () => {
     setSheetOpen(true);
   };
 
-  const handleAddTransport = (fromEntryId: string, toEntryId: string, prefillTime: string) => {
+  const handleAddTransport = (fromEntryId: string, toEntryId: string, prefillTime: string, resolvedTz?: string) => {
     const fromEntry = entries.find(e => e.id === fromEntryId);
     const toEntry = entries.find(e => e.id === toEntryId);
     const fromOpt = fromEntry?.options[0];
@@ -417,7 +417,7 @@ const Timeline = () => {
       gapMinutes = Math.round(gapMs / 60000);
     }
 
-    setTransportContext({ fromAddress: fromAddr, toAddress: toAddr, gapMinutes, fromEntryId, toEntryId });
+    setTransportContext({ fromAddress: fromAddr, toAddress: toAddr, gapMinutes, fromEntryId, toEntryId, resolvedTz });
     setPrefillStartTime(actualEndTime);
     setPrefillEndTime(undefined);
     setPrefillCategory('transfer');

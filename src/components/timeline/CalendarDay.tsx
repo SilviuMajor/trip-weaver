@@ -54,7 +54,7 @@ interface CalendarDayProps {
   isFirstDay?: boolean;
   isLastDay?: boolean;
   onAddBetween?: (prefillTime: string) => void;
-  onAddTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string) => void;
+  onAddTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string, resolvedTz?: string) => void;
   onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
   onDropFromPanel?: (entryId: string, hourOffset: number) => void;
   onModeSwitchConfirm?: (entryId: string, mode: string, newDurationMin: number, distanceKm: number, polyline?: string | null) => Promise<void>;
@@ -517,7 +517,16 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                       onClick={(e) => {
                         e.stopPropagation();
                         if (isTransportGap && onAddTransport) {
-                          onAddTransport(entry.id, nextEntry.id, entry.end_time);
+                          // Pass the resolved TZ of the "from" entry so transport inherits it
+                          const fromResolvedTz = (() => {
+                            if (dayFlights.length > 0 && dayFlights[0].flightEndUtc) {
+                              const entryUtcMs = new Date(entry.start_time).getTime();
+                              const flightEndMs = new Date(dayFlights[0].flightEndUtc).getTime();
+                              return entryUtcMs >= flightEndMs ? dayFlights[0].destinationTz : dayFlights[0].originTz;
+                            }
+                            return activeTz || tripTimezone;
+                          })();
+                          onAddTransport(entry.id, nextEntry.id, entry.end_time, fromResolvedTz);
                         } else if (onAddBetween) {
                           onAddBetween(entry.end_time);
                         }
@@ -591,9 +600,21 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                   } else {
                     // Per-entry TZ: check if entry is before or after flight
                     if (dayFlights.length > 0 && dayFlights[0].flightEndUtc) {
-                      const entryUtcMs = new Date(entry.start_time).getTime();
                       const flightEndMs = new Date(dayFlights[0].flightEndUtc).getTime();
-                      resolvedTz = entryUtcMs >= flightEndMs ? dayFlights[0].destinationTz : dayFlights[0].originTz;
+                      // Transport entries inherit TZ from their "from" entry
+                      if (entry.from_entry_id) {
+                        const fromEntry = sortedEntries.find(e => e.id === entry.from_entry_id);
+                        if (fromEntry) {
+                          const fromEntryMs = new Date(fromEntry.start_time).getTime();
+                          resolvedTz = fromEntryMs >= flightEndMs ? dayFlights[0].destinationTz : dayFlights[0].originTz;
+                        } else {
+                          const entryUtcMs = new Date(entry.start_time).getTime();
+                          resolvedTz = entryUtcMs >= flightEndMs ? dayFlights[0].destinationTz : dayFlights[0].originTz;
+                        }
+                      } else {
+                        const entryUtcMs = new Date(entry.start_time).getTime();
+                        resolvedTz = entryUtcMs >= flightEndMs ? dayFlights[0].destinationTz : dayFlights[0].originTz;
+                      }
                     }
                     entryStartHour = getHourInTimezone(entry.start_time, resolvedTz);
                     entryEndHour = getHourInTimezone(entry.end_time, resolvedTz);
