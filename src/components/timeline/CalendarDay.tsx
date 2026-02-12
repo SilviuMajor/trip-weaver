@@ -603,8 +603,6 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                 let entryEndHour: number;
                 let resolvedTz = activeTz || homeTimezone;
 
-                // DIAGNOSTIC: will be removed after verification
-                const _preResolvedTz = resolvedTz;
 
                 if (isDragged && dragState) {
                   entryStartHour = dragState.currentStartHour;
@@ -640,10 +638,6 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                   if (entryEndHour < entryStartHour) entryEndHour = 24;
                 }
 
-                // TZ-DEBUG: trace TZ resolution for post-flight entries
-                if (dayFlights.length > 0) {
-                  console.log(`[TZ-DEBUG] ${primaryOption.name}: startTime=${entry.start_time}, resolvedTz=${resolvedTz}, startHour=${entryStartHour.toFixed(2)}, endHour=${entryEndHour.toFixed(2)}, activeTz=${activeTz}, preResolved=${_preResolvedTz}`);
-                }
 
                 // For flight groups, expand bounds to cover checkin + checkout
                 const flightGroup = flightGroupMap.get(entry.id);
@@ -1010,14 +1004,39 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                     {/* SNAP button below transport cards */}
                     {isTransport && (() => {
                       // Find the next non-linked entry in sortedEntries
-                      const nextVisible = entry.to_entry_id
+                      let nextVisible = entry.to_entry_id
                         ? sortedEntries.find(e => e.id === entry.to_entry_id)
                         : null;
+                      // Fallback: find next chronological non-transport, non-linked entry
+                      if (!nextVisible) {
+                        const entryIdx = sortedEntries.findIndex(e => e.id === entry.id);
+                        for (let i = entryIdx + 1; i < sortedEntries.length; i++) {
+                          const candidate = sortedEntries[i];
+                          const cOpt = candidate.options[0];
+                          const isTransport = cOpt?.category === 'transfer' || 
+                            (candidate.from_entry_id != null && candidate.to_entry_id != null) ||
+                            ['drive to', 'walk to', 'transit to', 'cycle to'].some(p => (cOpt?.name?.toLowerCase() ?? '').startsWith(p));
+                          if (!isTransport && !candidate.linked_flight_id) {
+                            nextVisible = candidate;
+                            break;
+                          }
+                        }
+                      }
                       if (!nextVisible) return null;
 
                       const transportEnd = new Date(entry.end_time).getTime();
                       const nextStart = new Date(nextVisible.start_time).getTime();
                       const gapMs = nextStart - transportEnd;
+                      console.log('[SNAP-DEBUG]', {
+                        entryName: primaryOption.name,
+                        entryEndUtc: entry.end_time,
+                        nextEntryName: nextVisible.options[0]?.name,
+                        nextEntryStartUtc: nextVisible.start_time,
+                        gapMs,
+                        hasToEntryId: !!entry.to_entry_id,
+                        nextIsLocked: nextVisible.is_locked,
+                        shouldShowSnap: gapMs > 0,
+                      });
                       if (gapMs <= 0) return null;
 
                       const handleSnapNext = async () => {
