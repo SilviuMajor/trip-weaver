@@ -11,6 +11,8 @@ import Timeline from "./pages/Timeline";
 import Settings from "./pages/Settings";
 import TripSettings from "./pages/TripSettings";
 import StyleShowcase from "./pages/StyleShowcase";
+import Live from "./pages/Live";
+import Planner from "./pages/Planner";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -27,6 +29,8 @@ const App = () => (
           <Route path="/trip/new" element={<TripWizard />} />
           <Route path="/trip/:tripId" element={<UserSelect />} />
           <Route path="/trip/:tripId/timeline" element={<Timeline />} />
+          <Route path="/trip/:tripId/planner" element={<Planner />} />
+          <Route path="/trip/:tripId/live" element={<Live />} />
           <Route path="/trip/:tripId/settings" element={<TripSettings />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/styles" element={<StyleShowcase />} />

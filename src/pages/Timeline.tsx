@@ -4,9 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
 import { getDateInTimezone, localToUTC, resolveDropTz } from '@/lib/timezoneUtils';
 import { findCategory } from '@/lib/categories';
-import { LayoutList } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Button } from '@/components/ui/button';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGeolocation } from '@/hooks/useGeolocation';
 
@@ -16,10 +14,10 @@ import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { analyzeConflict, generateRecommendations } from '@/lib/conflictEngine';
 import { toast } from '@/hooks/use-toast';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
+import TripNavBar from '@/components/timeline/TripNavBar';
 import CalendarDay from '@/components/timeline/CalendarDay';
 import EntrySheet from '@/components/timeline/EntrySheet';
 import CategorySidebar from '@/components/timeline/CategorySidebar';
-import LivePanel from '@/components/timeline/LivePanel';
 import ConflictResolver from '@/components/timeline/ConflictResolver';
 import DayPickerDialog from '@/components/timeline/DayPickerDialog';
 import HotelWizard from '@/components/timeline/HotelWizard';
@@ -65,8 +63,7 @@ const Timeline = () => {
   // Category sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Live panel state
-  const [liveOpen, setLiveOpen] = useState(false);
+
 
   // Conflict resolution state
   const [conflictOpen, setConflictOpen] = useState(false);
@@ -1396,6 +1393,14 @@ const Timeline = () => {
       <TimelineHeader
         trip={trip}
         tripId={tripId ?? ''}
+        onDataRefresh={fetchData}
+        onAutoGenerateTransport={handleAutoGenerateTransport}
+        autoTransportLoading={autoTransportLoading}
+        scheduledEntries={scheduledEntries}
+      />
+      <TripNavBar
+        currentPage="timeline"
+        tripId={tripId ?? ''}
         onAddEntry={() => {
           setPrefillStartTime(undefined);
           setPrefillEndTime(undefined);
@@ -1406,14 +1411,7 @@ const Timeline = () => {
           setSheetOption(null);
           setSheetOpen(true);
         }}
-        onDataRefresh={fetchData}
-        onToggleIdeas={() => setSidebarOpen(prev => !prev)}
-        onToggleLive={() => setLiveOpen(prev => !prev)}
-        onAutoGenerateTransport={handleAutoGenerateTransport}
-        autoTransportLoading={autoTransportLoading}
-        liveOpen={liveOpen}
         ideasCount={unscheduledEntries.length}
-        scheduledEntries={scheduledEntries}
       />
 
       {loading ? (
@@ -1435,11 +1433,6 @@ const Timeline = () => {
       ) : (
         <>
           <div className="flex flex-1 overflow-hidden">
-            {/* LIVE panel (left) */}
-            {!isMobile && (
-              <LivePanel open={liveOpen} onOpenChange={setLiveOpen} />
-            )}
-
             <main ref={mainScrollRef} className="flex-1 overflow-y-auto pb-20">
               {days.map((day, index) => {
                 const dayStr = format(day, 'yyyy-MM-dd');
@@ -1518,50 +1511,34 @@ const Timeline = () => {
           </div>
 
 
-          {/* Mobile FABs */}
+          {/* Mobile sidebar */}
           {isMobile && (
-            <>
-              {/* Mobile Live panel */}
-              <LivePanel open={liveOpen} onOpenChange={setLiveOpen} />
-              <button
-                onClick={() => setSidebarOpen(prev => !prev)}
-                className="fixed bottom-20 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-primary shadow-lg transition-transform hover:scale-105 active:scale-95"
-              >
-                <LayoutList className="h-5 w-5 text-primary-foreground" />
-                {unscheduledEntries.length > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
-                    {unscheduledEntries.length}
-                  </span>
-                )}
-              </button>
-
-              <CategorySidebar
-                open={sidebarOpen}
-                onOpenChange={setSidebarOpen}
-                entries={entries}
-                trip={trip}
-                onDragStart={handleSidebarDragStart}
-                onCardTap={(entry) => {
-                  const opt = entry.options[0];
-                  if (opt) handleCardTap(entry, opt);
-                }}
-                onAddEntry={(catId) => {
-                  if (catId === 'hotel') {
-                    setHotelWizardOpen(true);
-                    return;
-                  }
-                  setPrefillStartTime(undefined);
-                  setPrefillEndTime(undefined);
-                  setPrefillCategory(catId);
-                  setSheetMode('create');
-                  setSheetEntry(null);
-                  setSheetOption(null);
-                  setSheetOpen(true);
-                }}
-                onDuplicate={handleDuplicate}
-                onInsert={handleInsert}
-              />
-            </>
+            <CategorySidebar
+              open={sidebarOpen}
+              onOpenChange={setSidebarOpen}
+              entries={entries}
+              trip={trip}
+              onDragStart={handleSidebarDragStart}
+              onCardTap={(entry) => {
+                const opt = entry.options[0];
+                if (opt) handleCardTap(entry, opt);
+              }}
+              onAddEntry={(catId) => {
+                if (catId === 'hotel') {
+                  setHotelWizardOpen(true);
+                  return;
+                }
+                setPrefillStartTime(undefined);
+                setPrefillEndTime(undefined);
+                setPrefillCategory(catId);
+                setSheetMode('create');
+                setSheetEntry(null);
+                setSheetOption(null);
+                setSheetOpen(true);
+              }}
+              onDuplicate={handleDuplicate}
+              onInsert={handleInsert}
+            />
           )}
 
           <EntrySheet
