@@ -38,6 +38,7 @@ const Timeline = () => {
   const [travelSegments, setTravelSegments] = useState<TravelSegment[]>([]);
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [globalRefreshing, setGlobalRefreshing] = useState(false);
 
   const homeTimezone = trip?.home_timezone ?? 'Europe/London';
 
@@ -90,6 +91,26 @@ const Timeline = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const mainScrollRef = useRef<HTMLElement>(null);
   const dayRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // Global refresh: recalculate all transport + weather
+  const handleGlobalRefresh = useCallback(async () => {
+    if (!tripId) return;
+    setGlobalRefreshing(true);
+    try {
+      await Promise.all([
+        supabase.functions.invoke('auto-generate-transport', { body: { tripId } }),
+        supabase.functions.invoke('fetch-weather', { body: { tripId } }),
+      ]);
+      await fetchDataRef.current?.();
+      toast({ title: 'Weather & routes updated' });
+    } catch (err) {
+      console.error('Global refresh failed:', err);
+      toast({ title: 'Refresh failed', description: 'Please try again', variant: 'destructive' });
+    } finally {
+      setGlobalRefreshing(false);
+    }
+  }, [tripId]);
+
   // Redirect if no user
   useEffect(() => {
     if (!currentUser) {
@@ -1395,6 +1416,8 @@ const Timeline = () => {
       <TimelineHeader
         trip={trip}
         tripId={tripId ?? ''}
+        onRefresh={handleGlobalRefresh}
+        refreshing={globalRefreshing}
       />
       <TripNavBar
         liveOpen={liveOpen}

@@ -283,7 +283,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
           'sticky z-20 border-b border-border bg-background/90 px-4 py-1.5 backdrop-blur-md',
           today && 'border-primary/30 bg-primary/5'
         )}
-        style={{ top: 52 }}
+        style={{ top: 0 }}
         id={today ? 'today' : undefined}
       >
         <div className="mx-auto flex max-w-2xl items-center px-0">
@@ -367,7 +367,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
           <div
             className="relative ml-20"
             data-grid-top
-            style={{ height: containerHeight, minHeight: 200, marginRight: 8 }}
+            style={{ height: containerHeight, minHeight: 200, marginRight: 24 }}
             onDragOver={(e) => {
               if (onDropFromPanel) {
                 e.preventDefault();
@@ -818,18 +818,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                                 />
                               );
                             })()}
-                            {/* Lock icon outside card — always locked for flights */}
-                            {isEditor && onToggleLock && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toast.info('Flight position is fixed — edit times inside the card');
-                                }}
-                                className="absolute top-1/2 -translate-y-1/2 -left-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background shadow-sm"
-                              >
-                                <Lock className="h-3 w-3 text-amber-500" />
-                              </button>
-                            )}
+                            {/* No lock icon on flight cards */}
                           </div>
                           );
                         })() : isTransport ? (
@@ -920,19 +909,19 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                               onTouchDragEnd={onTouchEnd}
                               isShaking={shakeEntryId === entry.id}
                             />
-                            {/* Lock icon outside card */}
+                            {/* Lock icon outside card — right side */}
                             {isEditor && onToggleLock && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   onToggleLock(entry.id, !!isLocked);
                                 }}
-                                className="absolute top-1/2 -translate-y-1/2 -left-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+                                className="absolute top-1/2 -translate-y-1/2 -right-3 z-30 flex h-7 w-7 items-center justify-center rounded-full border border-border bg-background shadow-sm"
                               >
                                 {isLocked ? (
-                                  <Lock className="h-3 w-3 text-amber-500" />
+                                  <Lock className="h-4 w-4 text-primary fill-primary" />
                                 ) : (
-                                  <LockOpen className="h-3 w-3 text-muted-foreground/50" />
+                                  <LockOpen className="h-4 w-4 text-muted-foreground/40" />
                                 )}
                               </button>
                             )}

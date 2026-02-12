@@ -418,7 +418,7 @@ const EntryCard = ({
             'group relative overflow-hidden rounded-2xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
             isEntryPast && 'opacity-50 grayscale-[30%]',
             isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-            isLocked && 'border-r border-t border-b border-dashed border-muted-foreground/40',
+            isLocked && 'border-r border-t border-b border-muted-foreground/20',
             isShaking && 'animate-shake',
             cardSizeClass
           )}
@@ -484,7 +484,7 @@ const EntryCard = ({
           'group relative overflow-hidden rounded-xl border shadow-sm transition-all hover:shadow-md',
           isEntryPast && 'opacity-50 grayscale-[30%]',
           isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-          isLocked && 'border-dashed border-2 border-muted-foreground/40',
+          isLocked && 'border-2 border-muted-foreground/20',
           isShaking && 'animate-shake',
           cardSizeClass
         )}
@@ -549,7 +549,7 @@ const EntryCard = ({
           'group relative flex items-center gap-1.5 overflow-hidden rounded-lg border shadow-sm transition-all hover:shadow-md',
           isEntryPast && 'opacity-50 grayscale-[30%]',
           isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-          isLocked && 'border-dashed border-2 border-muted-foreground/40',
+          isLocked && 'border-2 border-muted-foreground/20',
           isShaking && 'animate-shake',
           cardSizeClass
         )}
@@ -603,7 +603,7 @@ const EntryCard = ({
           'group relative overflow-hidden rounded-xl border shadow-sm transition-all hover:shadow-md',
           isEntryPast && 'opacity-50 grayscale-[30%]',
           isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-          isLocked && 'border-dashed border-2 border-muted-foreground/40',
+          isLocked && 'border-2 border-muted-foreground/20',
           isShaking && 'animate-shake',
           cardSizeClass
         )}
@@ -719,7 +719,7 @@ const EntryCard = ({
           'group relative overflow-hidden rounded-2xl border shadow-md transition-all hover:shadow-lg',
           isEntryPast && 'opacity-50 grayscale-[30%]',
           isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-          isLocked && 'border-dashed border-2 border-muted-foreground/40',
+          isLocked && 'border-2 border-muted-foreground/20',
           isProcessing && 'opacity-80',
           isShaking && 'animate-shake',
           cardSizeClass
