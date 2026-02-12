@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ExternalLink, Navigation } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -8,23 +9,28 @@ interface MapPreviewProps {
 }
 
 const MapPreview = ({ latitude, longitude, locationName }: MapPreviewProps) => {
-  const staticMapUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${latitude},${longitude}&zoom=15&size=600x200&markers=${latitude},${longitude},red-pushpin`;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const staticMapUrl = `${supabaseUrl}/functions/v1/static-map?lat=${latitude}&lng=${longitude}`;
   const appleMapsUrl = `https://maps.apple.com/?ll=${latitude},${longitude}&q=${encodeURIComponent(locationName || 'Location')}`;
   const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+  const [imgError, setImgError] = useState(false);
 
   return (
     <div className="space-y-2">
       {locationName && (
         <p className="text-sm font-medium text-foreground">{locationName}</p>
       )}
-      <div className="overflow-hidden rounded-lg border border-border">
-        <img
-          src={staticMapUrl}
-          alt="Map preview"
-          className="h-[150px] w-full object-cover"
-          loading="lazy"
-        />
-      </div>
+      {!imgError && (
+        <div className="overflow-hidden rounded-lg border border-border">
+          <img
+            src={staticMapUrl}
+            alt="Map preview"
+            className="h-[150px] w-full object-cover"
+            loading="lazy"
+            onError={() => setImgError(true)}
+          />
+        </div>
+      )}
       <div className="flex gap-2">
         <Button
           variant="outline"
