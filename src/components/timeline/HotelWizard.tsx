@@ -29,11 +29,12 @@ interface HotelWizardProps {
   tripId: string;
   trip: Trip;
   onCreated: () => void;
+  dayTimezoneMap?: Map<string, { activeTz: string; flights: Array<any> }>;
 }
 
 const REFERENCE_DATE = '2099-01-01';
 
-const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated }: HotelWizardProps) => {
+const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneMap }: HotelWizardProps) => {
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
 
@@ -140,7 +141,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated }: HotelWizar
 
     setSaving(true);
     try {
-      const tz = trip.home_timezone;
+      const fallbackTz = trip.home_timezone;
 
       for (const hotel of hotelsToCreate) {
         for (const nightIdx of hotel.selectedNights) {
@@ -153,8 +154,14 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated }: HotelWizar
             ? format(addDays(parseISO(REFERENCE_DATE), nightIdx + 1), 'yyyy-MM-dd')
             : format(addDays(parseISO(trip.start_date!), nightIdx + 1), 'yyyy-MM-dd');
 
+          // Resolve per-night timezone from dayTimezoneMap
+          const tzInfo = dayTimezoneMap?.get(dayDateStr);
+          const tz = tzInfo?.activeTz || fallbackTz;
+          const nextTzInfo = dayTimezoneMap?.get(nextDayDateStr);
+          const nextTz = nextTzInfo?.activeTz || fallbackTz;
+
           const startIso = localToUTC(dayDateStr, eveningReturn, tz);
-          const endIso = localToUTC(nextDayDateStr, morningLeave, tz);
+          const endIso = localToUTC(nextDayDateStr, morningLeave, nextTz);
 
           // Insert entry
           const { data: newEntry, error: entryErr } = await supabase

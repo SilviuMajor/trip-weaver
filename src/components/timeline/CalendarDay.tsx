@@ -418,11 +418,22 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
               });
 
               /* ---------- Between-entry gap buttons + dashed line ---------- */
+              // Detect transport entries by category AND naming pattern (for old entries)
+              const isTransportEntry = (entry: EntryWithOptions): boolean => {
+                const opt = entry.options[0];
+                if (!opt) return false;
+                if (opt.category === 'transfer') return true;
+                const name = opt.name?.toLowerCase() ?? '';
+                return (entry.from_entry_id != null && entry.to_entry_id != null) ||
+                  (name.startsWith('drive to') || name.startsWith('walk to') || 
+                   name.startsWith('transit to') || name.startsWith('cycle to'));
+              };
+
               const visibleEntries = sortedEntries.filter(e => {
                 const opt = e.options[0];
                 return opt
                   && opt.category !== 'airport_processing'
-                  && opt.category !== 'transfer'
+                  && !isTransportEntry(e)
                   && !e.linked_flight_id;
               });
 
@@ -592,6 +603,9 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                 let entryEndHour: number;
                 let resolvedTz = activeTz || homeTimezone;
 
+                // DIAGNOSTIC: will be removed after verification
+                const _preResolvedTz = resolvedTz;
+
                 if (isDragged && dragState) {
                   entryStartHour = dragState.currentStartHour;
                   entryEndHour = dragState.currentEndHour;
@@ -624,6 +638,11 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                     entryEndHour = getHourInTimezone(entry.end_time, resolvedTz);
                   }
                   if (entryEndHour < entryStartHour) entryEndHour = 24;
+                }
+
+                // TZ-DEBUG: trace TZ resolution for post-flight entries
+                if (dayFlights.length > 0) {
+                  console.log(`[TZ-DEBUG] ${primaryOption.name}: startTime=${entry.start_time}, resolvedTz=${resolvedTz}, startHour=${entryStartHour.toFixed(2)}, endHour=${entryEndHour.toFixed(2)}, activeTz=${activeTz}, preResolved=${_preResolvedTz}`);
                 }
 
                 // For flight groups, expand bounds to cover checkin + checkout
@@ -680,7 +699,12 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                 }
                 if (origEndHour < origStartHour) origEndHour = 24;
 
-                const isTransport = primaryOption.category === 'transfer';
+                const isTransport = primaryOption.category === 'transfer' || (() => {
+                  const name = primaryOption.name?.toLowerCase() ?? '';
+                  return (entry.from_entry_id != null && entry.to_entry_id != null) ||
+                    (name.startsWith('drive to') || name.startsWith('walk to') || 
+                     name.startsWith('transit to') || name.startsWith('cycle to'));
+                })();
                 const isFlightCard = !!flightGroup;
                 const canDrag = onEntryTimeChange && !isLocked && !isTransport && !isFlightCard;
 
@@ -984,7 +1008,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                     </div>
 
                     {/* SNAP button below transport cards */}
-                    {primaryOption.category === 'transfer' && (() => {
+                    {isTransport && (() => {
                       // Find the next non-linked entry in sortedEntries
                       const nextVisible = entry.to_entry_id
                         ? sortedEntries.find(e => e.id === entry.to_entry_id)
