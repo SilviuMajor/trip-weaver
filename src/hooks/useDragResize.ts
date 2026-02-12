@@ -11,27 +11,17 @@ interface DragState {
   currentStartHour: number;
   currentEndHour: number;
   tz?: string;
-  /** When dragging across days, this holds the target day date */
-  targetDay?: Date;
-  /** The original day date the entry started on */
-  originDay?: Date;
   /** Offset in hours between cursor position and card top at grab time */
   grabOffsetHours: number;
-}
-
-interface DayBoundary {
-  dayDate: Date;
-  topPx: number;
-  bottomPx: number;
-  gridTopPx?: number;
 }
 
 interface UseDragResizeOptions {
   pixelsPerHour: number;
   startHour: number;
+  totalHours: number;
+  gridTopPx: number;
   onCommit: (entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date, dragType?: DragType) => void;
   scrollContainerRef?: React.RefObject<HTMLElement>;
-  dayBoundaries?: DayBoundary[];
 }
 
 const SNAP_MINUTES = 15;
@@ -49,7 +39,7 @@ function snapToGrid(hour: number): number {
   return snapped / 60;
 }
 
-export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContainerRef, dayBoundaries }: UseDragResizeOptions) {
+export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx, onCommit, scrollContainerRef }: UseDragResizeOptions) {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -110,21 +100,16 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
     entryStartHour: number,
     entryEndHour: number,
     tz?: string,
-    originDay?: Date,
   ) => {
+    // Compute grab offset in the single global coordinate space
     let grabOffsetHours = 0;
-    if (dayBoundaries && scrollContainerRef?.current) {
+    if (scrollContainerRef?.current) {
       const container = scrollContainerRef.current;
       const containerRect = container.getBoundingClientRect();
       const absoluteY = clientY - containerRect.top + container.scrollTop;
-      for (const boundary of dayBoundaries) {
-        if (absoluteY >= boundary.topPx && absoluteY < boundary.bottomPx) {
-          const relativeY = absoluteY - (boundary.gridTopPx ?? boundary.topPx);
-          const cursorHour = startHour + relativeY / pixelsPerHour;
-          grabOffsetHours = cursorHour - entryStartHour;
-          break;
-        }
-      }
+      const relativeY = absoluteY - gridTopPx;
+      const cursorHour = startHour + relativeY / pixelsPerHour;
+      grabOffsetHours = cursorHour - entryStartHour;
     }
 
     const state: DragState = {
@@ -136,8 +121,6 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
       currentStartHour: entryStartHour,
       currentEndHour: entryEndHour,
       tz,
-      originDay,
-      targetDay: originDay,
       grabOffsetHours,
     };
     setDragState(state);
@@ -146,7 +129,7 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
     wasDraggedRef.current = false;
     lastClientYRef.current = clientY;
     startAutoScroll();
-  }, [startAutoScroll, dayBoundaries, scrollContainerRef, startHour, pixelsPerHour]);
+  }, [startAutoScroll, scrollContainerRef, startHour, pixelsPerHour, gridTopPx]);
 
   const handlePointerMove = useCallback((clientY: number) => {
     const state = dragStateRef.current;
@@ -161,40 +144,58 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
       wasDraggedRef.current = true;
     }
 
-    // Cross-day detection
-    if (dayBoundaries && dayBoundaries.length > 0 && scrollContainerRef?.current && state.type === 'move') {
+    // Single global coordinate space
+    if (scrollContainerRef?.current) {
       const container = scrollContainerRef.current;
       const containerRect = container.getBoundingClientRect();
       const absoluteY = clientY - containerRect.top + container.scrollTop;
+      const relativeY = absoluteY - gridTopPx;
+      const duration = state.originalEndHour - state.originalStartHour;
 
-      for (const boundary of dayBoundaries) {
-        if (absoluteY >= boundary.topPx && absoluteY < boundary.bottomPx) {
-          // Calculate hour within this day's grid
-          const relativeY = absoluteY - (boundary.gridTopPx ?? boundary.topPx);
-          const duration = state.originalEndHour - state.originalStartHour;
-          const rawHour = startHour + relativeY / pixelsPerHour - state.grabOffsetHours;
-          let newStart = snapToGrid(rawHour);
-          let newEnd = newStart + duration;
+      if (state.type === 'move') {
+        const rawHour = startHour + relativeY / pixelsPerHour - state.grabOffsetHours;
+        let newStart = snapToGrid(rawHour);
+        let newEnd = newStart + duration;
 
-          if (newStart < 0) { newEnd -= newStart; newStart = 0; }
-          if (newEnd > 24) { newStart -= (newEnd - 24); newEnd = 24; }
-          newStart = Math.max(0, newStart);
-          newEnd = Math.min(24, newEnd);
+        if (newStart < 0) { newEnd -= newStart; newStart = 0; }
+        if (newEnd > totalHours) { newStart -= (newEnd - totalHours); newEnd = totalHours; }
+        newStart = Math.max(0, newStart);
+        newEnd = Math.min(totalHours, newEnd);
 
-          const updated: DragState = {
-            ...state,
-            currentStartHour: newStart,
-            currentEndHour: newEnd,
-            targetDay: boundary.dayDate,
-          };
-          setDragState(updated);
-          dragStateRef.current = updated;
-          return;
-        }
+        const updated: DragState = {
+          ...state,
+          currentStartHour: newStart,
+          currentEndHour: newEnd,
+        };
+        setDragState(updated);
+        dragStateRef.current = updated;
+        return;
+      } else if (state.type === 'resize-top') {
+        const rawHour = startHour + relativeY / pixelsPerHour;
+        let newStart = snapToGrid(rawHour);
+        let newEnd = state.originalEndHour;
+        if (newStart >= newEnd - 0.25) newStart = newEnd - 0.25;
+        if (newStart < 0) newStart = 0;
+
+        const updated: DragState = { ...state, currentStartHour: newStart, currentEndHour: newEnd };
+        setDragState(updated);
+        dragStateRef.current = updated;
+        return;
+      } else if (state.type === 'resize-bottom') {
+        let newStart = state.originalStartHour;
+        const rawHour = startHour + relativeY / pixelsPerHour;
+        let newEnd = snapToGrid(rawHour);
+        if (newEnd <= newStart + 0.25) newEnd = newStart + 0.25;
+        if (newEnd > totalHours) newEnd = totalHours;
+
+        const updated: DragState = { ...state, currentStartHour: newStart, currentEndHour: newEnd };
+        setDragState(updated);
+        dragStateRef.current = updated;
+        return;
       }
     }
 
-    // Fallback: same-day drag (original behavior)
+    // Fallback: delta-based (if no scroll container)
     const deltaHours = deltaPixels / pixelsPerHour;
 
     let newStart = state.originalStartHour;
@@ -215,17 +216,17 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
     }
 
     if (newStart < 0) { newEnd -= newStart; newStart = 0; }
-    if (newEnd > 24) { newStart -= (newEnd - 24); newEnd = 24; }
+    if (newEnd > totalHours) { newStart -= (newEnd - totalHours); newEnd = totalHours; }
 
     const updated = { ...state, currentStartHour: newStart, currentEndHour: newEnd };
     setDragState(updated);
     dragStateRef.current = updated;
-  }, [pixelsPerHour, startHour, dayBoundaries, scrollContainerRef]);
+  }, [pixelsPerHour, startHour, totalHours, scrollContainerRef, gridTopPx]);
 
   const commitDrag = useCallback(() => {
     const state = dragStateRef.current;
     if (state && wasDraggedRef.current) {
-      onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz, state.targetDay, state.type);
+      onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz, undefined, state.type);
     }
     stopAutoScroll();
     setDragState(null);
@@ -242,11 +243,10 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
     entryStartHour: number,
     entryEndHour: number,
     tz?: string,
-    originDay?: Date,
   ) => {
     e.preventDefault();
     e.stopPropagation();
-    startDrag(entryId, type, e.clientY, entryStartHour, entryEndHour, tz, originDay);
+    startDrag(entryId, type, e.clientY, entryStartHour, entryEndHour, tz);
   }, [startDrag]);
 
   // Touch handlers with hold-to-drag
@@ -257,13 +257,12 @@ export function useDragResize({ pixelsPerHour, startHour, onCommit, scrollContai
     entryStartHour: number,
     entryEndHour: number,
     tz?: string,
-    originDay?: Date,
   ) => {
     const touch = e.touches[0];
     touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
     
     touchTimerRef.current = setTimeout(() => {
-      startDrag(entryId, type, touch.clientY, entryStartHour, entryEndHour, tz, originDay);
+      startDrag(entryId, type, touch.clientY, entryStartHour, entryEndHour, tz);
     }, TOUCH_HOLD_MS);
   }, [startDrag]);
 
