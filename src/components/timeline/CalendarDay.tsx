@@ -7,7 +7,8 @@ import { haversineKm } from '@/lib/distance';
 import { localToUTC, getHourInTimezone, resolveEntryTz } from '@/lib/timezoneUtils';
 import { Plus, Bus, Lock, LockOpen, AlertTriangle } from 'lucide-react';
 import { useDragResize, type DragType } from '@/hooks/useDragResize';
-import TimeSlotGrid, { getUtcOffsetHoursDiff } from './TimeSlotGrid';
+import TimeSlotGrid from './TimeSlotGrid';
+import { getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
 import EntryCard from './EntryCard';
 import FlightGroupCard from './FlightGroupCard';
 import TravelSegmentCard from './TravelSegmentCard';
@@ -668,6 +669,16 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
 
                 const top = Math.max(0, (groupStartHour - startHour) * PIXELS_PER_HOUR);
                 const height = (groupEndHour - groupStartHour) * PIXELS_PER_HOUR;
+
+                console.log('[POSITION-DEBUG]', primaryOption.name, {
+                  entryStartHour,
+                  groupStartHour,
+                  topPx: top,
+                  heightPx: height,
+                  pixelsPerHour: PIXELS_PER_HOUR,
+                  resolvedTz,
+                  activeTz,
+                });
                 const isCompact = height < 40 && !flightGroup;
                 const isMedium = height >= 40 && height < 80 && !flightGroup;
                 const isCondensed = height >= 80 && height < 160 && !flightGroup;
@@ -707,6 +718,17 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                     (name.startsWith('drive to') || name.startsWith('walk to') || 
                      name.startsWith('transit to') || name.startsWith('cycle to'));
                 })();
+
+                if (primaryOption.name?.toLowerCase().includes('drive') || 
+                    primaryOption.name?.toLowerCase().includes('walk') ||
+                    primaryOption.name?.toLowerCase().includes('transit')) {
+                  console.log('[TRANSPORT-DEBUG]', primaryOption.name, {
+                    category: primaryOption.category,
+                    isTransport,
+                    fromEntryId: entry.from_entry_id,
+                    toEntryId: entry.to_entry_id,
+                  });
+                }
                 const isFlightCard = !!flightGroup;
                 const canDrag = onEntryTimeChange && !isLocked && !isTransport && !isFlightCard;
 
