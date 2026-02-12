@@ -117,7 +117,9 @@ const ContinuousTimeline = ({
     if (!container || days.length === 0) return;
     const handleScroll = () => {
       const scrollTop = container.scrollTop;
-      const adjustedScroll = scrollTop - gridTopPx + 60;
+      const viewportHeight = container.clientHeight;
+      const centreScroll = scrollTop + viewportHeight / 2;
+      const adjustedScroll = centreScroll - gridTopPx;
       const dayIdx = Math.floor(adjustedScroll / (24 * PIXELS_PER_HOUR));
       const clamped = Math.max(0, Math.min(days.length - 1, dayIdx));
       setCurrentDayIndex(clamped);
