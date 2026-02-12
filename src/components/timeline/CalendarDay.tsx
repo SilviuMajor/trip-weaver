@@ -882,6 +882,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                               isCompact={isCompact}
                               isMedium={isMedium}
                               isCondensed={isCondensed}
+                              notes={(entry as any).notes}
                               option={primaryOption}
                               startTime={entry.start_time}
                               endTime={entry.end_time}

@@ -181,6 +181,23 @@ const EntrySheet = ({
   const [viewResults, setViewResults] = useState<TransportResult[]>([]);
   const [viewSelectedMode, setViewSelectedMode] = useState<string | null>(null);
   const [viewApplying, setViewApplying] = useState(false);
+  const [notesValue, setNotesValue] = useState('');
+  const [notesDirty, setNotesDirty] = useState(false);
+
+  useEffect(() => {
+    if (mode === 'view' && entry) {
+      setNotesValue((entry as any).notes ?? '');
+      setNotesDirty(false);
+    }
+  }, [mode, entry]);
+
+  const handleNotesSave = async () => {
+    if (!notesDirty || !entry) return;
+    const trimmed = notesValue.trim() || null;
+    await supabase.from('entries').update({ notes: trimmed } as any).eq('id', entry.id);
+    setNotesDirty(false);
+    onSaved();
+  };
 
   // ─── Create mode state ───
   const [step, setStep] = useState<Step>('category');
@@ -1384,6 +1401,26 @@ const EntrySheet = ({
                 placeholder="https://..."
               />
             )}
+
+            {/* Notes */}
+            {isEditor ? (
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Notes</Label>
+                <textarea
+                  value={notesValue}
+                  onChange={(e) => { setNotesValue(e.target.value); setNotesDirty(true); }}
+                  onBlur={handleNotesSave}
+                  placeholder="Add a note..."
+                  className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
+                  rows={3}
+                />
+              </div>
+            ) : notesValue ? (
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Notes</Label>
+                <p className="text-sm text-foreground whitespace-pre-wrap">{notesValue}</p>
+              </div>
+            ) : null}
 
             {/* Map */}
             {option.latitude != null && option.longitude != null && (

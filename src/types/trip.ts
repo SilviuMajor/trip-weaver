@@ -47,6 +47,7 @@ export interface Entry {
   to_entry_id: string | null;
   created_at: string;
   updated_at: string;
+  notes?: string | null;
 }
 
 export interface OptionGroup {
