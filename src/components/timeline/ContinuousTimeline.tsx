@@ -125,14 +125,16 @@ const ContinuousTimeline = ({
     return () => container.removeEventListener('scroll', handleScroll);
   }, [scrollContainerRef, gridTopPx, days.length]);
 
-  // Helper to get TZ abbreviation for a day
-  const getTzAbbrev = useCallback((dayDate: Date): string => {
+  // Helper to get TZ abbreviation at midnight for a day (before any flight departs)
+  const getMidnightTzAbbrev = useCallback((dayDate: Date): string => {
     const dayStr = format(dayDate, 'yyyy-MM-dd');
     const tzInfo = dayTimezoneMap.get(dayStr);
     if (!tzInfo) return '';
+    // At midnight, use the origin TZ (before any flight departs that day)
+    const tz = tzInfo.flights.length > 0 ? tzInfo.flights[0].originTz : tzInfo.activeTz;
     try {
-      return new Intl.DateTimeFormat('en-GB', { timeZone: tzInfo.activeTz, timeZoneName: 'short' })
-        .formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value || '';
+      return new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'short' })
+        .formatToParts(dayDate).find(p => p.type === 'timeZoneName')?.value || '';
     } catch { return ''; }
   }, [dayTimezoneMap]);
 
@@ -468,13 +470,13 @@ const ContinuousTimeline = ({
     return localHour >= lastFlight.flightEndHour ? lastFlight.destinationTz : lastFlight.originTz;
   }, [days, dayTimezoneMap, homeTimezone]);
 
-  const stickyTzAbbrev = days.length > 0 ? getTzAbbrev(days[currentDayIndex]) : '';
+  const stickyTzAbbrev = days.length > 0 ? getMidnightTzAbbrev(days[currentDayIndex]) : '';
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-2">
-      {/* Sticky floating day pill */}
-      <div className="sticky top-0 z-40 flex justify-start pl-1 py-1">
-        <div className="inline-flex items-center gap-1 rounded-full bg-background/80 backdrop-blur-sm border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-sm">
+    <>
+      {/* Sticky floating day pill - outside max-w-2xl for proper sticky */}
+      <div className="sticky top-0 z-40 flex justify-center py-1">
+        <div className="inline-flex items-center gap-1 rounded-full bg-background/90 backdrop-blur-md border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-md">
           <span>{isUndated ? `Day ${currentDayIndex + 1}` : format(days[currentDayIndex], 'EEE d MMM').toUpperCase()}</span>
           <span className="text-muted-foreground/60">·</span>
           <span className="text-muted-foreground">{stickyTzAbbrev}</span>
@@ -484,6 +486,7 @@ const ContinuousTimeline = ({
         </div>
       </div>
 
+      <div className="mx-auto max-w-2xl px-4 py-2">
       <div
         ref={gridRef}
         className="relative ml-20"
@@ -539,7 +542,7 @@ const ContinuousTimeline = ({
           const globalHour = dayIndex * 24;
           const today = !isUndated && isToday(day);
           const dayLabel = isUndated ? `Day ${dayIndex + 1}` : format(day, 'EEE d MMM').toUpperCase();
-          const tzAbbrev = getTzAbbrev(day);
+          const tzAbbrev = getMidnightTzAbbrev(day);
 
           return (
             <div key={`day-marker-${dayIndex}`} data-day-marker data-day-index={dayIndex}>
@@ -1208,6 +1211,7 @@ const ContinuousTimeline = ({
         🏁 Trip Ends
       </div>
     </div>
+    </>
   );
 };
 
