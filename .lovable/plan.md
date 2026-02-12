@@ -1,92 +1,124 @@
 
-# Fix Navigation, Planner Layout, Header, and Card Readability
+# Add Live Panel + 3-Panel Desktop Layout
 
-## 1. Replace TripNavBar with Tab Bar + FAB
+## Overview
 
-**File: `src/components/timeline/TripNavBar.tsx`** -- Rewrite completely
+Add a "Live" tab to the navigation bar and implement a 3-panel desktop layout where Timeline is always the centre panel, with Live and Planner as toggleable side panels. On mobile, Live becomes a full-screen takeover.
 
-Replace the current 3-button switching nav with a simple 2-tab bar:
-- Two tabs always visible: **Timeline** (Calendar icon) and **Planner** (ClipboardList icon)
-- Active tab: bold text, orange underline/highlight using the app's warm palette
-- Inactive tab: muted/grey text
-- No "Live" tab -- remove entirely
-- No + button in the bar -- it moves to a FAB
+## 1. Update TripNavBar to 3 tabs
 
-Props simplified:
-- `currentPage: 'timeline' | 'planner'`
-- `tripId: string`
-- `onTabChange: (page: 'timeline' | 'planner') => void`
+**File: `src/components/timeline/TripNavBar.tsx`**
 
-On Timeline page: tapping "Planner" tab opens the sidebar panel (not navigating to `/planner` route). On Planner page: not used (Planner becomes a side panel, not a separate route).
+- Add a third tab: **Live** (Radio icon) on the left, **Timeline** (Calendar icon) in the centre, **Planner** (ClipboardList icon) on the right
+- Change props to accept `activeTab` as an object `{ live: boolean; planner: boolean }` (since on desktop both can be active simultaneously), plus `currentView` for mobile (only one active at a time)
+- Actually, simpler approach: keep `activeTab` but accept a new prop `livePanelOpen: boolean` and `plannerPanelOpen: boolean` to control highlight states
+- On desktop: Live and Planner tabs act as toggles (click to open/close their panels). Timeline tab closes both panels. Multiple tabs can appear "active".
+- On mobile: tabs are mutually exclusive. Tapping Live shows full-screen Live. Tapping Timeline returns to timeline. Tapping Planner opens the 60% overlay.
 
-**File: `src/pages/Timeline.tsx`** -- Update TripNavBar usage
+New props:
+```
+interface TripNavBarProps {
+  liveOpen: boolean;
+  plannerOpen: boolean;
+  isMobile: boolean;
+  onToggleLive: () => void;
+  onTogglePlanner: () => void;
+  onTimelineOnly: () => void;
+}
+```
 
-- Replace `TripNavBar` with the new tab bar component
-- "Planner" tab toggles `sidebarOpen` state (opens/closes CategorySidebar)
-- "Timeline" tab closes the sidebar if open
-- Add a FAB (floating action button): fixed `bottom-6 right-6`, circular, orange (`bg-primary`), shadow-lg, with Plus icon. `onClick` triggers the existing add entry flow. Rendered alongside UndoRedoButtons.
+## 2. Update LivePanel for desktop side panel + mobile full-screen
 
-## 2. Planner as Side Panel (not full page)
+**File: `src/components/timeline/LivePanel.tsx`**
 
-**File: `src/App.tsx`** -- Remove the `/trip/:tripId/planner` route. Remove the `/trip/:tripId/live` route (Live removed from nav).
+- Enhance the placeholder content: add subtitle "Live trip tracking, weather, and real-time updates", add a pulse animation on the Radio icon, use warm color palette
+- Desktop: renders as a left-side panel with `border-r`, width controlled by parent
+- Mobile: instead of a Sheet, render as a full-screen overlay (absolutely positioned, covering the main content area but keeping the header + tab bar visible). The tab bar stays at top so user can navigate back.
 
-**File: `src/pages/Planner.tsx`** -- Keep file but it will no longer be routed to. (Or delete the route; the Planner content lives inside `CategorySidebar` already.)
+Mobile implementation: when `open && isMobile`, render a `div` that fills the remaining viewport below the tab bar with the Live content. This replaces the timeline content visually.
 
-The Planner functionality is already implemented as `CategorySidebar` in `Timeline.tsx`:
-- **Desktop/tablet**: `CategorySidebar` renders as a side panel (already does this -- `w-[320px]` border-l). Change width to `w-[40%]` for ~40% screen width.
-- **Mobile**: `CategorySidebar` already renders as a `Sheet` sliding from the right. Change width to `w-[60%]` (currently `w-full sm:w-[380px]`). The Sheet already has a dimmed backdrop and tap-to-close behavior.
+## 3. Update Timeline.tsx layout to support 3 panels
+
+**File: `src/pages/Timeline.tsx`**
+
+Add `liveOpen` state alongside existing `sidebarOpen` state.
+
+Layout structure change for the main content area (line ~1438):
+
+```
+<div className="flex flex-1 overflow-hidden">
+  {/* Desktop Live panel */}
+  {!isMobile && <LivePanel open={liveOpen} onOpenChange={setLiveOpen} />}
+  
+  {/* Timeline (always visible on desktop, hidden on mobile when Live is active) */}
+  <main className="flex-1 overflow-y-auto pb-20" style={dynamicWidth}>
+    ...calendar days...
+  </main>
+  
+  {/* Desktop Planner panel */}
+  {!isMobile && <CategorySidebar ... />}
+</div>
+
+{/* Mobile: Live full-screen takeover */}
+{isMobile && liveOpen && <LivePanel ... />}
+
+{/* Mobile: Planner overlay (existing Sheet behavior) */}
+{isMobile && <CategorySidebar ... />}
+```
+
+Desktop panel widths (using CSS transitions for smooth animation):
+- Live panel: `w-[30%]` when only Live is open, `w-[25%]` when both panels are open
+- Planner panel: `w-[30%]` when only Planner is open, `w-[25%]` when both panels are open
+- Timeline: takes remaining space (`flex-1`)
+
+Update TripNavBar usage:
+- Pass `liveOpen`, `plannerOpen: sidebarOpen`, `isMobile`
+- `onToggleLive`: toggles `liveOpen` state. On mobile, also closes planner and sets a "mobileView" state.
+- `onTogglePlanner`: toggles `sidebarOpen`. On mobile, closes live view.
+- `onTimelineOnly`: closes both panels. On mobile, returns to timeline view.
+
+Mobile behavior:
+- Add `mobileView` state: `'timeline' | 'live'` (Planner is an overlay, not a full view)
+- When `mobileView === 'live'`, hide the timeline `<main>` and show LivePanel content in its place
+- Tab bar remains visible at top
+
+## 4. LivePanel styling update
+
+**File: `src/components/timeline/LivePanel.tsx`**
+
+Update the placeholder content to be more polished:
+- Radio icon with pulse animation (`animate-pulse`)
+- Title: "LIVE" in bold
+- Subtitle: "Live trip tracking, weather, and real-time updates"
+- Warm background tint (`bg-primary/5`)
+- Match app's warm colour palette
+
+Desktop rendering: remove the Sheet wrapper entirely; just render a `div` with `border-r`, `overflow-y-auto`, and transition on width. Width is controlled by parent CSS classes passed via className or computed in the component based on a `bothOpen` prop.
+
+## 5. CategorySidebar width adjustment
 
 **File: `src/components/timeline/CategorySidebar.tsx`**
-- Desktop panel: change `w-[320px]` to `w-[40vw] max-w-[500px]`
-- Mobile sheet: change `w-full sm:w-[380px]` to `w-[60vw] min-w-[280px]`
-- The panel already has independent scroll (`overflow-y-auto`)
 
-When "Planner" tab is active, `sidebarOpen = true`. When "Timeline" tab is tapped, `sidebarOpen = false`.
+- Accept optional `compact` prop (boolean)
+- When `compact` (both panels open): `w-[25vw]` instead of `w-[40vw]`
+- When not compact (only planner open): `w-[30vw] max-w-[500px]`
+- Mobile: unchanged (`w-[60vw] min-w-[280px]`)
 
-## 3. Clean Up Header
-
-**File: `src/components/timeline/TimelineHeader.tsx`**
-
-Remove the entire "Organizer tools row" (lines 126-140) -- the lock icon, auto-transport, and weather buttons. Keep only:
-- Left: Trip icon + name + welcome message
-- Right: Settings cog + exit button
-
-These organizer tools will be accessible from Trip Settings page instead.
-
-However, this removes functionality (lock voting, auto-transport, weather fetch). Since the user says "These are legacy and cluttering the UI", I'll remove them from the header. The auto-transport and weather functions are still callable from the code; they just won't have header buttons. Lock toggle can be accessed from Trip Settings.
-
-Props to remove from TimelineHeader: `onAutoGenerateTransport`, `autoTransportLoading`, `scheduledEntries`.
-
-## 4. Strengthen Card Dark Gradient
-
-**File: `src/components/timeline/EntryCard.tsx`**
-
-Both full-size and condensed cards already have `bg-gradient-to-t from-black/70 via-black/30 to-transparent`. Strengthen to `from-black/80 via-black/40 to-black/5` for better text legibility.
-
-**File: `src/components/timeline/SidebarEntryCard.tsx`**
-
-Currently has `bg-gradient-to-r from-black/70 via-black/50 to-black/30`. Strengthen to `from-black/80 via-black/50 to-black/30`.
-
-## 5. "Planner" Naming
-
-Already done in previous update. Verify no remaining "Trip Events" references exist.
-
-## Summary of File Changes
+## Files Changed
 
 | File | Change |
 |---|---|
-| `src/components/timeline/TripNavBar.tsx` | Rewrite: 2-tab bar (Timeline + Planner), no Live, no + button |
-| `src/pages/Timeline.tsx` | Update tab bar usage, add FAB, tab controls sidebar open/close, remove auto-transport/weather header props |
-| `src/components/timeline/TimelineHeader.tsx` | Remove organizer tools row, simplify props |
-| `src/components/timeline/CategorySidebar.tsx` | Desktop: `w-[40vw]`, Mobile: `w-[60vw]` |
-| `src/components/timeline/EntryCard.tsx` | Strengthen gradient overlay on image cards |
-| `src/components/timeline/SidebarEntryCard.tsx` | Strengthen gradient overlay |
-| `src/App.tsx` | Remove `/planner` and `/live` routes |
+| `src/components/timeline/TripNavBar.tsx` | Rewrite: 3 tabs (Live, Timeline, Planner), support toggle behavior |
+| `src/pages/Timeline.tsx` | Add `liveOpen` state, `mobileView` state, 3-panel flex layout, update nav bar props |
+| `src/components/timeline/LivePanel.tsx` | Enhanced placeholder styling, remove Sheet for mobile (use inline full-screen), desktop as flex panel |
+| `src/components/timeline/CategorySidebar.tsx` | Add `compact` prop for narrower width when both panels open |
 
 ## Technical Notes
 
-- The FAB uses `fixed bottom-6 right-6 z-40` with `h-14 w-14 rounded-full bg-primary shadow-lg`
-- Tab bar stays sticky below header with `sticky top-[57px] z-20`
-- Active tab uses a bottom border highlight (`border-b-2 border-primary text-primary font-semibold`)
-- The Planner panel opens/closes via the existing `sidebarOpen` state in Timeline.tsx
-- UndoRedoButtons positioning may need adjustment to avoid overlapping the FAB (offset left or stack vertically)
+- Panel transitions use `transition-all duration-300` for smooth open/close
+- Desktop: `flex` layout with `overflow-hidden` on container; each panel has `overflow-y-auto` for independent scrolling
+- Mobile Live: rendered as a div that replaces the `<main>` content area (not a Sheet), keeping header + tab bar visible
+- The FAB (`+` button) remains `fixed bottom-6 right-6 z-40` on all views
+- UndoRedoButtons remain visible on all views
+- Timeline tab click on desktop: sets `liveOpen = false` and `sidebarOpen = false`
+- On mobile, tapping an already-active tab (e.g., tapping Timeline when already on timeline) is a no-op
