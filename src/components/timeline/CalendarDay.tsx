@@ -475,43 +475,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
 
                 // Check if transport already exists between these entries
                 if (hasTransferBetween(entry, nextEntry)) {
-                  // Find the transport entry to check for remaining gap after it
-                  const transferEntry = sortedEntries.find(e => {
-                    const opt = e.options[0];
-                    if (!opt || opt.category !== 'transfer') return false;
-                    const eStart = new Date(e.start_time).getTime();
-                    const aEnd = new Date(entry.end_time).getTime();
-                    const bStart = new Date(nextEntry.start_time).getTime();
-                    return eStart >= aEnd && eStart <= bStart;
-                  });
-                  if (transferEntry) {
-                    // Check remaining gap after transport
-                    const transportEndHour = getHourInTimezone(transferEntry.end_time, aTzs.endTz);
-                    const remainingGapMin = Math.round((bStartHour - transportEndHour) * 60);
-                    if (remainingGapMin > 5) {
-                      const remainingGapTopPx = (transportEndHour - startHour) * PIXELS_PER_HOUR;
-                      const remainingGapHeight = (bStartHour - startHour) * PIXELS_PER_HOUR - remainingGapTopPx;
-                      const remainingMidHour = (transportEndHour + bStartHour) / 2;
-                      const remainingBtnTop = (remainingMidHour - startHour) * PIXELS_PER_HOUR - 12;
-                      return (
-                        <div key={`gap-${entry.id}-${nextEntry.id}`}>
-                          <div
-                            className="absolute left-1/2 border-l-2 border-dashed border-primary/20 pointer-events-none"
-                            style={{ top: remainingGapTopPx, height: remainingGapHeight }}
-                          />
-                          <button
-                            onClick={(e) => { e.stopPropagation(); onAddBetween?.(transferEntry.end_time, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' }); }}
-                            className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                            style={{ top: remainingBtnTop }}
-                          >
-                            <Plus className="h-3 w-3" />
-                            <span>+ Add something</span>
-                          </button>
-                        </div>
-                      );
-                    }
-                  }
-                  return null;
+                  return null; // SNAP block on transport card handles this gap
                 }
 
                 const gapTopPx = (aEndHour - startHour) * PIXELS_PER_HOUR;
@@ -1028,22 +992,21 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                             </button>
                           );
                         })()}
-                        {/* SNAP button below transport cards */}
+                        {/* Tiered SNAP system below transport cards */}
                         {isTransport && (() => {
                           // Find the next non-linked entry in sortedEntries
                           let nextVisible = entry.to_entry_id
                             ? sortedEntries.find(e => e.id === entry.to_entry_id)
                             : null;
-                          // Fallback: find next chronological non-transport, non-linked entry
                           if (!nextVisible) {
                             const entryIdx = sortedEntries.findIndex(e => e.id === entry.id);
                             for (let i = entryIdx + 1; i < sortedEntries.length; i++) {
                               const candidate = sortedEntries[i];
                               const cOpt = candidate.options[0];
-                              const isTransport = cOpt?.category === 'transfer' || 
+                              const cIsTransport = cOpt?.category === 'transfer' || 
                                 (candidate.from_entry_id != null && candidate.to_entry_id != null) ||
                                 ['drive to', 'walk to', 'transit to', 'cycle to'].some(p => (cOpt?.name?.toLowerCase() ?? '').startsWith(p));
-                              if (!isTransport && !candidate.linked_flight_id) {
+                              if (!cIsTransport && !candidate.linked_flight_id) {
                                 nextVisible = candidate;
                                 break;
                               }
@@ -1054,17 +1017,14 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                           const transportEnd = new Date(entry.end_time).getTime();
                           const nextStart = new Date(nextVisible.start_time).getTime();
                           const gapMs = nextStart - transportEnd;
-                          console.log('[SNAP-DEBUG]', {
-                            entryName: primaryOption.name,
-                            entryEndUtc: entry.end_time,
-                            nextEntryName: nextVisible.options[0]?.name,
-                            nextEntryStartUtc: nextVisible.start_time,
-                            gapMs,
-                            hasToEntryId: !!entry.to_entry_id,
-                            nextIsLocked: nextVisible.is_locked,
-                            shouldShowSnap: gapMs > 0,
-                          });
                           if (gapMs <= 0) return null;
+
+                          const gapMin = gapMs / 60000;
+
+                          // Tier 1: gap < 30 min and not locked → auto-snap handled by Timeline.tsx, no button
+                          if (gapMin < 30 && !nextVisible.is_locked) {
+                            return null;
+                          }
 
                           const handleSnapNext = async () => {
                             if (nextVisible.is_locked) {
@@ -1075,7 +1035,6 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                             const transportEndMs = new Date(entry.end_time).getTime();
                             const duration = new Date(nextVisible.end_time).getTime() - new Date(nextVisible.start_time).getTime();
 
-                            // Recalculate transport duration for the current mode
                             const fromAddr = primaryOption.departure_location;
                             const toAddr = primaryOption.arrival_location;
                             let finalTransportEndMs = transportEndMs;
@@ -1117,7 +1076,6 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                               }
                             }
 
-                            // Snap next event to transport end
                             const newStart = new Date(finalTransportEndMs).toISOString();
                             const newEnd = new Date(finalTransportEndMs + duration).toISOString();
 
@@ -1129,14 +1087,39 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                             toast.success('Snapped next event into place');
                           };
 
+                          // Tier 2: gap 30-90 min → SNAP + Add Something stacked below transport
+                          // Tier 3: gap > 90 min → SNAP ~15 min below transport, Add Something in remaining gap
+                          const snapTopOffset = gapMin <= 90
+                            ? height + 2
+                            : height + (15 / 60) * PIXELS_PER_HOUR;
+
+                          const addBtnTopOffset = gapMin <= 90
+                            ? height + 24
+                            : height + (15 / 60) * PIXELS_PER_HOUR + 24;
+
                           return (
-                            <button
-                              onClick={handleSnapNext}
-                              className="absolute z-20 left-1/2 -translate-x-1/2 rounded-full bg-green-100 dark:bg-green-900/30 px-3 py-0.5 text-[10px] font-bold text-green-600 dark:text-green-300 border border-green-200 dark:border-green-800/40 hover:bg-green-200 dark:hover:bg-green-800/40 transition-colors"
-                              style={{ top: height + 2 }}
-                            >
-                              SNAP
-                            </button>
+                            <>
+                              <button
+                                onClick={handleSnapNext}
+                                className="absolute z-20 left-1/2 -translate-x-1/2 rounded-full bg-green-100 dark:bg-green-900/30 px-3 py-0.5 text-[10px] font-bold text-green-600 dark:text-green-300 border border-green-200 dark:border-green-800/40 hover:bg-green-200 dark:hover:bg-green-800/40 transition-colors"
+                                style={{ top: snapTopOffset }}
+                              >
+                                SNAP
+                              </button>
+                              {onAddBetween && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onAddBetween(entry.end_time);
+                                  }}
+                                  className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-0.5 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                                  style={{ top: addBtnTopOffset }}
+                                >
+                                  <Plus className="h-3 w-3" />
+                                  <span>+ Add something</span>
+                                </button>
+                              )}
+                            </>
                           );
                         })()}
                       </div>
