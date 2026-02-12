@@ -1,192 +1,179 @@
 
 
-# Timezone Model Migration: `tripTimezone` to `homeTimezone`
+# Fix Post-Migration Issues: TZ Offset, Transport Rendering, SNAP Button
 
-This is a foundational migration replacing the single destination-based timezone with a home/origin timezone model. All per-day/per-entry timezone resolution uses `dayTimezoneMap` and `resolveEntryTz()` as the primary source, with `homeTimezone` only as a last-resort fallback.
+## Root Cause Analysis
 
-## Step 1 -- Database Migration
+### Issue 1 — 1-hour offset on post-flight entries
 
-Rename the `timezone` column to `home_timezone` in the `trips` table:
+**Found the exact bug.** The database confirms it:
 
-```sql
-ALTER TABLE trips RENAME COLUMN timezone TO home_timezone;
-ALTER TABLE trips ALTER COLUMN home_timezone SET DEFAULT 'Europe/London';
-```
+The "Flying Dutchmen Cocktails" entry has `start_time = 2026-02-21 11:15:00 UTC`. In Amsterdam (CET, UTC+1) that's 12:15 local — which matches the card label. But it renders at ~13:15 position.
 
-Update `src/types/trip.ts`: change `timezone: string` to `home_timezone: string` in the `Trip` interface (line 17).
+This means the entry was **saved with the wrong TZ**. If the user typed "12:15" and `localToUTC` used `Europe/London` (homeTimezone, UTC+0) instead of `Europe/Amsterdam` (CET, UTC+1), the result would be `12:15 UTC` — which in Amsterdam displays as 13:15. That matches the observed behavior.
 
-## Step 2 -- Trip Creation Flow
+**The bug is in how `sheetResolvedTz` is computed.** In `handleCardTap` (line 378-387) and `handleAddBetween` (line 398-411), the code sets `sheetResolvedTz` to `info.activeTz` from `dayTimezoneMap`. But `activeTz` for a flight day is the **departure** (pre-flight) TZ, not the destination TZ. For entries AFTER the flight, we need the destination TZ.
 
-**File: `src/pages/TripWizard.tsx`**
-- Line 39: Change default from `'Europe/Amsterdam'` to `'Europe/London'`
-- Lines 58-63: Change auto-set from `outboundFlight.arrivalTz` to `outboundFlight.departureTz`
-- Line 165: Change `timezone` key to `home_timezone` in the insert payload
+The DISPLAY path in CalendarDay (lines 606-622) correctly checks `entry.start_time >= flightEndUtc` to pick destination TZ. But the SAVE path doesn't — it just uses `activeTz`.
 
-**File: `src/components/wizard/TimezoneStep.tsx`**
-- Line 21: Change heading to "Where are you starting from?"
-- Line 22: Change subtitle to "Select your home timezone"
+### Issues 2, 3, 4 — Transport visual, gap buttons, SNAP button
 
-## Step 3 -- Rename all `tripTimezone` to `homeTimezone`
+**All three share the same root cause.** The "Drive to Singel 460" entry has:
+- `category: NULL` (not `'transfer'`)
+- `from_entry_id: NULL`
+- `to_entry_id: NULL`
 
-Pure rename, no logic changes.
+This is an old-style entry created before the transport connector system. The rendering code checks `category === 'transfer'` to render the connector strip (Issue 2), the gap filter checks `category !== 'transfer'` to exclude transport from gap evaluation (Issue 3), and the SNAP check requires `category === 'transfer'` (Issue 4).
+
+---
+
+## Fixes
+
+### Fix 1: Correct `sheetResolvedTz` computation (Issue 1)
 
 **File: `src/pages/Timeline.tsx`**
-- Line 43: `const homeTimezone = trip?.home_timezone ?? 'Europe/London';`
-- All ~15 references to `tripTimezone` become `homeTimezone` (lines 48, 235, 292, 331, 360, 365, 752, 1004, 1009, 1141)
+
+Create a helper function that resolves the correct TZ for a given UTC timestamp on a given day, accounting for flight boundaries:
+
+```typescript
+const resolveTimezoneForTime = useCallback((isoTime: string): string => {
+  // Find which day this time belongs to
+  for (const [dayStr, info] of dayTimezoneMap) {
+    if (getDateInTimezone(isoTime, info.activeTz) === dayStr) {
+      // Check if this time is after a flight on this day
+      if (info.flights.length > 0) {
+        const lastFlight = info.flights[info.flights.length - 1];
+        if (lastFlight.flightEndUtc) {
+          const timeMs = new Date(isoTime).getTime();
+          const flightEndMs = new Date(lastFlight.flightEndUtc).getTime();
+          if (timeMs >= flightEndMs) {
+            return lastFlight.destinationTz;
+          }
+        }
+      }
+      return info.activeTz;
+    }
+  }
+  return homeTimezone;
+}, [dayTimezoneMap, homeTimezone]);
+```
+
+Then use it in:
+
+1. **`handleCardTap`** (line 378-387): Replace the loop with `setSheetResolvedTz(resolveTimezoneForTime(entry.start_time))`
+
+2. **`handleAddBetween`** (line 398-411): Replace `setSheetResolvedTz(tzInfo?.activeTz || homeTimezone)` with `setSheetResolvedTz(resolveTimezoneForTime(prefillTime))`
+
+3. **`handleDragSlot`** (line 562-569): Add `setSheetResolvedTz(resolveTimezoneForTime(startIso))` before opening the sheet
+
+4. **`handleAddTransport`** (line 413): The resolvedTz is already passed as a parameter from CalendarDay gap buttons, so this is fine.
+
+### Fix 2: Data migration for old transport entries (Issues 2, 3, 4)
+
+**Database migration SQL:**
+
+```sql
+-- Fix old transport entries that lack category and connector links
+-- These are entries whose option name starts with transport mode labels
+UPDATE entry_options
+SET category = 'transfer', category_color = '#6B7280'
+WHERE category IS NULL
+AND (name ILIKE 'Drive to%' OR name ILIKE 'Walk to%' 
+     OR name ILIKE 'Transit to%' OR name ILIKE 'Cycle to%');
+```
+
+This fixes the data so existing transport entries get proper `category = 'transfer'`.
+
+Note: The `from_entry_id` / `to_entry_id` links can't be auto-reconstructed for old entries, but this is acceptable — the SNAP button uses `to_entry_id` to find its target, so old-style transport won't show SNAP. The critical fix is category-based rendering.
+
+### Fix 3: Make transport detection more robust (Issues 2, 3, 4)
 
 **File: `src/components/timeline/CalendarDay.tsx`**
-- Line 40 prop: `tripTimezone` to `homeTimezone`
-- Line 78 destructure: rename
-- All ~8 internal references (lines 141, 142, 163, 189, 217, 218, 237, 248)
 
-**File: `src/components/timeline/EntrySheet.tsx`**
-- Line 229: `const homeTimezone = trip?.home_timezone ?? 'Europe/London';`
-- All internal references
+Add a helper that detects transport entries by BOTH category and naming pattern:
 
-**File: `src/components/timeline/HotelWizard.tsx`**
-- Line 143: `const tz = trip.home_timezone;`
-
-**File: `supabase/functions/auto-generate-transport/index.ts`**
-- Line 175: `const timezone = trip.home_timezone || 'Europe/London';`
-
-**File: `src/pages/TripSettings.tsx`**
-- No direct `trip.timezone` reference found -- reads via generic `tripData`; no change needed.
-
-## Step 4 -- Fix 4 HIGH Severity Bugs
-
-### Bug 1: `formatTime` in Timeline.tsx (line 45)
-Change signature to accept optional per-entry TZ:
 ```typescript
-const formatTime = useCallback((isoString: string, tz?: string) => {
-  const d = new Date(isoString);
-  return d.toLocaleTimeString('en-GB', {
-    timeZone: tz || homeTimezone,
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  });
-}, [homeTimezone]);
-```
-CalendarDay prop type (line 39) changes to `formatTime: (iso: string, tz?: string) => string`.
-
-### Bug 6: EntrySheet edit prefill (lines 253-254)
-Add `resolvedTz?: string` prop to EntrySheetProps. Use it for edit prefill:
-```typescript
-const editTz = resolvedTz || homeTimezone;
-const { date: sDate, time: sTime } = utcToLocal(editEntry.start_time, editTz);
-const { time: eTime } = utcToLocal(editEntry.end_time, editTz);
-```
-
-### Bug 7: EntrySheet normal save (lines 678, 681-682)
-Use `resolvedTz` for non-flight, non-transport saves:
-```typescript
-const saveTz = resolvedTz || homeTimezone;
-startIso = localToUTC(entryDate, startTime, saveTz);
-endIso = localToUTC(entryDate, endTime, saveTz);
-```
-
-### Bug 8: EntrySheet view mode time save (lines 847-848)
-Use `resolvedTz`:
-```typescript
-const dateStr = utcToLocal(entry.start_time, resolvedTz || homeTimezone).date;
-const newUtc = localToUTC(dateStr, newTimeStr, resolvedTz || homeTimezone);
-```
-
-### EntrySheet `resolvedTz` prop plumbing
-In Timeline.tsx, when opening EntrySheet, compute `resolvedTz` from `dayTimezoneMap`:
-- For view mode (`handleCardTap`): compute from entry's start_time day
-- For create mode: compute from prefill time's day
-Store in state and pass to EntrySheet.
-
-## Step 5 -- Fix 4 MEDIUM Severity Bugs
-
-### Bug 2: Idea insert (Timeline.tsx line 1001-1009)
-Use `dayTimezoneMap` to look up the target day's TZ:
-```typescript
-const dayKey = dayDateStr;
-const tzInfo = dayTimezoneMap.get(dayKey);
-const insertTz = tzInfo?.activeTz || homeTimezone;
-const startIso = localToUTC(dayDateStr, timeStr, insertTz);
-const endIso = localToUTC(dayDateStr, endTimeStr, insertTz);
-```
-
-### Bug 3: Route day grouping (Timeline.tsx line 1141)
-Replace single-TZ grouping:
-```typescript
-const getDayKey = (isoTime: string) => {
-  for (const [dayStr, info] of dayTimezoneMap) {
-    if (getDateInTimezone(isoTime, info.activeTz) === dayStr) return dayStr;
-  }
-  return getDateInTimezone(isoTime, homeTimezone);
+const isTransportEntry = (entry: EntryWithOptions): boolean => {
+  const opt = entry.options[0];
+  if (!opt) return false;
+  if (opt.category === 'transfer') return true;
+  // Fallback for old entries without proper category
+  const name = opt.name?.toLowerCase() ?? '';
+  return (entry.from_entry_id != null && entry.to_entry_id != null) ||
+    (name.startsWith('drive to') || name.startsWith('walk to') || 
+     name.startsWith('transit to') || name.startsWith('cycle to'));
 };
 ```
 
-### Bug 9: HotelWizard (line 143)
-Pass `dayTimezoneMap` as prop. For each night, resolve:
+Replace `opt.category !== 'transfer'` checks in:
+- `visibleEntries` filter (line 425): use `!isTransportEntry(e)`
+- `isTransport` variable (line 683): use `isTransportEntry(entry)`
+- SNAP button condition (line 987): use `isTransportEntry(entry)` (with `entry` being the current entry variable, not a fresh one from the map)
+
+### Fix 4: Existing event data correction (Issue 1)
+
+The "Cocktails" entry stored at 11:15 UTC was meant to be 12:15 Amsterdam time (= 11:15 UTC). Let me re-verify... actually wait: `localToUTC("2026-02-21", "12:15", "Europe/London")` would produce `12:15 UTC`, not `11:15 UTC`. But the stored value is `11:15 UTC`.
+
+This means the entry was actually saved correctly! The 12:15 CET = 11:15 UTC is right. So the SAVE path may have been correct for this particular entry (possibly created before migration with the old destination-based tripTimezone = Europe/Amsterdam).
+
+The rendering offset must then be in the DISPLAY path. Let me re-examine: if `activeTz` = `Europe/London` and the flight boundary check works, `resolvedTz` should be `Europe/Amsterdam`. Then `getHourInTimezone("11:15 UTC", "Europe/Amsterdam")` = 12.25 (12:15 CET). That's the correct position.
+
+The user reports it renders at ~13:30 though. This could mean `resolvedTz` is NOT being set correctly in the display path, or there's a different entry causing confusion. Given this uncertainty, I'll add **diagnostic console.logs** to trace the exact values:
+
+**File: `src/components/timeline/CalendarDay.tsx`** (temporary, in the entry rendering block around line 598):
+
+```typescript
+// DIAGNOSTIC: trace TZ resolution for post-flight entries
+if (process.env.NODE_ENV === 'development') {
+  console.log(`[TZ-DEBUG] ${primaryOption.name}: startTime=${entry.start_time}, resolvedTz=${resolvedTz}, startHour=${entryStartHour}, endHour=${entryEndHour}, activeTz=${activeTz}, flights=${dayFlights.length}`);
+}
+```
+
+### Fix 5a: HotelWizard dayTimezoneMap (Issue 5)
+
+**File: `src/components/timeline/HotelWizard.tsx`**
+
+Add `dayTimezoneMap` prop. In the night loop (line 146-157), resolve per-night TZ:
+
 ```typescript
 const tzInfo = dayTimezoneMap?.get(dayDateStr);
 const tz = tzInfo?.activeTz || trip.home_timezone;
+const nextTzInfo = dayTimezoneMap?.get(nextDayDateStr);
+const nextTz = nextTzInfo?.activeTz || trip.home_timezone;
+const startIso = localToUTC(dayDateStr, eveningReturn, tz);
+const endIso = localToUTC(nextDayDateStr, morningLeave, nextTz);
 ```
 
-### Bug 10: auto-generate-transport edge function (lines 175, 218)
-Read `trip.home_timezone`. Build server-side per-day TZ map from flight data:
-```typescript
-// Reference client-side dayTimezoneMap logic in src/pages/Timeline.tsx
-const timezone = trip.home_timezone || 'Europe/London';
-// Build flight-aware per-day TZ map
-let currentTz = timezone;
-const flightEntries = entries.filter(e => {
-  const opt = optionsByEntry.get(e.id);
-  return opt?.category === 'flight' && opt?.departure_tz;
-}).sort((a,b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
-if (flightEntries.length > 0) {
-  currentTz = optionsByEntry.get(flightEntries[0].id)?.departure_tz || timezone;
-}
-// Then for each day, check if a flight lands and switch currentTz
-```
+**File: `src/pages/Timeline.tsx`** — pass `dayTimezoneMap` to HotelWizard.
 
-## Step 6 -- Fix 2 LOW Severity Bugs
+### Fix 5b: Remove destination from TripSettings
 
-### Bug 4: dayLocationMap flight day (Timeline.tsx line 331)
-```typescript
-const flightOpt = flight.options[0];
-const flightArrTz = flightOpt?.arrival_tz || homeTimezone;
-const flightDay = getDateInTimezone(flight.end_time, flightArrTz);
-```
+**File: `src/pages/TripSettings.tsx`**
 
-### Bug 5: Weather hour lookup (CalendarDay.tsx line 248)
-```typescript
-const { startTz } = resolveEntryTz(entry, dayFlights, activeTz, homeTimezone);
-const hour = Math.floor(getHourInTimezone(entry.start_time, startTz));
-```
+Remove lines 255-256 (destination label + input) and update `handleSave` (line 103) to remove the `destination` field from the update payload.
 
-## Step 7 -- Dashboard Auto-Generated Destinations
+### Fix 5c: One-time data audit
 
-**File: `src/pages/Dashboard.tsx`**
+Add the diagnostic console.logs (Fix 4 above) and report back. If entries are confirmed to have wrong UTC timestamps, we can write a targeted migration. But based on the data analysis, the Cocktails entry appears to be stored correctly (11:15 UTC = 12:15 CET), suggesting the display path may be the actual issue.
 
-After fetching trips, batch-fetch entry options. For each trip, collect unique `location_name` and `arrival_location` values excluding transport categories. Display as comma-separated city list. Fallback to `trip.destination` if no entries, then "No destinations yet".
+---
 
 ## Files Changed Summary
 
 | File | Changes |
 |------|---------|
-| Database migration | Rename `timezone` to `home_timezone`, change default |
-| `src/types/trip.ts` | Rename `timezone` to `home_timezone` |
-| `src/pages/TripWizard.tsx` | Use departure TZ, insert as `home_timezone` |
-| `src/components/wizard/TimezoneStep.tsx` | Update heading/subtitle |
-| `src/pages/Timeline.tsx` | Rename; fix `formatTime`; fix idea insert; fix route grouping; fix `dayLocationMap`; pass `resolvedTz` to EntrySheet |
-| `src/components/timeline/CalendarDay.tsx` | Rename prop; fix weather TZ |
-| `src/components/timeline/EntrySheet.tsx` | Add `resolvedTz` prop; fix edit prefill, save, view-mode save |
-| `src/components/timeline/HotelWizard.tsx` | Accept `dayTimezoneMap` prop; use per-night TZ |
-| `supabase/functions/auto-generate-transport/index.ts` | Read `home_timezone`; add flight-aware per-day TZ resolution |
-| `src/pages/Dashboard.tsx` | Auto-generate destination list from entry data |
+| `src/pages/Timeline.tsx` | Add `resolveTimezoneForTime` helper; fix `handleCardTap`, `handleAddBetween`, `handleDragSlot` TZ resolution; pass `dayTimezoneMap` to HotelWizard |
+| `src/components/timeline/CalendarDay.tsx` | Add `isTransportEntry` helper; fix `visibleEntries` filter, `isTransport` detection, SNAP condition; add TZ diagnostic logs |
+| `src/components/timeline/HotelWizard.tsx` | Accept `dayTimezoneMap` prop; use per-night resolved TZ |
+| `src/pages/TripSettings.tsx` | Remove destination field and label |
+| Database migration | Fix old transport entries: set `category = 'transfer'` where name matches transport patterns |
 
 ## What Is NOT Changed
 
-- Transport generation UTC arithmetic (already correct)
-- SNAP button UTC gap detection (already correct)
-- handleEntryTimeChange trailing transport logic (already correct)
-- handleGenerateTransportDirect destination pull (already correct)
-- Flight save logic in EntrySheet (already uses per-flight TZ)
-- TimeSlotGrid slot click (already uses activeTz)
-- resolveDropTz (already correct)
-- Drag commit in CalendarDay (already correct fallback chain)
+- Transport generation UTC arithmetic (correct)
+- SNAP click handler logic (correct) 
+- handleEntryTimeChange trailing transport (correct)
+- handleGenerateTransportDirect destination pull (correct)
+- CalendarDay entry rendering TZ resolution (lines 606-622 -- already correct)
+- Flight save logic (correct)
 
