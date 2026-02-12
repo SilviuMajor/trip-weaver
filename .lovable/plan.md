@@ -1,92 +1,81 @@
 
-# Refresh Button, Gap Fix, and Lock Icon Repositioning
+# "Send to Planner", Remove Inline Title Edit, Bigger Close Button, Lock Toggle in Overview
 
-## Overview
+## 1. Rename "Move to Ideas" to "Send to Planner"
 
-Three fixes: (1) Add a refresh button to the header that recalculates all transport and weather, (2) Remove the gap between tab bar and timeline content, (3) Move lock icons from the left side to the right side of cards.
+**File: `src/components/timeline/EntrySheet.tsx`**
 
-## 1. Refresh Button in Header
-
-**File: `src/components/timeline/TimelineHeader.tsx`**
-
-Add a `RefreshCw` icon button to the right side of the header, positioned before the Settings cog. The header right side becomes: Refresh | Settings | Exit.
-
-New props:
-- `onRefresh: () => Promise<void>` -- callback to trigger refresh
-- `refreshing: boolean` -- controls spin animation
-
-The button shows `RefreshCw` icon with `animate-spin` class when `refreshing` is true.
+- Line 1462-1465: Change the button text from "Move to ideas" to "Send to Planner", replace `Lightbulb` icon with `ClipboardList` icon (import it from lucide-react)
+- Also hide for flights: add `option?.category !== 'flight'` to the existing condition
 
 **File: `src/pages/Timeline.tsx`**
 
-Add a `handleGlobalRefresh` function that:
-1. Sets a `globalRefreshing` state to true
-2. Calls `supabase.functions.invoke('auto-generate-transport', { body: { tripId } })` to recalculate all transport routes (this re-fetches directions for existing connectors)
-3. Calls `supabase.functions.invoke('fetch-weather', ...)` to refresh weather data for all trip days/locations
-4. Calls `fetchData()` to reload everything
-5. Shows toast: "Weather and routes updated"
-6. Sets `globalRefreshing` to false
+- Line 1021: Rename comment from "Move to ideas" to "Send to Planner"
+- Line 1032: Change toast message from `'Moved to ideas panel'` to `'Event moved to Planner'`, and add an Undo action to the toast that re-schedules the entry (sets `is_scheduled: true`)
 
-Pass `onRefresh={handleGlobalRefresh}` and `refreshing={globalRefreshing}` to `TimelineHeader`.
+**File: `src/lib/conflictEngine.ts`**
 
-For weather refresh, the function needs `tripId` and the trip's day-location segments (latitude/longitude per date range). The existing `dayLocationMap` and trip dates provide this data.
+- Line 146: Change description from `'Move to ideas (unscheduled)'` to `'Send to Planner (unscheduled)'`
 
-## 2. Fix Gap Between Tab Bar and Timeline Content
+## 2. Remove Inline Title Editing on Timeline Cards
+
+**File: `src/components/timeline/EntryCard.tsx`**
+
+Remove the inline editing functionality for the title on all card variants (full, condensed, medium, compact):
+- Remove the `isEditingName`, `editedName`, `nameInputRef` state variables and the `handleNameClick`, `handleNameSave`, `handleNameKeyDown` functions (lines 130-168)
+- In each card variant, replace the conditional `isEditingName ? <input>... : <span onClick={handleNameClick}>` with just a plain display `<span>` or `<h3>` (no `onClick`, no `cursor-text`)
+- Affects: compact card (lines 564-581), medium card (lines 498-515), condensed card (lines 636-653), full card (lines 773-803)
+
+## 3. Bigger Close Button on Overview Sheet
+
+**File: `src/components/timeline/EntrySheet.tsx`**
+
+The Dialog uses shadcn's `DialogContent` which includes an auto-generated close button. Override it by adding a custom close button in the view mode dialog:
+
+- In the view mode `DialogContent` (line 1025), add a custom X button at the top-right with `h-11 w-11` (44x44px tap target) and hide the default close button using the `hideCloseButton` approach or by overriding styling
+- Position: `absolute top-3 right-3 z-50`, with a larger X icon (`h-6 w-6`)
+
+Since shadcn's `DialogContent` has a built-in close button that is small, we need to either:
+- Add `className` to DialogContent to hide the default close via CSS (`[&>button]:hidden`) and render our own larger close button
+- Or override the close button styling directly
+
+Approach: Add `[&>button.absolute]:h-11 [&>button.absolute]:w-11` to the DialogContent className to increase the built-in close button's tap target, or render a custom one.
+
+Simplest: Override the default close button in DialogContent with CSS: `className="... [&>button:last-child]:h-11 [&>button:last-child]:w-11 [&>button:last-child]:top-3 [&>button:last-child]:right-3 [&>button:last-child]:[&_svg]:h-6 [&>button:last-child]:[&_svg]:w-6"`
+
+## 4. Lock Toggle in Overview Sheet (Top-Right, Beside X)
+
+**File: `src/components/timeline/EntrySheet.tsx`**
+
+- In the view mode dialog header area (around line 1026-1045), add a lock/unlock icon button beside the close button in the top-right area
+- Locked: solid orange filled `Lock` icon (`text-primary fill-primary`)
+- Unlocked: grey outline `LockOpen` icon (`text-muted-foreground`)
+- Do NOT show on flight overviews (`option.category === 'flight'`) or transport overviews (`option.category === 'transfer'`)
+- Tapping calls the existing `handleToggleLock` function
+- Remove the existing Lock/Unlock button from the editor actions row (lines 1458-1460) since it's now redundant
+
+Position the lock icon as `absolute top-3 right-14` (to the left of the close X button).
+
+## 5. Undo Toast for "Send to Planner"
 
 **File: `src/pages/Timeline.tsx`**
 
-Investigate and remove any extra padding/margin between the `TripNavBar` component and the `<main>` content area. The likely cause is:
-- The `<main>` element may have top padding
-- The `CalendarDay` component's day header has padding that creates visual space
-- There may be wrapper divs with unnecessary spacing
+Update `handleMoveToIdeas` (to be renamed `handleSendToPlanner`):
+- After successfully unscheduling, show a toast with an "Undo" action button
+- The Undo action sets `is_scheduled: true` on the entry and calls `fetchData()`
 
-The fix: ensure the `<main>` tag has no top padding (`pt-0`), and the first `CalendarDay`'s sticky header sits flush against the tab bar. Reduce any `py-3` or `pt-3` on the first day's content area.
-
-**File: `src/components/timeline/CalendarDay.tsx`**
-
-The day header div currently has `py-3` padding. This should be kept but the sticky positioning should place it right below the tab bar. Check the `top` value on the sticky day header -- it should be `top-[calc(57px+41px)]` (header height + tab bar height) so it stacks correctly without a gap.
-
-Currently the day header has `sticky top-0` which means it sits at the top of its scroll container (the `<main>` element), not below the fixed header/tab bar. Since header and tab bar are `sticky` (not `fixed`), and are outside the `<main>` scroll container, there should be no gap issue from sticky positioning.
-
-The actual gap is likely from padding on the content wrappers. Remove any `pt-*` or `mt-*` on the main content area between the tab bar and the first calendar day.
-
-## 3. Reposition Lock Icon to Right Side
-
-**File: `src/components/timeline/CalendarDay.tsx`**
-
-Move the lock icon button from `-left-2` to `-right-3` (outside the right edge of the card, in the gutter/margin area). Increase size from `h-5 w-5` to `h-7 w-7` for easier tapping (~28px).
-
-For regular entries (non-flight, non-transport):
-- Change: `absolute top-1/2 -translate-y-1/2 -left-2` to `absolute top-1/2 -translate-y-1/2 -right-3`
-- Locked state: solid filled orange lock icon (`Lock` with `text-primary` or `text-amber-500`, add `fill-amber-500` for filled appearance)
-- Unlocked state: outline-only lock icon (`LockOpen` with `text-muted-foreground/40`)
-- Size: `h-4 w-4` icons inside `h-7 w-7` button
-
-For flight cards:
-- Remove the lock icon entirely (flights are always locked, no toggle needed as per requirements)
-
-For transport connectors:
-- No lock icon (already the case -- transport cards don't show lock icons)
-
-**Styling updates for locked state on cards:**
-- Remove the `border-dashed border-2 border-muted-foreground/40` styling from locked cards in `EntryCard.tsx` (the lock icon in the gutter is sufficient visual indicator)
-- Keep the normal border styling for locked and unlocked cards alike
-
-## Files Changed
+## Summary of File Changes
 
 | File | Change |
 |---|---|
-| `src/components/timeline/TimelineHeader.tsx` | Add refresh button with spin animation before settings cog |
-| `src/pages/Timeline.tsx` | Add `handleGlobalRefresh` function, `globalRefreshing` state, pass to header, fix gap padding |
-| `src/components/timeline/CalendarDay.tsx` | Move lock icon from left to right gutter, increase size, remove flight lock icon, update styling |
-| `src/components/timeline/EntryCard.tsx` | Remove locked-state dashed border styling (lock is now external) |
+| `src/components/timeline/EntrySheet.tsx` | Rename button to "Send to Planner" with ClipboardList icon, bigger close button, add lock toggle top-right, remove redundant lock button from actions row, hide "Send to Planner" on flights |
+| `src/components/timeline/EntryCard.tsx` | Remove all inline title editing (state, handlers, conditional inputs) -- titles are display-only |
+| `src/pages/Timeline.tsx` | Rename handler/toast, add undo toast action for "Send to Planner" |
+| `src/lib/conflictEngine.ts` | Rename description text |
 
 ## Technical Notes
 
-- Refresh button icon: `RefreshCw` from lucide-react, with `animate-spin` when active
-- Lock icon positioning: `absolute top-1/2 -translate-y-1/2 -right-3 z-30` with `h-7 w-7` container
-- Locked appearance: `Lock` icon with `fill-current text-primary` (solid orange filled)
-- Unlocked appearance: `LockOpen` icon with `text-muted-foreground/40` (outline only, muted)
-- The `marginRight: 8` on the grid container in CalendarDay may need to increase to `16` or `24` to make room for the right-side lock icon
-- Transport refresh in `handleGlobalRefresh` calls the `auto-generate-transport` edge function which handles recalculating all routes
-- Weather refresh calls `fetch-weather` with the trip's location segments derived from `dayLocationMap`
+- The lock toggle in the overview uses `absolute top-3 right-14 z-50` positioning inside `DialogContent` (which is `relative`)
+- Close button enlarged to 44x44px via CSS overrides on DialogContent's built-in close button
+- Undo toast uses the toast action pattern: `toast({ title: '...', action: <ToastAction onClick={...}>Undo</ToastAction> })`
+- Inline title editing removal is purely a deletion -- no new code needed, just remove the editing states and replace conditional renders with plain text elements
