@@ -15,7 +15,7 @@ import { analyzeConflict, generateRecommendations } from '@/lib/conflictEngine';
 import { toast } from '@/hooks/use-toast';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
 import TripNavBar from '@/components/timeline/TripNavBar';
-import CalendarDay from '@/components/timeline/CalendarDay';
+import ContinuousTimeline from '@/components/timeline/ContinuousTimeline';
 import EntrySheet from '@/components/timeline/EntrySheet';
 import CategorySidebar from '@/components/timeline/CategorySidebar';
 import LivePanel from '@/components/timeline/LivePanel';
@@ -90,7 +90,6 @@ const Timeline = () => {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const mainScrollRef = useRef<HTMLElement>(null);
-  const dayRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
 
 
 
@@ -847,8 +846,8 @@ const Timeline = () => {
     await fetchData();
   };
 
-  // Handle drop from ideas panel onto timeline
-  const handleDropOnTimeline = async (entryId: string, dayDate: Date, hourOffset: number) => {
+  // Handle drop from ideas panel onto timeline (global hour)
+  const handleDropOnTimeline = async (entryId: string, globalHour: number) => {
     const entry = entries.find(e => e.id === entryId);
     if (!entry) return;
 
@@ -860,25 +859,31 @@ const Timeline = () => {
       return;
     }
 
+    const dayIndex = Math.max(0, Math.min(Math.floor(globalHour / 24), days.length - 1));
+    const dayDate = days[dayIndex];
     const dateStr = format(dayDate, 'yyyy-MM-dd');
+    const localHour = globalHour - dayIndex * 24;
 
     // Compute original duration to preserve it
     const originalDurationMs = new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime();
     const durationMin = Math.max(Math.round(originalDurationMs / 60000), 30); // at least 30m
 
-    const startMinutes = Math.round(hourOffset * 60);
-    const sH = Math.floor(startMinutes / 60);
+    const startMinutes = Math.round(localHour * 60);
+    const sH = Math.floor(startMinutes / 60) % 24;
     const sM = startMinutes % 60;
 
     const endMinutes = startMinutes + durationMin;
-    const eH = Math.floor(endMinutes / 60);
+    const eH = Math.floor(endMinutes / 60) % 24;
     const eM = endMinutes % 60;
 
     const dayKey = format(dayDate, 'yyyy-MM-dd');
     const tzInfo = dayTimezoneMap.get(dayKey);
-    const resolvedTz = resolveDropTz(hourOffset, tzInfo, homeTimezone);
+    const resolvedTz = resolveDropTz(localHour, tzInfo, homeTimezone);
     const startIso = localToUTC(dateStr, `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`, resolvedTz);
-    const endIso = localToUTC(dateStr, `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`, resolvedTz);
+    // End might be on next day
+    const endDayIndex = Math.min(Math.floor((globalHour + durationMin / 60) / 24), days.length - 1);
+    const endDateStr = format(days[endDayIndex], 'yyyy-MM-dd');
+    const endIso = localToUTC(endDateStr, `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`, resolvedTz);
 
     // If already scheduled somewhere, create a copy instead of moving
     const alreadyScheduled = entry.is_scheduled !== false;
