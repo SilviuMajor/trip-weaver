@@ -92,24 +92,7 @@ const Timeline = () => {
   const mainScrollRef = useRef<HTMLElement>(null);
   const dayRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
 
-  // Global refresh: recalculate all transport + weather
-  const handleGlobalRefresh = useCallback(async () => {
-    if (!tripId) return;
-    setGlobalRefreshing(true);
-    try {
-      await Promise.all([
-        supabase.functions.invoke('auto-generate-transport', { body: { tripId } }),
-        supabase.functions.invoke('fetch-weather', { body: { tripId } }),
-      ]);
-      await fetchDataRef.current?.();
-      toast({ title: 'Weather & routes updated' });
-    } catch (err) {
-      console.error('Global refresh failed:', err);
-      toast({ title: 'Refresh failed', description: 'Please try again', variant: 'destructive' });
-    } finally {
-      setGlobalRefreshing(false);
-    }
-  }, [tripId]);
+
 
   // Redirect if no user
   useEffect(() => {
@@ -383,6 +366,54 @@ const Timeline = () => {
 
     return map;
   }, [trip, scheduledEntries, homeTimezone]);
+
+  // Global refresh: recalculate all transport + weather
+  const handleGlobalRefresh = useCallback(async () => {
+    if (!tripId || !trip) return;
+    setGlobalRefreshing(true);
+    try {
+      // Build weather segments from dayLocationMap
+      const refreshDays = (() => {
+        if (!trip.start_date) return [];
+        const start = parseISO(trip.start_date);
+        const end = parseISO(trip.end_date!);
+        const result: Date[] = [];
+        let cur = startOfDay(start);
+        while (cur <= end) { result.push(new Date(cur)); cur = addDays(cur, 1); }
+        return result;
+      })();
+
+      // Group consecutive days with same location into segments
+      const segments: { lat: number; lng: number; startDate: string; endDate: string }[] = [];
+      let currentSeg: { lat: number; lng: number; startDate: string; endDate: string } | null = null;
+      for (const day of refreshDays) {
+        const dayStr = format(day, 'yyyy-MM-dd');
+        const loc = dayLocationMap.get(dayStr);
+        if (!loc) continue;
+        if (currentSeg && currentSeg.lat === loc.lat && currentSeg.lng === loc.lng) {
+          currentSeg.endDate = dayStr;
+        } else {
+          if (currentSeg) segments.push(currentSeg);
+          currentSeg = { lat: loc.lat, lng: loc.lng, startDate: dayStr, endDate: dayStr };
+        }
+      }
+      if (currentSeg) segments.push(currentSeg);
+
+      await Promise.all([
+        supabase.functions.invoke('auto-generate-transport', { body: { tripId } }),
+        segments.length > 0
+          ? supabase.functions.invoke('fetch-weather', { body: { tripId, segments } })
+          : Promise.resolve(),
+      ]);
+      await fetchDataRef.current?.();
+      toast({ title: 'Weather & routes updated' });
+    } catch (err) {
+      console.error('Global refresh failed:', err);
+      toast({ title: 'Refresh failed', description: 'Please try again', variant: 'destructive' });
+    } finally {
+      setGlobalRefreshing(false);
+    }
+  }, [tripId, trip, dayLocationMap]);
 
   const getEntriesForDay = (day: Date): EntryWithOptions[] => {
     const dayStr = format(day, 'yyyy-MM-dd');
