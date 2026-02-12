@@ -17,7 +17,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import AIRPORTS from '@/lib/airports';
-import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, Lightbulb, Plane, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, AlertTriangle, RefreshCw } from 'lucide-react';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import PhotoStripPicker from './PhotoStripPicker';
 import ImageGallery from './ImageGallery';
@@ -1022,7 +1022,20 @@ const EntrySheet = ({
 
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md [&>button:last-child]:h-11 [&>button:last-child]:w-11 [&>button:last-child]:top-3 [&>button:last-child]:right-3 [&>button:last-child]:[&_svg]:h-6 [&>button:last-child]:[&_svg]:w-6">
+          {/* Lock toggle in top-right, beside close button */}
+          {isEditor && option?.category !== 'flight' && option?.category !== 'transfer' && (
+            <button
+              className="absolute top-3 right-14 z-50 flex items-center justify-center h-11 w-11 rounded-sm hover:bg-muted/50 transition-colors"
+              onClick={handleToggleLock}
+              disabled={toggling}
+            >
+              {isLocked
+                ? <Lock className="h-5 w-5 text-primary fill-primary" />
+                : <LockOpen className="h-5 w-5 text-muted-foreground" />
+              }
+            </button>
+          )}
           <div className="space-y-4">
             <DialogHeader className="text-left">
               {option.category && (
@@ -1455,13 +1468,9 @@ const EntrySheet = ({
             {/* Editor actions */}
             {isEditor && (
               <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
-                <Button variant="outline" size="sm" onClick={handleToggleLock} disabled={toggling}>
-                  {isLocked ? <><Unlock className="mr-1.5 h-3.5 w-3.5" /> Unlock</> : <><Lock className="mr-1.5 h-3.5 w-3.5" /> Lock</>}
-                </Button>
-
-                {onMoveToIdeas && option?.category !== 'transfer' && (
+                {onMoveToIdeas && option?.category !== 'transfer' && option?.category !== 'flight' && (
                   <Button variant="outline" size="sm" onClick={() => onMoveToIdeas(entry.id)}>
-                    <Lightbulb className="mr-1.5 h-3.5 w-3.5" /> Move to ideas
+                    <ClipboardList className="mr-1.5 h-3.5 w-3.5" /> Send to Planner
                   </Button>
                 )}
 

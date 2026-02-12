@@ -1018,8 +1018,8 @@ const Timeline = () => {
     toast({ title: 'Placed with conflict marker ⚠️', description: 'Adjust the schedule manually when ready.' });
   };
 
-  // Handle "Move to ideas" from overlay
-  const handleMoveToIdeas = async (entryId: string) => {
+  // Handle "Send to Planner" from overlay
+  const handleSendToPlanner = async (entryId: string) => {
     const { error } = await supabase
       .from('entries')
       .update({ is_scheduled: false } as any)
@@ -1029,7 +1029,20 @@ const Timeline = () => {
       return;
     }
     setSheetOpen(false);
-    toast({ title: 'Moved to ideas panel 💡' });
+    toast({
+      title: 'Event moved to Planner 📋',
+      action: (
+        <button
+          className="ml-2 shrink-0 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+          onClick={async () => {
+            await supabase.from('entries').update({ is_scheduled: true } as any).eq('id', entryId);
+            await fetchData();
+          }}
+        >
+          Undo
+        </button>
+      ),
+    });
     await fetchData();
   };
 
@@ -1672,7 +1685,7 @@ const Timeline = () => {
             votingLocked={trip.voting_locked}
             userVotes={userVotes}
             onVoteChange={fetchData}
-            onMoveToIdeas={handleMoveToIdeas}
+            onMoveToIdeas={handleSendToPlanner}
             // Create mode props
             prefillStartTime={prefillStartTime}
             prefillEndTime={prefillEndTime}

@@ -143,7 +143,7 @@ export function generateRecommendations(
     recommendations.push({
       id: `skip-${entry.id}`,
       label: `Skip "${entry.options[0]?.name}"`,
-      description: 'Move to ideas (unscheduled)',
+      description: 'Send to Planner (unscheduled)',
       changes: [], // handled specially by the caller
     });
   }
