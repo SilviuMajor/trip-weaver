@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { addDays, parseISO, startOfDay, format, isPast } from 'date-fns';
+import { addDays, parseISO, startOfDay, format, isPast, isToday } from 'date-fns';
 import { getDateInTimezone, localToUTC, resolveDropTz } from '@/lib/timezoneUtils';
 import { findCategory } from '@/lib/categories';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -90,6 +90,7 @@ const Timeline = () => {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const mainScrollRef = useRef<HTMLElement>(null);
+  const [currentDayIndex, setCurrentDayIndex] = useState(0);
 
 
 
@@ -1497,6 +1498,33 @@ const Timeline = () => {
         </div>
       ) : (
         <>
+          {/* Day pill - fixed between nav and scroll container */}
+          {days.length > 0 && (() => {
+            const dayDate = days[currentDayIndex];
+            const dayStr = format(dayDate, 'yyyy-MM-dd');
+            const tzInfo = dayTimezoneMap.get(dayStr);
+            let tzAbbrev = '';
+            if (tzInfo) {
+              const tz = tzInfo.flights.length > 0 ? tzInfo.flights[0].originTz : tzInfo.activeTz;
+              try {
+                tzAbbrev = new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'short' })
+                  .formatToParts(dayDate).find(p => p.type === 'timeZoneName')?.value || '';
+              } catch { /* ignore */ }
+            }
+            return (
+              <div className="flex justify-center py-1 bg-background/90 backdrop-blur-md border-b border-border/30 z-30">
+                <div className="inline-flex items-center gap-1 rounded-full bg-background border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-sm">
+                  <span>{isUndated ? `Day ${currentDayIndex + 1}` : format(dayDate, 'EEE d MMM').toUpperCase()}</span>
+                  <span className="text-muted-foreground/60">·</span>
+                  <span className="text-muted-foreground">{tzAbbrev}</span>
+                  {!isUndated && isToday(dayDate) && (
+                    <span className="ml-1 rounded-full bg-primary px-1.5 py-0 text-[8px] font-semibold text-primary-foreground">TODAY</span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="flex flex-1 overflow-hidden">
             {/* Desktop Live panel */}
             {!isMobile && (
@@ -1545,6 +1573,7 @@ const Timeline = () => {
                   onVoteChange={fetchData}
                   scrollContainerRef={mainScrollRef}
                   isUndated={isUndated}
+                  onCurrentDayChange={setCurrentDayIndex}
                 />
               </main>
             )}
