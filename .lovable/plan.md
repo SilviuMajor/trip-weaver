@@ -1,124 +1,92 @@
 
-# Add Live Panel + 3-Panel Desktop Layout
+# Refresh Button, Gap Fix, and Lock Icon Repositioning
 
 ## Overview
 
-Add a "Live" tab to the navigation bar and implement a 3-panel desktop layout where Timeline is always the centre panel, with Live and Planner as toggleable side panels. On mobile, Live becomes a full-screen takeover.
+Three fixes: (1) Add a refresh button to the header that recalculates all transport and weather, (2) Remove the gap between tab bar and timeline content, (3) Move lock icons from the left side to the right side of cards.
 
-## 1. Update TripNavBar to 3 tabs
+## 1. Refresh Button in Header
 
-**File: `src/components/timeline/TripNavBar.tsx`**
+**File: `src/components/timeline/TimelineHeader.tsx`**
 
-- Add a third tab: **Live** (Radio icon) on the left, **Timeline** (Calendar icon) in the centre, **Planner** (ClipboardList icon) on the right
-- Change props to accept `activeTab` as an object `{ live: boolean; planner: boolean }` (since on desktop both can be active simultaneously), plus `currentView` for mobile (only one active at a time)
-- Actually, simpler approach: keep `activeTab` but accept a new prop `livePanelOpen: boolean` and `plannerPanelOpen: boolean` to control highlight states
-- On desktop: Live and Planner tabs act as toggles (click to open/close their panels). Timeline tab closes both panels. Multiple tabs can appear "active".
-- On mobile: tabs are mutually exclusive. Tapping Live shows full-screen Live. Tapping Timeline returns to timeline. Tapping Planner opens the 60% overlay.
+Add a `RefreshCw` icon button to the right side of the header, positioned before the Settings cog. The header right side becomes: Refresh | Settings | Exit.
 
 New props:
-```
-interface TripNavBarProps {
-  liveOpen: boolean;
-  plannerOpen: boolean;
-  isMobile: boolean;
-  onToggleLive: () => void;
-  onTogglePlanner: () => void;
-  onTimelineOnly: () => void;
-}
-```
+- `onRefresh: () => Promise<void>` -- callback to trigger refresh
+- `refreshing: boolean` -- controls spin animation
 
-## 2. Update LivePanel for desktop side panel + mobile full-screen
-
-**File: `src/components/timeline/LivePanel.tsx`**
-
-- Enhance the placeholder content: add subtitle "Live trip tracking, weather, and real-time updates", add a pulse animation on the Radio icon, use warm color palette
-- Desktop: renders as a left-side panel with `border-r`, width controlled by parent
-- Mobile: instead of a Sheet, render as a full-screen overlay (absolutely positioned, covering the main content area but keeping the header + tab bar visible). The tab bar stays at top so user can navigate back.
-
-Mobile implementation: when `open && isMobile`, render a `div` that fills the remaining viewport below the tab bar with the Live content. This replaces the timeline content visually.
-
-## 3. Update Timeline.tsx layout to support 3 panels
+The button shows `RefreshCw` icon with `animate-spin` class when `refreshing` is true.
 
 **File: `src/pages/Timeline.tsx`**
 
-Add `liveOpen` state alongside existing `sidebarOpen` state.
+Add a `handleGlobalRefresh` function that:
+1. Sets a `globalRefreshing` state to true
+2. Calls `supabase.functions.invoke('auto-generate-transport', { body: { tripId } })` to recalculate all transport routes (this re-fetches directions for existing connectors)
+3. Calls `supabase.functions.invoke('fetch-weather', ...)` to refresh weather data for all trip days/locations
+4. Calls `fetchData()` to reload everything
+5. Shows toast: "Weather and routes updated"
+6. Sets `globalRefreshing` to false
 
-Layout structure change for the main content area (line ~1438):
+Pass `onRefresh={handleGlobalRefresh}` and `refreshing={globalRefreshing}` to `TimelineHeader`.
 
-```
-<div className="flex flex-1 overflow-hidden">
-  {/* Desktop Live panel */}
-  {!isMobile && <LivePanel open={liveOpen} onOpenChange={setLiveOpen} />}
-  
-  {/* Timeline (always visible on desktop, hidden on mobile when Live is active) */}
-  <main className="flex-1 overflow-y-auto pb-20" style={dynamicWidth}>
-    ...calendar days...
-  </main>
-  
-  {/* Desktop Planner panel */}
-  {!isMobile && <CategorySidebar ... />}
-</div>
+For weather refresh, the function needs `tripId` and the trip's day-location segments (latitude/longitude per date range). The existing `dayLocationMap` and trip dates provide this data.
 
-{/* Mobile: Live full-screen takeover */}
-{isMobile && liveOpen && <LivePanel ... />}
+## 2. Fix Gap Between Tab Bar and Timeline Content
 
-{/* Mobile: Planner overlay (existing Sheet behavior) */}
-{isMobile && <CategorySidebar ... />}
-```
+**File: `src/pages/Timeline.tsx`**
 
-Desktop panel widths (using CSS transitions for smooth animation):
-- Live panel: `w-[30%]` when only Live is open, `w-[25%]` when both panels are open
-- Planner panel: `w-[30%]` when only Planner is open, `w-[25%]` when both panels are open
-- Timeline: takes remaining space (`flex-1`)
+Investigate and remove any extra padding/margin between the `TripNavBar` component and the `<main>` content area. The likely cause is:
+- The `<main>` element may have top padding
+- The `CalendarDay` component's day header has padding that creates visual space
+- There may be wrapper divs with unnecessary spacing
 
-Update TripNavBar usage:
-- Pass `liveOpen`, `plannerOpen: sidebarOpen`, `isMobile`
-- `onToggleLive`: toggles `liveOpen` state. On mobile, also closes planner and sets a "mobileView" state.
-- `onTogglePlanner`: toggles `sidebarOpen`. On mobile, closes live view.
-- `onTimelineOnly`: closes both panels. On mobile, returns to timeline view.
+The fix: ensure the `<main>` tag has no top padding (`pt-0`), and the first `CalendarDay`'s sticky header sits flush against the tab bar. Reduce any `py-3` or `pt-3` on the first day's content area.
 
-Mobile behavior:
-- Add `mobileView` state: `'timeline' | 'live'` (Planner is an overlay, not a full view)
-- When `mobileView === 'live'`, hide the timeline `<main>` and show LivePanel content in its place
-- Tab bar remains visible at top
+**File: `src/components/timeline/CalendarDay.tsx`**
 
-## 4. LivePanel styling update
+The day header div currently has `py-3` padding. This should be kept but the sticky positioning should place it right below the tab bar. Check the `top` value on the sticky day header -- it should be `top-[calc(57px+41px)]` (header height + tab bar height) so it stacks correctly without a gap.
 
-**File: `src/components/timeline/LivePanel.tsx`**
+Currently the day header has `sticky top-0` which means it sits at the top of its scroll container (the `<main>` element), not below the fixed header/tab bar. Since header and tab bar are `sticky` (not `fixed`), and are outside the `<main>` scroll container, there should be no gap issue from sticky positioning.
 
-Update the placeholder content to be more polished:
-- Radio icon with pulse animation (`animate-pulse`)
-- Title: "LIVE" in bold
-- Subtitle: "Live trip tracking, weather, and real-time updates"
-- Warm background tint (`bg-primary/5`)
-- Match app's warm colour palette
+The actual gap is likely from padding on the content wrappers. Remove any `pt-*` or `mt-*` on the main content area between the tab bar and the first calendar day.
 
-Desktop rendering: remove the Sheet wrapper entirely; just render a `div` with `border-r`, `overflow-y-auto`, and transition on width. Width is controlled by parent CSS classes passed via className or computed in the component based on a `bothOpen` prop.
+## 3. Reposition Lock Icon to Right Side
 
-## 5. CategorySidebar width adjustment
+**File: `src/components/timeline/CalendarDay.tsx`**
 
-**File: `src/components/timeline/CategorySidebar.tsx`**
+Move the lock icon button from `-left-2` to `-right-3` (outside the right edge of the card, in the gutter/margin area). Increase size from `h-5 w-5` to `h-7 w-7` for easier tapping (~28px).
 
-- Accept optional `compact` prop (boolean)
-- When `compact` (both panels open): `w-[25vw]` instead of `w-[40vw]`
-- When not compact (only planner open): `w-[30vw] max-w-[500px]`
-- Mobile: unchanged (`w-[60vw] min-w-[280px]`)
+For regular entries (non-flight, non-transport):
+- Change: `absolute top-1/2 -translate-y-1/2 -left-2` to `absolute top-1/2 -translate-y-1/2 -right-3`
+- Locked state: solid filled orange lock icon (`Lock` with `text-primary` or `text-amber-500`, add `fill-amber-500` for filled appearance)
+- Unlocked state: outline-only lock icon (`LockOpen` with `text-muted-foreground/40`)
+- Size: `h-4 w-4` icons inside `h-7 w-7` button
+
+For flight cards:
+- Remove the lock icon entirely (flights are always locked, no toggle needed as per requirements)
+
+For transport connectors:
+- No lock icon (already the case -- transport cards don't show lock icons)
+
+**Styling updates for locked state on cards:**
+- Remove the `border-dashed border-2 border-muted-foreground/40` styling from locked cards in `EntryCard.tsx` (the lock icon in the gutter is sufficient visual indicator)
+- Keep the normal border styling for locked and unlocked cards alike
 
 ## Files Changed
 
 | File | Change |
 |---|---|
-| `src/components/timeline/TripNavBar.tsx` | Rewrite: 3 tabs (Live, Timeline, Planner), support toggle behavior |
-| `src/pages/Timeline.tsx` | Add `liveOpen` state, `mobileView` state, 3-panel flex layout, update nav bar props |
-| `src/components/timeline/LivePanel.tsx` | Enhanced placeholder styling, remove Sheet for mobile (use inline full-screen), desktop as flex panel |
-| `src/components/timeline/CategorySidebar.tsx` | Add `compact` prop for narrower width when both panels open |
+| `src/components/timeline/TimelineHeader.tsx` | Add refresh button with spin animation before settings cog |
+| `src/pages/Timeline.tsx` | Add `handleGlobalRefresh` function, `globalRefreshing` state, pass to header, fix gap padding |
+| `src/components/timeline/CalendarDay.tsx` | Move lock icon from left to right gutter, increase size, remove flight lock icon, update styling |
+| `src/components/timeline/EntryCard.tsx` | Remove locked-state dashed border styling (lock is now external) |
 
 ## Technical Notes
 
-- Panel transitions use `transition-all duration-300` for smooth open/close
-- Desktop: `flex` layout with `overflow-hidden` on container; each panel has `overflow-y-auto` for independent scrolling
-- Mobile Live: rendered as a div that replaces the `<main>` content area (not a Sheet), keeping header + tab bar visible
-- The FAB (`+` button) remains `fixed bottom-6 right-6 z-40` on all views
-- UndoRedoButtons remain visible on all views
-- Timeline tab click on desktop: sets `liveOpen = false` and `sidebarOpen = false`
-- On mobile, tapping an already-active tab (e.g., tapping Timeline when already on timeline) is a no-op
+- Refresh button icon: `RefreshCw` from lucide-react, with `animate-spin` when active
+- Lock icon positioning: `absolute top-1/2 -translate-y-1/2 -right-3 z-30` with `h-7 w-7` container
+- Locked appearance: `Lock` icon with `fill-current text-primary` (solid orange filled)
+- Unlocked appearance: `LockOpen` icon with `text-muted-foreground/40` (outline only, muted)
+- The `marginRight: 8` on the grid container in CalendarDay may need to increase to `16` or `24` to make room for the right-side lock icon
+- Transport refresh in `handleGlobalRefresh` calls the `auto-generate-transport` edge function which handles recalculating all routes
+- Weather refresh calls `fetch-weather` with the trip's location segments derived from `dayLocationMap`
