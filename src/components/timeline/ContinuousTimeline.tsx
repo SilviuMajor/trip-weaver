@@ -93,6 +93,7 @@ const ContinuousTimeline = ({
   const containerHeight = totalHours * PIXELS_PER_HOUR;
   const gridRef = useRef<HTMLDivElement>(null);
   const [gridTopPx, setGridTopPx] = useState(0);
+  const [currentDayIndex, setCurrentDayIndex] = useState(0);
 
   // Compute gridTopPx after layout
   useEffect(() => {
@@ -107,6 +108,33 @@ const ContinuousTimeline = ({
     }, 100);
     return () => clearTimeout(timer);
   }, [days, scheduledEntries, scrollContainerRef]);
+
+  // Scroll listener for sticky day pill
+  useEffect(() => {
+    const container = scrollContainerRef?.current;
+    if (!container || days.length === 0) return;
+    const handleScroll = () => {
+      const scrollTop = container.scrollTop;
+      const adjustedScroll = scrollTop - gridTopPx + 60;
+      const dayIdx = Math.floor(adjustedScroll / (24 * PIXELS_PER_HOUR));
+      const clamped = Math.max(0, Math.min(days.length - 1, dayIdx));
+      setCurrentDayIndex(clamped);
+    };
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [scrollContainerRef, gridTopPx, days.length]);
+
+  // Helper to get TZ abbreviation for a day
+  const getTzAbbrev = useCallback((dayDate: Date): string => {
+    const dayStr = format(dayDate, 'yyyy-MM-dd');
+    const tzInfo = dayTimezoneMap.get(dayStr);
+    if (!tzInfo) return '';
+    try {
+      return new Intl.DateTimeFormat('en-GB', { timeZone: tzInfo.activeTz, timeZoneName: 'short' })
+        .formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value || '';
+    } catch { return ''; }
+  }, [dayTimezoneMap]);
 
   // Resolve TZ info for a given day
   const getDayTzInfo = useCallback((dayDate: Date) => {
@@ -440,11 +468,20 @@ const ContinuousTimeline = ({
     return localHour >= lastFlight.flightEndHour ? lastFlight.destinationTz : lastFlight.originTz;
   }, [days, dayTimezoneMap, homeTimezone]);
 
+  const stickyTzAbbrev = days.length > 0 ? getTzAbbrev(days[currentDayIndex]) : '';
+
   return (
     <div className="mx-auto max-w-2xl px-4 py-2">
-      {/* Trip Begins marker */}
-      <div className="flex items-center justify-center rounded-full bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 mb-2">
-        🚩 Trip Begins
+      {/* Sticky floating day pill */}
+      <div className="sticky top-0 z-40 flex justify-start pl-1 py-1">
+        <div className="inline-flex items-center gap-1 rounded-full bg-background/80 backdrop-blur-sm border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-sm">
+          <span>{isUndated ? `Day ${currentDayIndex + 1}` : format(days[currentDayIndex], 'EEE d MMM').toUpperCase()}</span>
+          <span className="text-muted-foreground/60">·</span>
+          <span className="text-muted-foreground">{stickyTzAbbrev}</span>
+          {!isUndated && days[currentDayIndex] && isToday(days[currentDayIndex]) && (
+            <span className="ml-1 rounded-full bg-primary px-1.5 py-0 text-[8px] font-semibold text-primary-foreground">TODAY</span>
+          )}
+        </div>
       </div>
 
       <div
@@ -497,39 +534,41 @@ const ContinuousTimeline = ({
           );
         })}
 
-        {/* Midnight day markers */}
+        {/* Midnight day markers — inline pills */}
         {days.map((day, dayIndex) => {
           const globalHour = dayIndex * 24;
           const today = !isUndated && isToday(day);
-          const dayLabel = isUndated ? `Day ${dayIndex + 1}` : format(day, 'EEE d MMM');
-          const tzInfo = getDayTzInfo(day);
+          const dayLabel = isUndated ? `Day ${dayIndex + 1}` : format(day, 'EEE d MMM').toUpperCase();
+          const tzAbbrev = getTzAbbrev(day);
 
           return (
-            <div key={`day-marker-${dayIndex}`}>
-              {/* Day label in gutter */}
+            <div key={`day-marker-${dayIndex}`} data-day-marker data-day-index={dayIndex}>
+              {/* Inline pill beside 00:00 label */}
               <div
-                className="absolute z-[16]"
-                style={{ top: globalHour * PIXELS_PER_HOUR - 14, left: -80, width: 68 }}
+                className="absolute z-[16] flex items-center gap-1"
+                style={{ top: globalHour * PIXELS_PER_HOUR - 8, left: -12 }}
                 id={today ? 'today' : undefined}
               >
                 <div className={cn(
-                  'flex flex-col items-end gap-0',
-                  today ? 'text-primary' : 'text-muted-foreground/60'
+                  'inline-flex items-center gap-1 rounded-full bg-secondary/80 px-2 py-0.5 text-[9px] font-semibold text-secondary-foreground',
+                  today && 'ring-1 ring-primary/40'
                 )}>
-                  <span className="text-[9px] font-bold uppercase tracking-wider">
-                    {dayLabel}
-                  </span>
-                  {/* TZ abbreviation */}
-                  {tzInfo && (
-                    <span className="text-[8px] font-bold uppercase tracking-wider text-muted-foreground/40">
-                      {(() => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tzInfo.activeTz, timeZoneName: 'short' }).formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value; } catch { return ''; } })()}
-                    </span>
+                  <span>{dayLabel}</span>
+                  {tzAbbrev && (
+                    <>
+                      <span className="text-muted-foreground/50">·</span>
+                      <span className="text-muted-foreground/70">{tzAbbrev}</span>
+                    </>
+                  )}
+                  {dayIndex === 0 && (
+                    <>
+                      <span className="text-muted-foreground/50">·</span>
+                      <span className="text-muted-foreground/70">🚩 Trip Begins</span>
+                    </>
                   )}
                 </div>
                 {today && (
-                  <span className="mt-0.5 rounded-full bg-primary px-1.5 py-0 text-[8px] font-semibold text-primary-foreground">
-                    TODAY
-                  </span>
+                  <span className="rounded-full bg-primary px-1.5 py-0 text-[8px] font-semibold text-primary-foreground">TODAY</span>
                 )}
               </div>
               {/* Midnight line (subtle) */}
