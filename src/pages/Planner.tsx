@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ClipboardList, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
@@ -26,7 +26,6 @@ const Planner = () => {
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
 
-  // Sheet state
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetMode, setSheetMode] = useState<'create' | 'view' | null>(null);
   const [sheetEntry, setSheetEntry] = useState<EntryWithOptions | null>(null);
@@ -83,7 +82,6 @@ const Planner = () => {
     return d.toLocaleTimeString('en-GB', { timeZone: tz || homeTimezone, hour: '2-digit', minute: '2-digit', hour12: false });
   }, [homeTimezone]);
 
-  // Categories
   const allCategories = useMemo(() => {
     const cats: CategoryDef[] = PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing' && c.id !== 'transport' && c.id !== 'transfer');
     const custom = (trip?.category_presets as CategoryPreset[] | null) ?? [];
@@ -93,14 +91,12 @@ const Planner = () => {
     return cats;
   }, [trip?.category_presets]);
 
-  // Filter
   const filteredEntries = useMemo(() => {
     if (activeFilter === 'ideas') return entries.filter(e => e.is_scheduled === false);
     if (activeFilter === 'scheduled') return entries.filter(e => e.is_scheduled !== false);
     return entries;
   }, [entries, activeFilter]);
 
-  // Grouped
   const grouped = useMemo(() => {
     const map = new Map<string, EntryWithOptions[]>();
     for (const cat of allCategories) map.set(cat.id, []);
@@ -118,7 +114,6 @@ const Planner = () => {
     return map;
   }, [filteredEntries, allCategories]);
 
-  // Dedup
   const deduplicatedMap = useMemo(() => {
     const groups = new Map<string, EntryWithOptions[]>();
     for (const entry of entries) {
@@ -167,14 +162,6 @@ const Planner = () => {
     { key: 'scheduled', label: 'Scheduled', count: scheduledCount },
   ];
 
-  const handleAddEntry = () => {
-    setPrefillCategory(undefined);
-    setSheetMode('create');
-    setSheetEntry(null);
-    setSheetOption(null);
-    setSheetOpen(true);
-  };
-
   const handleCardTap = (entry: EntryWithOptions) => {
     const opt = entry.options[0];
     if (opt) {
@@ -189,18 +176,10 @@ const Planner = () => {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <TimelineHeader
-        trip={trip}
-        tripId={tripId ?? ''}
-        onDataRefresh={fetchData}
-        scheduledEntries={entries.filter(e => e.is_scheduled !== false)}
-      />
-      <TripNavBar
-        currentPage="planner"
-        tripId={tripId ?? ''}
-        onAddEntry={handleAddEntry}
-        ideasCount={ideasCount}
-      />
+      <TimelineHeader trip={trip} tripId={tripId ?? ''} />
+      <TripNavBar activeTab="planner" onTabChange={(tab) => {
+        if (tab === 'timeline') navigate(`/trip/${tripId}/timeline`);
+      }} />
 
       {loading ? (
         <div className="flex flex-1 items-center justify-center">
@@ -211,7 +190,6 @@ const Planner = () => {
         </div>
       ) : (
         <main className="flex-1 overflow-y-auto">
-          {/* Filter tabs */}
           <div className="sticky top-[105px] z-10 flex items-center gap-1.5 border-b border-border bg-background/95 backdrop-blur-sm px-4 py-2">
             {filterTabs.map(tab => (
               <button
@@ -229,7 +207,6 @@ const Planner = () => {
             ))}
           </div>
 
-          {/* Category sections */}
           <div className="mx-auto max-w-2xl p-4 space-y-4">
             {allCategories.map(cat => {
               const catEntries = grouped.get(cat.id) ?? [];
@@ -267,7 +244,7 @@ const Planner = () => {
                       <SidebarEntryCard
                         key={original.id}
                         entry={original}
-                        onDragStart={() => { }}
+                        onDragStart={() => {}}
                         onClick={() => handleCardTap(original)}
                         usageCount={usageCount}
                         isFlight={isFlight}
@@ -278,7 +255,6 @@ const Planner = () => {
               );
             })}
 
-            {/* Other */}
             {(() => {
               const otherEntries = grouped.get('other') ?? [];
               const dedupedOther = getFilteredOriginals(otherEntries);
@@ -295,7 +271,7 @@ const Planner = () => {
                       <SidebarEntryCard
                         key={original.id}
                         entry={original}
-                        onDragStart={() => { }}
+                        onDragStart={() => {}}
                         onClick={() => handleCardTap(original)}
                         usageCount={usageCount}
                         isFlight={isFlight}
@@ -308,6 +284,21 @@ const Planner = () => {
           </div>
         </main>
       )}
+
+      {/* FAB */}
+      <button
+        onClick={() => {
+          setPrefillCategory(undefined);
+          setSheetMode('create');
+          setSheetEntry(null);
+          setSheetOption(null);
+          setSheetOpen(true);
+        }}
+        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors"
+        title="Add entry"
+      >
+        <span className="text-2xl font-light">+</span>
+      </button>
 
       {trip && (
         <>

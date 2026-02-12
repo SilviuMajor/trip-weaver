@@ -34,10 +34,8 @@ const Live = () => {
       <TimelineHeader
         trip={trip}
         tripId={tripId ?? ''}
-        onDataRefresh={fetchTrip}
-        scheduledEntries={[]}
       />
-      <TripNavBar currentPage="live" tripId={tripId ?? ''} />
+      <TripNavBar activeTab="timeline" onTabChange={() => navigate(`/trip/${tripId}/timeline`)} />
 
       <div className="flex flex-1 items-center justify-center p-6">
         <div className="text-center">

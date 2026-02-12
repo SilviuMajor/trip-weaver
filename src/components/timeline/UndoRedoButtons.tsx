@@ -10,7 +10,7 @@ interface UndoRedoButtonsProps {
 
 const UndoRedoButtons = ({ canUndo, canRedo, onUndo, onRedo }: UndoRedoButtonsProps) => {
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex items-center gap-1 rounded-full border border-border bg-background/90 backdrop-blur-sm shadow-lg px-1 py-1">
+    <div className="fixed bottom-4 right-[88px] z-50 flex items-center gap-1 rounded-full border border-border bg-background/90 backdrop-blur-sm shadow-lg px-1 py-1">
       <button
         onClick={onUndo}
         disabled={!canUndo}

@@ -1393,15 +1393,15 @@ const Timeline = () => {
       <TimelineHeader
         trip={trip}
         tripId={tripId ?? ''}
-        onDataRefresh={fetchData}
-        onAutoGenerateTransport={handleAutoGenerateTransport}
-        autoTransportLoading={autoTransportLoading}
-        scheduledEntries={scheduledEntries}
       />
       <TripNavBar
-        currentPage="timeline"
-        tripId={tripId ?? ''}
-        onAddEntry={() => {
+        activeTab={sidebarOpen ? 'planner' : 'timeline'}
+        onTabChange={(tab) => setSidebarOpen(tab === 'planner')}
+      />
+
+      {/* Floating Action Button */}
+      <button
+        onClick={() => {
           setPrefillStartTime(undefined);
           setPrefillEndTime(undefined);
           setPrefillCategory(undefined);
@@ -1411,8 +1411,11 @@ const Timeline = () => {
           setSheetOption(null);
           setSheetOpen(true);
         }}
-        ideasCount={unscheduledEntries.length}
-      />
+        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors"
+        title="Add entry"
+      >
+        <span className="text-2xl font-light">+</span>
+      </button>
 
       {loading ? (
         <div className="flex flex-1 items-center justify-center">

@@ -29,7 +29,6 @@ const App = () => (
           <Route path="/trip/new" element={<TripWizard />} />
           <Route path="/trip/:tripId" element={<UserSelect />} />
           <Route path="/trip/:tripId/timeline" element={<Timeline />} />
-          <Route path="/trip/:tripId/planner" element={<Planner />} />
           <Route path="/trip/:tripId/live" element={<Live />} />
           <Route path="/trip/:tripId/settings" element={<TripSettings />} />
           <Route path="/settings" element={<Settings />} />
