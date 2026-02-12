@@ -55,6 +55,7 @@ interface ContinuousTimelineProps {
   onToggleLock?: (entryId: string, currentLocked: boolean) => void;
   scrollContainerRef?: React.RefObject<HTMLElement>;
   isUndated?: boolean;
+  onCurrentDayChange?: (dayIndex: number) => void;
 }
 
 const ContinuousTimeline = ({
@@ -87,6 +88,7 @@ const ContinuousTimeline = ({
   onToggleLock,
   scrollContainerRef,
   isUndated,
+  onCurrentDayChange,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
@@ -119,11 +121,12 @@ const ContinuousTimeline = ({
       const dayIdx = Math.floor(adjustedScroll / (24 * PIXELS_PER_HOUR));
       const clamped = Math.max(0, Math.min(days.length - 1, dayIdx));
       setCurrentDayIndex(clamped);
+      onCurrentDayChange?.(clamped);
     };
     container.addEventListener('scroll', handleScroll, { passive: true });
     handleScroll();
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [scrollContainerRef, gridTopPx, days.length]);
+  }, [scrollContainerRef, gridTopPx, days.length, onCurrentDayChange]);
 
   // Helper to get TZ abbreviation at midnight for a day (before any flight departs)
   const getMidnightTzAbbrev = useCallback((dayDate: Date): string => {
@@ -470,23 +473,8 @@ const ContinuousTimeline = ({
     return localHour >= lastFlight.flightEndHour ? lastFlight.destinationTz : lastFlight.originTz;
   }, [days, dayTimezoneMap, homeTimezone]);
 
-  const stickyTzAbbrev = days.length > 0 ? getMidnightTzAbbrev(days[currentDayIndex]) : '';
-
   return (
-    <>
-      {/* Sticky floating day pill - outside max-w-2xl for proper sticky */}
-      <div className="sticky top-0 z-40 flex justify-center py-1">
-        <div className="inline-flex items-center gap-1 rounded-full bg-background/90 backdrop-blur-md border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-md">
-          <span>{isUndated ? `Day ${currentDayIndex + 1}` : format(days[currentDayIndex], 'EEE d MMM').toUpperCase()}</span>
-          <span className="text-muted-foreground/60">·</span>
-          <span className="text-muted-foreground">{stickyTzAbbrev}</span>
-          {!isUndated && days[currentDayIndex] && isToday(days[currentDayIndex]) && (
-            <span className="ml-1 rounded-full bg-primary px-1.5 py-0 text-[8px] font-semibold text-primary-foreground">TODAY</span>
-          )}
-        </div>
-      </div>
-
-      <div className="mx-auto max-w-2xl px-4 py-2">
+    <div className="mx-auto max-w-2xl px-4 py-2">
       <div
         ref={gridRef}
         className="relative ml-20"
@@ -1211,7 +1199,6 @@ const ContinuousTimeline = ({
         🏁 Trip Ends
       </div>
     </div>
-    </>
   );
 };
 
