@@ -1,81 +1,147 @@
 
-# "Send to Planner", Remove Inline Title Edit, Bigger Close Button, Lock Toggle in Overview
+# Continuous Timeline Refactor
 
-## 1. Rename "Move to Ideas" to "Send to Planner"
+## Overview
 
-**File: `src/components/timeline/EntrySheet.tsx`**
+Replace the per-day `CalendarDay` loop with a single `ContinuousTimeline` component that renders all trip days as one unbroken vertical column. The core change: every hour gets a "global hour" number (Day 2 09:00 = hour 33), and all positioning uses `globalHour * 80px`.
 
-- Line 1462-1465: Change the button text from "Move to ideas" to "Send to Planner", replace `Lightbulb` icon with `ClipboardList` icon (import it from lucide-react)
-- Also hide for flights: add `option?.category !== 'flight'` to the existing condition
+## Architecture
 
-**File: `src/pages/Timeline.tsx`**
+```text
+BEFORE                              AFTER
+Timeline.tsx                        Timeline.tsx
+  |-- days.map(CalendarDay)           |-- ContinuousTimeline
+       |-- TimeSlotGrid (0-24)             |-- Single grid (0 to N*24)
+       |-- per-day entries                 |-- ALL entries globally
+       |-- per-day gaps                    |-- ALL gaps globally
+       |-- per-day weather                 |-- ALL weather globally
+       |-- per-day drag (useDragResize)    |-- Single drag space
+       |-- sticky day header               |-- Subtle midnight labels
+```
 
-- Line 1021: Rename comment from "Move to ideas" to "Send to Planner"
-- Line 1032: Change toast message from `'Moved to ideas panel'` to `'Event moved to Planner'`, and add an Undo action to the toast that re-schedules the entry (sets `is_scheduled: true`)
+## Files to Create
 
-**File: `src/lib/conflictEngine.ts`**
+### `src/components/timeline/ContinuousTimeline.tsx` (NEW -- ~1100 lines)
 
-- Line 146: Change description from `'Move to ideas (unscheduled)'` to `'Send to Planner (unscheduled)'`
+This replaces the `days.map(CalendarDay)` loop. It receives all entries, weather, travel segments, timezone maps, and callbacks as props.
 
-## 2. Remove Inline Title Editing on Timeline Cards
+**Props**: Same data previously split across CalendarDay instances -- `days`, `entries` (all scheduled), `allEntries`, `weatherData`, `travelSegments`, `dayTimezoneMap`, `dayLocationMap`, `homeTimezone`, `formatTime`, all callbacks (`onCardTap`, `onEntryTimeChange`, `onAddBetween`, `onAddTransport`, `onGenerateTransport`, `onDragSlot`, `onClickSlot`, `onDropFromPanel`, `onModeSwitchConfirm`, `onDeleteTransport`, `onToggleLock`, `onVoteChange`), and user state (`userId`, `userVotes`, `votingLocked`, `isEditor`, `userLat`, `userLng`, `scrollContainerRef`).
 
-**File: `src/components/timeline/EntryCard.tsx`**
+**Key internal logic**:
 
-Remove the inline editing functionality for the title on all card variants (full, condensed, medium, compact):
-- Remove the `isEditingName`, `editedName`, `nameInputRef` state variables and the `handleNameClick`, `handleNameSave`, `handleNameKeyDown` functions (lines 130-168)
-- In each card variant, replace the conditional `isEditingName ? <input>... : <span onClick={handleNameClick}>` with just a plain display `<span>` or `<h3>` (no `onClick`, no `cursor-text`)
-- Affects: compact card (lines 564-581), medium card (lines 498-515), condensed card (lines 636-653), full card (lines 773-803)
+1. **Global hour helper**: For any entry, compute `getGlobalHour(entry)`:
+   - Find which day the entry falls on using `getDateInTimezone(entry.start_time, resolvedTz)`
+   - Find that day's index in the `days` array
+   - Return `dayIndex * 24 + getHourInTimezone(entry.start_time, resolvedTz)`
+   - For flight end hours, use `startGlobalHour + utcDurationHours` (preserving UTC duration across TZ boundaries)
 
-## 3. Bigger Close Button on Overview Sheet
+2. **Grid container**: Single `div` with `height = days.length * 24 * 80` pixels, with `className="relative ml-20"` and `marginRight: 24`.
 
-**File: `src/components/timeline/EntrySheet.tsx`**
+3. **Hour lines**: Render hour lines for hours 0 to `totalDays * 24`. Each line at `globalHour * 80px`. Labels show `HH:00` format where `HH = globalHour % 24`.
 
-The Dialog uses shadcn's `DialogContent` which includes an auto-generated close button. Override it by adding a custom close button in the view mode dialog:
+4. **Midnight day markers**: At globalHour 0, 24, 48, etc., render a subtle label in the left gutter with day name + date (e.g., "Tue 24 Feb"). At globalHour 0, show "Trip Begins" badge. At the last day's end, show "Trip Ends" badge. Current day's midnight gets a "TODAY" badge. These are NOT sticky headers -- just inline visual markers.
 
-- In the view mode `DialogContent` (line 1025), add a custom X button at the top-right with `h-11 w-11` (44x44px tap target) and hide the default close button using the `hideCloseButton` approach or by overriding styling
-- Position: `absolute top-3 right-3 z-50`, with a larger X icon (`h-6 w-6`)
+5. **Entry positioning**: For each entry, compute `startGlobalHour` and `endGlobalHour`. Cross-midnight entries naturally span (e.g., start=22, end=26). Position: `top = startGlobalHour * 80`, `height = (endGlobalHour - startGlobalHour) * 80`.
 
-Since shadcn's `DialogContent` has a built-in close button that is small, we need to either:
-- Add `className` to DialogContent to hide the default close via CSS (`[&>button]:hidden`) and render our own larger close button
-- Or override the close button styling directly
+6. **TZ resolution per entry**: Same logic as current CalendarDay -- use `dayTimezoneMap` keyed by the entry's date string. For flight days, resolve based on whether entry is before/after flight arrival boundary. Transport entries inherit TZ from their "from" entry.
 
-Approach: Add `[&>button.absolute]:h-11 [&>button.absolute]:w-11` to the DialogContent className to increase the built-in close button's tap target, or render a custom one.
+7. **Flight group rendering**: Identical to CalendarDay -- build `flightGroupMap`, compute checkin/flight/checkout fractions, render `FlightGroupCard`. Resize handles on top (checkin) and bottom (checkout) edges.
 
-Simplest: Override the default close button in DialogContent with CSS: `className="... [&>button:last-child]:h-11 [&>button:last-child]:w-11 [&>button:last-child]:top-3 [&>button:last-child]:right-3 [&>button:last-child]:[&_svg]:h-6 [&>button:last-child]:[&_svg]:w-6"`
+8. **Gap detection (global)**: Sort ALL non-transport, non-flight-linked visible entries by `startGlobalHour`. Iterate consecutive pairs. Compute gap = `nextStartGlobalHour - currentEndGlobalHour`. If gap > 5 minutes and no transfer exists between them: render gap button. Gap <= 2 hours = Transport button. Gap > 2 hours = "+ Add Something" button.
 
-## 4. Lock Toggle in Overview Sheet (Top-Right, Beside X)
+9. **SNAP system**: Below transport cards, find next visible entry. Compute gap in global hours. Apply tiered logic:
+   - Tier 1 (< 30 min, not locked): Auto-snap handled by Timeline.tsx on drag commit
+   - Tier 2 (30-90 min): SNAP button + Add Something button centered in gap
+   - Tier 3 (> 90 min): SNAP ~15 visual-min below transport end, Add Something in remaining space
+   All positioning uses global hours.
 
-**File: `src/components/timeline/EntrySheet.tsx`**
+10. **Transport connectors**: Render `TransportConnector` at their global hour positions. Transport spanning midnight renders as one continuous strip.
 
-- In the view mode dialog header area (around line 1026-1045), add a lock/unlock icon button beside the close button in the top-right area
-- Locked: solid orange filled `Lock` icon (`text-primary fill-primary`)
-- Unlocked: grey outline `LockOpen` icon (`text-muted-foreground`)
-- Do NOT show on flight overviews (`option.category === 'flight'`) or transport overviews (`option.category === 'transfer'`)
-- Tapping calls the existing `handleToggleLock` function
-- Remove the existing Lock/Unlock button from the editor actions row (lines 1458-1460) since it's now redundant
+11. **Overlap/conflict detection**: Compare consecutive sorted entries' `endGlobalHour > nextStartGlobalHour`. Cross-midnight overlaps detected naturally. Red ring + AlertTriangle badge on conflicting cards.
 
-Position the lock icon as `absolute top-3 right-14` (to the left of the close X button).
+12. **Lock icons**: Same as current -- positioned outside card to the right, vertically centered. No lock on flights or transport.
 
-## 5. Undo Toast for "Send to Planner"
+13. **Weather column**: Iterate all days, all hours. Position each badge at `(dayIndex * 24 + hour) * 80px`.
 
-**File: `src/pages/Timeline.tsx`**
+14. **Sunrise/sunset gradient**: Render per-day gradient segments positioned at their global hour offsets. Each segment is 24 hours * 80px tall, positioned at `dayIndex * 24 * 80px`. They appear continuous since there are no day dividers between them.
 
-Update `handleMoveToIdeas` (to be renamed `handleSendToPlanner`):
-- After successfully unscheduling, show a toast with an "Undo" action button
-- The Undo action sets `is_scheduled: true` on the entry and calls `fetchData()`
+15. **TZ change badges**: At flight arrival boundaries, render TZ offset badge at the flight's global end hour position.
 
-## Summary of File Changes
+16. **Drag-to-create (TimeSlotGrid replacement)**: Inline the drag-to-create functionality directly, using global coordinates. Mouse/touch down records global hour, drag shows preview block, release converts to day + local time + UTC.
 
-| File | Change |
-|---|---|
-| `src/components/timeline/EntrySheet.tsx` | Rename button to "Send to Planner" with ClipboardList icon, bigger close button, add lock toggle top-right, remove redundant lock button from actions row, hide "Send to Planner" on flights |
-| `src/components/timeline/EntryCard.tsx` | Remove all inline title editing (state, handlers, conditional inputs) -- titles are display-only |
-| `src/pages/Timeline.tsx` | Rename handler/toast, add undo toast action for "Send to Planner" |
-| `src/lib/conflictEngine.ts` | Rename description text |
+17. **Drop from Planner**: Single drop zone over the entire grid. Y position / 80 = global hour. Convert to day index + local hour + resolved TZ + UTC.
 
-## Technical Notes
+18. **useDragResize integration**: Pass `startHour: 0` (global), no `dayBoundaries`. The hook operates in a single coordinate space from 0 to `totalDays * 24`.
 
-- The lock toggle in the overview uses `absolute top-3 right-14 z-50` positioning inside `DialogContent` (which is `relative`)
-- Close button enlarged to 44x44px via CSS overrides on DialogContent's built-in close button
-- Undo toast uses the toast action pattern: `toast({ title: '...', action: <ToastAction onClick={...}>Undo</ToastAction> })`
-- Inline title editing removal is purely a deletion -- no new code needed, just remove the editing states and replace conditional renders with plain text elements
+**Drag commit flow inside ContinuousTimeline**:
+```
+globalHour -> dayIndex = Math.floor(globalHour / 24)
+           -> localHour = globalHour % 24
+           -> dayDate = days[dayIndex]
+           -> dateStr = format(dayDate, 'yyyy-MM-dd')
+           -> timeStr from localHour
+           -> resolve TZ from dayTimezoneMap for that date
+           -> localToUTC(dateStr, timeStr, resolvedTz)
+           -> duration preserved from original entry
+```
+
+## Files to Modify
+
+### `src/hooks/useDragResize.ts`
+
+- Remove `DayBoundary` interface and `dayBoundaries` prop
+- Remove all cross-day boundary detection in `startDrag` and `handlePointerMove`
+- Remove `targetDay` and `originDay` from `DragState`
+- `startDrag`: Compute `grabOffsetHours` using a single `gridTopPx` value (passed via a new optional prop or computed from `scrollContainerRef`)
+- `handlePointerMove`: Always use single coordinate space. Remove the `dayBoundaries` branch. Compute cursor's global hour from absolute Y position relative to the grid top. No 0-24 clamping -- clamp to 0 and `totalHours` instead.
+- Add `totalHours` prop (replaces the implicit 24h range) and `gridTopPx` prop (pixel offset from scroll container top to grid start)
+- `onCommit` signature stays the same but `targetDay` parameter becomes undefined (ContinuousTimeline derives day from global hour)
+- Keep: grab offset, auto-scroll, snap-to-15min, touch hold logic
+
+### `src/pages/Timeline.tsx`
+
+- Remove: `dayBoundaries` state, `useEffect` that computes boundaries, `dayRefsMap`, `setDayRef`, `getEntriesForDay()`, `getWeatherForDay()`
+- Remove: `import CalendarDay`
+- Add: `import ContinuousTimeline`
+- Replace the `days.map(CalendarDay)` block (lines 1552-1594) with `<ContinuousTimeline>` passing all data
+- Update `handleDropOnTimeline` signature: instead of `(entryId, dayDate, hourOffset)`, accept `(entryId, globalHour)` and derive day + local hour internally
+- Keep everything else: sheet, sidebar, FAB, undo/redo, all handlers, Planner panel, Live panel, header, tab bar
+
+### `src/components/timeline/TimeSlotGrid.tsx`
+
+- No changes needed. TimeSlotGrid is no longer used directly (its functionality is inlined into ContinuousTimeline for the global grid). CalendarDay still imports it but CalendarDay is no longer rendered.
+
+### `src/components/timeline/CalendarDay.tsx`
+
+- No changes. Kept in codebase for reference but no longer rendered in the main timeline.
+
+## What Does NOT Change
+
+- All card components: EntryCard, FlightGroupCard, TransportConnector, TravelSegmentCard
+- Card styling, dark gradient, lock icons, notes
+- EntrySheet (event detail/edit overlay)
+- Planner panel, Live panel, header, tab bar, FAB
+- Event creation flows
+- Undo/redo system
+- All database operations and edge functions
+- 80px per hour scale
+- Weather fetching logic
+- Timezone resolution logic (resolveEntryTz, getHourInTimezone)
+- handleEntryTimeChange, handleModeSwitchConfirm, handleDeleteTransport, handleToggleLock
+- All toast messages and SNAP auto-snap in handleEntryTimeChange
+
+## Technical Considerations
+
+- **Performance**: A 7-day trip = 168 hours = 13,440px. A 14-day trip = 26,880px. Both well within DOM limits. No virtualization needed.
+- **Scroll-to-today**: Find current day's midnight global hour, scroll to `globalHour * 80px` position.
+- **Cross-midnight entries**: `endGlobalHour < startGlobalHour` is impossible in global coordinates (unlike per-day where we had `if (entryEndHour < entryStartHour) entryEndHour = 24`). This hack is eliminated.
+- **Empty days**: Just show hour grid and weather -- no "No plans yet" placeholder since it's a continuous flow.
+- **Auto-scroll during drag**: Same mechanism, just potentially taller container. The edge-zone detection works on viewport bounds, so it scales naturally.
+- **dayTimezoneMap lookup**: Still keyed by date string (yyyy-MM-dd). Given a global hour, derive `dayIndex = Math.floor(globalHour / 24)`, then `dayDate = days[dayIndex]`, then `format(dayDate, 'yyyy-MM-dd')` to look up TZ info.
+
+## Implementation Order
+
+1. Create `ContinuousTimeline.tsx` with all rendering logic (entries, gaps, transport, weather, sun gradient, drag, drop)
+2. Modify `useDragResize.ts` to remove day boundaries and work in global coordinate space
+3. Modify `Timeline.tsx` to use ContinuousTimeline instead of CalendarDay loop, update drop handler
+4. Test: continuous scroll, card positioning, drag across days, gap detection, SNAP, transport connectors, flights, conflicts, weather, lock icons, drop from planner, undo/redo
