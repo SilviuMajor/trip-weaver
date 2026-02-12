@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { ArrowLeft, LayoutList, Plus } from 'lucide-react';
+import { ArrowLeft, ClipboardList, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { PREDEFINED_CATEGORIES, type CategoryDef } from '@/lib/categories';
@@ -156,8 +156,8 @@ const CategorySidebar = ({
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex flex-1 items-center gap-2 font-display text-base font-semibold">
-          <LayoutList className="h-4 w-4 text-primary" />
-          Trip Events
+          <ClipboardList className="h-4 w-4 text-primary" />
+          Planner
         </div>
       </div>
 
@@ -269,7 +269,7 @@ const CategorySidebar = ({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent side="right" className="w-full sm:w-[380px] overflow-y-auto p-0">
           <SheetHeader className="sr-only">
-            <SheetTitle>Trip Events</SheetTitle>
+            <SheetTitle>Planner</SheetTitle>
           </SheetHeader>
           {panelContent}
         </SheetContent>
