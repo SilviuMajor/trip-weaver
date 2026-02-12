@@ -1514,14 +1514,14 @@ const Timeline = () => {
             return (
               <div
                 className="fixed left-1/2 -translate-x-1/2 z-50 pointer-events-none"
-                style={{ top: '130px' }}
+                style={{ top: '110px' }}
               >
-                <div className="inline-flex items-center gap-1 rounded-full bg-background/95 backdrop-blur-md border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-md">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-background/95 backdrop-blur-md border border-border/50 px-4 py-1.5 text-sm font-semibold text-foreground shadow-md">
                   <span>{isUndated ? `Day ${currentDayIndex + 1}` : format(dayDate, 'EEE d MMM').toUpperCase()}</span>
                   <span className="text-muted-foreground/60">·</span>
                   <span className="text-muted-foreground">{tzAbbrev}</span>
                   {!isUndated && isToday(dayDate) && (
-                    <span className="ml-1 rounded-full bg-primary px-1.5 py-0 text-[8px] font-semibold text-primary-foreground">TODAY</span>
+                    <span className="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">TODAY</span>
                   )}
                 </div>
               </div>

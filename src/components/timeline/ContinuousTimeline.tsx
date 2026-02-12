@@ -97,39 +97,32 @@ const ContinuousTimeline = ({
   const [gridTopPx, setGridTopPx] = useState(0);
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
 
-  // Compute gridTopPx after layout
-  useEffect(() => {
-    if (!gridRef.current || !scrollContainerRef?.current) return;
-    const timer = setTimeout(() => {
-      const container = scrollContainerRef.current;
-      const grid = gridRef.current;
-      if (!container || !grid) return;
-      const containerRect = container.getBoundingClientRect();
-      const gridRect = grid.getBoundingClientRect();
-      setGridTopPx(gridRect.top - containerRect.top + container.scrollTop);
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [days, scheduledEntries, scrollContainerRef]);
-
-  // Scroll listener for sticky day pill
+  // Single scroll listener that measures grid position inline (no stale gridTopPx dependency)
   useEffect(() => {
     const container = scrollContainerRef?.current;
-    if (!container || days.length === 0) return;
+    const grid = gridRef.current;
+    if (!container || !grid || days.length === 0) return;
+
     const handleScroll = () => {
-      if (gridTopPx <= 0) return;
-      const scrollTop = container.scrollTop;
-      const viewportHeight = container.clientHeight;
-      const centreScroll = scrollTop + viewportHeight / 2;
-      const adjustedScroll = centreScroll - gridTopPx;
+      const containerRect = container.getBoundingClientRect();
+      const gridRect = grid.getBoundingClientRect();
+      const gridTop = gridRect.top - containerRect.top + container.scrollTop;
+      setGridTopPx(gridTop);
+      const centreScroll = container.scrollTop + container.clientHeight / 2;
+      const adjustedScroll = centreScroll - gridTop;
       const dayIdx = Math.floor(adjustedScroll / (24 * PIXELS_PER_HOUR));
       const clamped = Math.max(0, Math.min(days.length - 1, dayIdx));
       setCurrentDayIndex(clamped);
       onCurrentDayChange?.(clamped);
     };
+
     container.addEventListener('scroll', handleScroll, { passive: true });
-    handleScroll();
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [scrollContainerRef, gridTopPx, days.length, onCurrentDayChange]);
+    const timer = setTimeout(handleScroll, 150);
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      clearTimeout(timer);
+    };
+  }, [scrollContainerRef?.current, days.length, onCurrentDayChange]);
 
   // Helper to get TZ abbreviation at midnight for a day (before any flight departs)
   const getMidnightTzAbbrev = useCallback((dayDate: Date): string => {
