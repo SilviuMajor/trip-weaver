@@ -1,97 +1,92 @@
 
+# Fix Navigation, Planner Layout, Header, and Card Readability
 
-# Header Restructure + Navigation Bar + Rename + Live Page
+## 1. Replace TripNavBar with Tab Bar + FAB
 
-## Overview
+**File: `src/components/timeline/TripNavBar.tsx`** -- Rewrite completely
 
-Restructure the trip page header into a clean top row (trip info + settings/exit), add a contextual 3-button navigation bar below it, rename "Trip Events" to "Planner" everywhere, and create a Live page placeholder.
+Replace the current 3-button switching nav with a simple 2-tab bar:
+- Two tabs always visible: **Timeline** (Calendar icon) and **Planner** (ClipboardList icon)
+- Active tab: bold text, orange underline/highlight using the app's warm palette
+- Inactive tab: muted/grey text
+- No "Live" tab -- remove entirely
+- No + button in the bar -- it moves to a FAB
 
-## Part 1 — Header Restructure
+Props simplified:
+- `currentPage: 'timeline' | 'planner'`
+- `tripId: string`
+- `onTabChange: (page: 'timeline' | 'planner') => void`
+
+On Timeline page: tapping "Planner" tab opens the sidebar panel (not navigating to `/planner` route). On Planner page: not used (Planner becomes a side panel, not a separate route).
+
+**File: `src/pages/Timeline.tsx`** -- Update TripNavBar usage
+
+- Replace `TripNavBar` with the new tab bar component
+- "Planner" tab toggles `sidebarOpen` state (opens/closes CategorySidebar)
+- "Timeline" tab closes the sidebar if open
+- Add a FAB (floating action button): fixed `bottom-6 right-6`, circular, orange (`bg-primary`), shadow-lg, with Plus icon. `onClick` triggers the existing add entry flow. Rendered alongside UndoRedoButtons.
+
+## 2. Planner as Side Panel (not full page)
+
+**File: `src/App.tsx`** -- Remove the `/trip/:tripId/planner` route. Remove the `/trip/:tripId/live` route (Live removed from nav).
+
+**File: `src/pages/Planner.tsx`** -- Keep file but it will no longer be routed to. (Or delete the route; the Planner content lives inside `CategorySidebar` already.)
+
+The Planner functionality is already implemented as `CategorySidebar` in `Timeline.tsx`:
+- **Desktop/tablet**: `CategorySidebar` renders as a side panel (already does this -- `w-[320px]` border-l). Change width to `w-[40%]` for ~40% screen width.
+- **Mobile**: `CategorySidebar` already renders as a `Sheet` sliding from the right. Change width to `w-[60%]` (currently `w-full sm:w-[380px]`). The Sheet already has a dimmed backdrop and tap-to-close behavior.
+
+**File: `src/components/timeline/CategorySidebar.tsx`**
+- Desktop panel: change `w-[320px]` to `w-[40vw] max-w-[500px]`
+- Mobile sheet: change `w-full sm:w-[380px]` to `w-[60vw] min-w-[280px]`
+- The panel already has independent scroll (`overflow-y-auto`)
+
+When "Planner" tab is active, `sidebarOpen = true`. When "Timeline" tab is tapped, `sidebarOpen = false`.
+
+## 3. Clean Up Header
 
 **File: `src/components/timeline/TimelineHeader.tsx`**
 
-Simplify the header to two groups:
+Remove the entire "Organizer tools row" (lines 126-140) -- the lock icon, auto-transport, and weather buttons. Keep only:
+- Left: Trip icon + name + welcome message
+- Right: Settings cog + exit button
 
-- **Left side**: Trip icon/image + trip name + welcome message (keep existing)
-- **Right side**: Settings cog (organizer only) + exit/back button (LogOut). Remove all other buttons from the header (LIVE toggle, lock, auto-transport, weather, +, ideas lightbulb). These organizer tools will move into a toolbar or be accessible elsewhere -- the lock, weather, and auto-transport buttons move into a collapsible "tools" row or dropdown on the header (or kept as a secondary row visible only to organizers).
+These organizer tools will be accessible from Trip Settings page instead.
 
-Actually, to keep functionality accessible without losing it:
-- Keep the organizer tools (lock, auto-transport, weather) in a second subtle row below the title, visible only to organizers
-- Remove: LIVE toggle button, + button, Ideas/Lightbulb button from the header (these move to the nav bar)
-- Keep: Settings cog + LogOut on the right of the top row
+However, this removes functionality (lock voting, auto-transport, weather fetch). Since the user says "These are legacy and cluttering the UI", I'll remove them from the header. The auto-transport and weather functions are still callable from the code; they just won't have header buttons. Lock toggle can be accessed from Trip Settings.
 
-**Props changes**: Remove `onToggleLive`, `liveOpen` from header props. Keep `onAddEntry` but don't render it in header (it's used by the nav bar's + button). Keep `onToggleIdeas` but don't render in header.
+Props to remove from TimelineHeader: `onAutoGenerateTransport`, `autoTransportLoading`, `scheduledEntries`.
 
-## Part 2 — Contextual Navigation Bar
+## 4. Strengthen Card Dark Gradient
 
-**New file: `src/components/timeline/TripNavBar.tsx`**
+**File: `src/components/timeline/EntryCard.tsx`**
 
-A sticky navigation bar rendered below the header. Props:
-- `currentPage`: `'timeline' | 'planner' | 'live'`
-- `tripId`: string
-- `onAddEntry`: callback for the + button
-- `ideasCount?`: number (badge on Planner button)
+Both full-size and condensed cards already have `bg-gradient-to-t from-black/70 via-black/30 to-transparent`. Strengthen to `from-black/80 via-black/40 to-black/5` for better text legibility.
 
-Three buttons based on `currentPage`:
+**File: `src/components/timeline/SidebarEntryCard.tsx`**
 
-| Current Page | Left | Centre | Right |
-|---|---|---|---|
-| Timeline | Live (Radio icon) | + (large, primary) | Planner (ClipboardList icon) |
-| Planner | Live (Radio icon) | + (large, primary) | Timeline (Calendar icon) |
-| Live | Timeline (Calendar icon) | + (large, primary) | Planner (ClipboardList icon) |
+Currently has `bg-gradient-to-r from-black/70 via-black/50 to-black/30`. Strengthen to `from-black/80 via-black/50 to-black/30`.
 
-Navigation uses `react-router-dom`'s `useNavigate`:
-- Timeline: `/trip/{tripId}/timeline`
-- Planner: `/trip/{tripId}/planner`
-- Live: `/trip/{tripId}/live`
+## 5. "Planner" Naming
 
-Styling: sticky below header (`sticky top-[header-height]`), clean border-bottom, warm background matching app palette. The + button is larger and uses primary color.
+Already done in previous update. Verify no remaining "Trip Events" references exist.
 
-**File: `src/pages/Timeline.tsx`**
-- Import and render `TripNavBar` after `TimelineHeader`, passing `currentPage="timeline"`
-- Remove the mobile FAB button for CategorySidebar (the Planner nav button replaces it)
-- The Planner nav button navigates to `/trip/{tripId}/planner` instead of toggling the sidebar
-
-## Part 3 — Rename "Trip Events" to "Planner"
-
-**File: `src/components/timeline/CategorySidebar.tsx`**
-- Line 160: Change "Trip Events" to "Planner"
-- Line 272: Change SheetTitle "Trip Events" to "Planner"
-- Change the icon from `LayoutList` to `ClipboardList`
-
-## Part 4 — New Routes and Pages
-
-**New file: `src/pages/Live.tsx`**
-- A page that fetches the trip, shows the same header + nav bar layout
-- Centre content: Radio icon + "Live View -- Coming Soon" text
-- Uses `TripNavBar` with `currentPage="live"`
-
-**New file: `src/pages/Planner.tsx`**
-- A full-page version of the CategorySidebar content (not a sheet/panel)
-- Shows header + nav bar + the category-grouped entry list
-- Uses `TripNavBar` with `currentPage="planner"`
-- Reuses the existing `CategorySidebar` component's panel content logic, but rendered as a full page instead of a sidebar/sheet
-
-**File: `src/App.tsx`**
-- Add route: `/trip/:tripId/planner` -> `<Planner />`
-- Add route: `/trip/:tripId/live` -> `<Live />`
-
-## Files Changed
+## Summary of File Changes
 
 | File | Change |
 |---|---|
-| `src/components/timeline/TimelineHeader.tsx` | Simplify: keep trip info left, settings+exit right. Move organizer tools to subtle second row. Remove nav buttons. |
-| `src/components/timeline/TripNavBar.tsx` | **New** -- Contextual 3-button nav bar |
-| `src/pages/Timeline.tsx` | Add TripNavBar, remove mobile FAB for sidebar |
-| `src/pages/Live.tsx` | **New** -- Live placeholder page |
-| `src/pages/Planner.tsx` | **New** -- Full-page planner (was CategorySidebar) |
-| `src/App.tsx` | Add /planner and /live routes |
-| `src/components/timeline/CategorySidebar.tsx` | Rename "Trip Events" to "Planner", update icon |
+| `src/components/timeline/TripNavBar.tsx` | Rewrite: 2-tab bar (Timeline + Planner), no Live, no + button |
+| `src/pages/Timeline.tsx` | Update tab bar usage, add FAB, tab controls sidebar open/close, remove auto-transport/weather header props |
+| `src/components/timeline/TimelineHeader.tsx` | Remove organizer tools row, simplify props |
+| `src/components/timeline/CategorySidebar.tsx` | Desktop: `w-[40vw]`, Mobile: `w-[60vw]` |
+| `src/components/timeline/EntryCard.tsx` | Strengthen gradient overlay on image cards |
+| `src/components/timeline/SidebarEntryCard.tsx` | Strengthen gradient overlay |
+| `src/App.tsx` | Remove `/planner` and `/live` routes |
 
-## Technical Details
+## Technical Notes
 
-- The nav bar uses `z-20` (below header's `z-30`) and `sticky` positioning
-- The + button in the centre is `h-12 w-12 rounded-full bg-primary` for prominence
-- Navigation between pages preserves trip context via URL params
-- The Planner page needs access to trip data and entries -- it will fetch them similarly to Timeline.tsx or receive them via shared state/context (simplest: fetch independently since each page is a separate route)
-
+- The FAB uses `fixed bottom-6 right-6 z-40` with `h-14 w-14 rounded-full bg-primary shadow-lg`
+- Tab bar stays sticky below header with `sticky top-[57px] z-20`
+- Active tab uses a bottom border highlight (`border-b-2 border-primary text-primary font-semibold`)
+- The Planner panel opens/closes via the existing `sidebarOpen` state in Timeline.tsx
+- UndoRedoButtons positioning may need adjustment to avoid overlapping the FAB (offset left or stack vertically)
