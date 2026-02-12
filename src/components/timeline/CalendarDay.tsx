@@ -638,6 +638,14 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                   if (entryEndHour < entryStartHour) entryEndHour = 24;
                 }
 
+                console.log('[TZ-DEBUG]', primaryOption.name, {
+                  startTimeUtc: entry.start_time,
+                  resolvedTz,
+                  startHour: entryStartHour,
+                  endHour: entryEndHour,
+                  activeTz,
+                  dayFlightsCount: dayFlights.length,
+                });
 
                 // For flight groups, expand bounds to cover checkin + checkout
                 const flightGroup = flightGroupMap.get(entry.id);
