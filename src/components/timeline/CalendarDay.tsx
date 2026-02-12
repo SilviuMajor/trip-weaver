@@ -1087,15 +1087,31 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                             toast.success('Snapped next event into place');
                           };
 
-                          // Tier 2: gap 30-90 min → SNAP + Add Something stacked below transport
-                          // Tier 3: gap > 90 min → SNAP ~15 min below transport, Add Something in remaining gap
-                          const snapTopOffset = gapMin <= 90
-                            ? height + 2
-                            : height + (15 / 60) * PIXELS_PER_HOUR;
+                          // Calculate gap pixel height from transport end to next event start
+                          const transportEndHourVal = getHourInTimezone(entry.end_time, resolvedTz);
+                          // Resolve next entry's timezone the same way
+                          const nextResolvedTzs = resolveEntryTz(nextVisible, dayFlights, activeTz, homeTimezone);
+                          const nextStartHourVal = getHourInTimezone(nextVisible.start_time, nextResolvedTzs.startTz);
+                          const gapPixelHeight = (nextStartHourVal - transportEndHourVal) * PIXELS_PER_HOUR;
 
-                          const addBtnTopOffset = gapMin <= 90
-                            ? height + 24
-                            : height + (15 / 60) * PIXELS_PER_HOUR + 24;
+                          const BUTTON_HEIGHT = 22;
+                          const BUTTONS_TOTAL = 44; // two buttons stacked
+
+                          let snapTopOffset: number;
+                          let addBtnTopOffset: number;
+
+                          if (gapMin <= 90) {
+                            // Tier 2: Both SNAP and Add Something centered together in the gap
+                            const gapMidOffset = height + Math.max(0, (gapPixelHeight - BUTTONS_TOTAL) / 2);
+                            snapTopOffset = gapMidOffset;
+                            addBtnTopOffset = gapMidOffset + BUTTON_HEIGHT;
+                          } else {
+                            // Tier 3: SNAP ~15 min below transport, Add Something centered in remaining gap
+                            snapTopOffset = height + (15 / 60) * PIXELS_PER_HOUR;
+                            const snapBottomPx = snapTopOffset + BUTTON_HEIGHT;
+                            const remainingGap = gapPixelHeight - (snapBottomPx - height);
+                            addBtnTopOffset = snapBottomPx + Math.max(0, (remainingGap - BUTTON_HEIGHT) / 2);
+                          }
 
                           return (
                             <>
