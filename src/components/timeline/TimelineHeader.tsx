@@ -1,15 +1,17 @@
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Button } from '@/components/ui/button';
-import { LogOut, Settings } from 'lucide-react';
+import { LogOut, Settings, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { Trip } from '@/types/trip';
 
 interface TimelineHeaderProps {
   trip: Trip | null;
   tripId: string;
+  onRefresh?: () => Promise<void>;
+  refreshing?: boolean;
 }
 
-const TimelineHeader = ({ trip, tripId }: TimelineHeaderProps) => {
+const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderProps) => {
   const { currentUser, logout, isOrganizer } = useCurrentUser();
   const navigate = useNavigate();
 
@@ -44,8 +46,20 @@ const TimelineHeader = ({ trip, tripId }: TimelineHeaderProps) => {
           </div>
         </div>
 
-        {/* Right: Settings + Exit */}
+        {/* Right: Refresh + Settings + Exit */}
         <div className="flex items-center gap-1">
+          {onRefresh && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="h-8 w-8"
+              title="Refresh weather & routes"
+            >
+              <RefreshCw className={`h-4 w-4 text-muted-foreground ${refreshing ? 'animate-spin' : ''}`} />
+            </Button>
+          )}
           {isOrganizer && (
             <Button variant="ghost" size="icon" onClick={() => navigate(`/trip/${tripId}/settings`)} className="h-8 w-8" title="Trip settings">
               <Settings className="h-4 w-4 text-muted-foreground" />
