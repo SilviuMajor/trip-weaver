@@ -649,6 +649,21 @@ const EntryCard = ({
                 {option.name}
               </h3>
             )}
+            {option.location_name && option.latitude != null && option.longitude != null && (
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${option.latitude},${option.longitude}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className={cn(
+                  'flex items-center gap-0.5 text-[9px] truncate hover:underline',
+                  firstImage ? 'text-white/70' : 'text-muted-foreground'
+                )}
+              >
+                <MapPin className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{option.location_name}</span>
+              </a>
+            )}
           </div>
           <div className="flex items-center justify-between">
             <span className={cn(
@@ -775,6 +790,23 @@ const EntryCard = ({
             {!option.category && <span className="text-xl">{catEmoji}</span>}
             {option.name}
           </h3>
+        )}
+
+        {/* Tappable location link */}
+        {!isTransfer && !isProcessing && option.location_name && option.latitude != null && option.longitude != null && (
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${option.latitude},${option.longitude}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              'mb-2 flex items-center gap-1 text-xs truncate hover:underline',
+              firstImage ? 'text-white/80' : 'text-muted-foreground'
+            )}
+          >
+            <MapPin className="h-3 w-3 shrink-0" />
+            <span className="truncate">{option.location_name}</span>
+          </a>
         )}
 
         {/* Transfer FROM → TO display */}

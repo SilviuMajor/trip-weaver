@@ -10,7 +10,7 @@ interface MapPreviewProps {
 const MapPreview = ({ latitude, longitude, locationName }: MapPreviewProps) => {
   const staticMapUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${latitude},${longitude}&zoom=15&size=600x200&markers=${latitude},${longitude},red-pushpin`;
   const appleMapsUrl = `https://maps.apple.com/?ll=${latitude},${longitude}&q=${encodeURIComponent(locationName || 'Location')}`;
-  const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+  const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
 
   return (
     <div className="space-y-2">

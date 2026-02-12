@@ -48,7 +48,7 @@ const TripSettings = () => {
   const [members, setMembers] = useState<TripUser[]>([]);
   const [walkThreshold, setWalkThreshold] = useState(10);
   const [tripName, setTripName] = useState('');
-  const [tripDestination, setTripDestination] = useState('');
+  
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -85,7 +85,7 @@ const TripSettings = () => {
         const t = tripData as unknown as Trip;
         setTrip(t);
         setTripName(t.name);
-        setTripDestination(t.destination ?? '');
+        
         setTripEmoji(t.emoji ?? '');
         setWalkThreshold((tripData as any).walk_threshold_min ?? 10);
       }
