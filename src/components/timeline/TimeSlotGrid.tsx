@@ -1,7 +1,6 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { format } from 'date-fns';
-import { cn } from '@/lib/utils';
-import { localToUTC, getUtcOffsetMinutes, getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
+import { localToUTC } from '@/lib/timezoneUtils';
 
 interface FlightTzInfo {
   originTz: string;
@@ -27,17 +26,6 @@ function snapMinutes(totalMinutes: number): number {
   return Math.round(totalMinutes / SNAP_MINUTES) * SNAP_MINUTES;
 }
 
-function getTzAbbr(tz: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: tz,
-      timeZoneName: 'short',
-    }).formatToParts(new Date());
-    return parts.find(p => p.type === 'timeZoneName')?.value ?? tz.split('/').pop() ?? tz;
-  } catch {
-    return tz.split('/').pop() ?? tz;
-  }
-}
 
 const TimeSlotGrid = ({
   startHour,
@@ -54,40 +42,6 @@ const TimeSlotGrid = ({
     hours.push(h);
   }
 
-  const hasDualTz = flights.length > 0;
-
-  // Compute flight midpoint and TZ offset for the badge
-  const tzInfo = useMemo(() => {
-    if (!hasDualTz) return null;
-    const f = flights[0];
-    const midpoint = (f.flightStartHour + f.flightEndHour) / 2;
-    const offsetHours = getUtcOffsetHoursDiff(f.originTz, f.destinationTz);
-    return {
-      ...f,
-      midpoint,
-      offsetHours,
-      originAbbr: getTzAbbr(f.originTz),
-      destAbbr: getTzAbbr(f.destinationTz),
-    };
-  }, [flights, hasDualTz]);
-
-  // Determine which TZ to use for a given hour label
-  const getHourTz = useCallback((hour: number): 'origin' | 'dest' => {
-    if (!tzInfo) return 'origin';
-    return hour >= tzInfo.midpoint ? 'dest' : 'origin';
-  }, [tzInfo]);
-
-  // Compute TZ offset in hours between two timezones
-  const getTzOffsetHours = useCallback((originTz: string, destTz: string): number => {
-    try {
-      const now = new Date();
-      const originOffset = getUtcOffsetMinutes(now, originTz);
-      const destOffset = getUtcOffsetMinutes(now, destTz);
-      return (destOffset - originOffset) / 60;
-    } catch {
-      return 0;
-    }
-  }, []);
 
   const [dragStart, setDragStart] = useState<number | null>(null);
   const [dragEnd, setDragEnd] = useState<number | null>(null);
@@ -190,19 +144,7 @@ const TimeSlotGrid = ({
       }}
     >
       {hours.map(hour => {
-        const hourTz = hasDualTz ? getHourTz(hour) : null;
-        const tzOffset = hasDualTz && tzInfo ? tzInfo.offsetHours : 0;
-
-        // For destination TZ hours, show the offset-adjusted time
-        let displayHour: string;
-        if (hourTz === 'dest') {
-          const destHour = hour + tzOffset;
-          const destH = ((Math.floor(destHour) % 24) + 24) % 24;
-          const destM = Math.round((destHour % 1) * 60);
-          displayHour = `${String(destH).padStart(2, '0')}:${String(Math.abs(destM)).padStart(2, '0')}`;
-        } else {
-          displayHour = `${String(hour).padStart(2, '0')}:00`;
-        }
+        const displayHour = `${String(hour).padStart(2, '0')}:00`;
 
         return (
           <div
@@ -222,6 +164,6 @@ const TimeSlotGrid = ({
   );
 };
 
-export { getUtcOffsetMinutes, getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
+
 
 export default TimeSlotGrid;
