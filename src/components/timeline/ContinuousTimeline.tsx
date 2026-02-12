@@ -116,6 +116,7 @@ const ContinuousTimeline = ({
     const container = scrollContainerRef?.current;
     if (!container || days.length === 0) return;
     const handleScroll = () => {
+      if (gridTopPx <= 0) return;
       const scrollTop = container.scrollTop;
       const viewportHeight = container.clientHeight;
       const centreScroll = scrollTop + viewportHeight / 2;

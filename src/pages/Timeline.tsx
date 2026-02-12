@@ -1514,7 +1514,7 @@ const Timeline = () => {
             return (
               <div
                 className="fixed left-1/2 -translate-x-1/2 z-50 pointer-events-none"
-                style={{ top: '98px' }}
+                style={{ top: '130px' }}
               >
                 <div className="inline-flex items-center gap-1 rounded-full bg-background/95 backdrop-blur-md border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-md">
                   <span>{isUndated ? `Day ${currentDayIndex + 1}` : format(dayDate, 'EEE d MMM').toUpperCase()}</span>
