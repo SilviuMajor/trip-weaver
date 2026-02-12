@@ -227,7 +227,7 @@ const Timeline = () => {
 
   // Compute timezone map per day based on flights
   const dayTimezoneMap = useMemo(() => {
-    const map = new Map<string, { activeTz: string; flights: Array<{ originTz: string; destinationTz: string; flightStartHour: number; flightEndHour: number }> }>();
+    const map = new Map<string, { activeTz: string; flights: Array<{ originTz: string; destinationTz: string; flightStartHour: number; flightEndHour: number; flightEndUtc: string }> }>();
     if (!trip) return map;
 
     const days = getDays();
@@ -283,7 +283,9 @@ const Timeline = () => {
             flightEndUtc: f.end_time,
           };
         });
-        map.set(dayStr, { activeTz: currentTz, flights });
+        // activeTz = destination TZ after last flight (most entries on flight day are post-flight)
+        const postFlightTz = flightEntries[flightEntries.length - 1].options[0].arrival_tz!;
+        map.set(dayStr, { activeTz: postFlightTz, flights });
         // After this day, the current TZ switches to the last flight's arrival
         currentTz = flightEntries[flightEntries.length - 1].options[0].arrival_tz!;
       }
@@ -329,7 +331,9 @@ const Timeline = () => {
       // Check if any flight lands on or before this day
       while (flightIdx < allFlights.length) {
         const flight = allFlights[flightIdx];
-        const flightDay = getDateInTimezone(flight.end_time, homeTimezone);
+        const flightOpt = flight.options[0];
+        const flightArrTz = flightOpt?.arrival_tz || homeTimezone;
+        const flightDay = getDateInTimezone(flight.end_time, flightArrTz);
         if (flightDay <= dayStr) {
           // After this flight, location is arrival
           const opt = flight.options[0];
@@ -381,9 +385,9 @@ const Timeline = () => {
       if (getDateInTimezone(isoTime, info.activeTz) === dayStr) {
         if (info.flights.length > 0) {
           const lastFlight = info.flights[info.flights.length - 1];
-          if ((lastFlight as any).flightEndUtc) {
+          if (lastFlight.flightEndUtc) {
             const timeMs = new Date(isoTime).getTime();
-            const flightEndMs = new Date((lastFlight as any).flightEndUtc).getTime();
+            const flightEndMs = new Date(lastFlight.flightEndUtc).getTime();
             if (timeMs >= flightEndMs) {
               return lastFlight.destinationTz;
             }
