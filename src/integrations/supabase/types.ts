@@ -24,6 +24,7 @@ export type Database = {
           is_scheduled: boolean
           linked_flight_id: string | null
           linked_type: string | null
+          notes: string | null
           option_group_id: string | null
           scheduled_day: number | null
           start_time: string
@@ -40,6 +41,7 @@ export type Database = {
           is_scheduled?: boolean
           linked_flight_id?: string | null
           linked_type?: string | null
+          notes?: string | null
           option_group_id?: string | null
           scheduled_day?: number | null
           start_time: string
@@ -56,6 +58,7 @@ export type Database = {
           is_scheduled?: boolean
           linked_flight_id?: string | null
           linked_type?: string | null
+          notes?: string | null
           option_group_id?: string | null
           scheduled_day?: number | null
           start_time?: string

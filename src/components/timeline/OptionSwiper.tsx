@@ -77,6 +77,7 @@ const OptionSwiper = ({
         onVoteChange={onVoteChange}
         onClick={() => onCardTap(entry, opt)}
         cardSizeClass={cardSizeClass}
+        notes={(entry as any).notes}
       />
     );
   }
@@ -102,6 +103,7 @@ const OptionSwiper = ({
                 onVoteChange={onVoteChange}
                 onClick={() => onCardTap(entry, opt)}
                 cardSizeClass={cardSizeClass}
+                notes={(entry as any).notes}
               />
             </div>
           ))}

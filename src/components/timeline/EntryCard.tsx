@@ -52,6 +52,7 @@ interface EntryCardProps {
   onTouchDragMove?: (e: React.TouchEvent) => void;
   onTouchDragEnd?: () => void;
   isShaking?: boolean;
+  notes?: string | null;
 }
 
 const getCategoryColor = (catId: string | null, customColor: string | null): string => {
@@ -118,6 +119,7 @@ const EntryCard = ({
   onTouchDragMove,
   onTouchDragEnd,
   isShaking,
+  notes,
 }: EntryCardProps) => {
   const firstImage = option.images?.[0]?.image_url;
   const catColor = getCategoryColor(option.category, option.category_color);
@@ -664,6 +666,14 @@ const EntryCard = ({
                 <span className="truncate">{option.location_name}</span>
               </a>
             )}
+            {notes && (
+              <p className={cn(
+                'text-[9px] line-clamp-1',
+                firstImage ? 'text-white/60' : 'text-muted-foreground'
+              )}>
+                {notes}
+              </p>
+            )}
           </div>
           <div className="flex items-center justify-between">
             <span className={cn(
@@ -807,6 +817,16 @@ const EntryCard = ({
             <MapPin className="h-3 w-3 shrink-0" />
             <span className="truncate">{option.location_name}</span>
           </a>
+        )}
+
+        {/* Notes */}
+        {notes && !isTransfer && !isProcessing && (
+          <p className={cn(
+            'mb-2 text-xs line-clamp-2',
+            firstImage ? 'text-white/70' : 'text-muted-foreground'
+          )}>
+            {notes}
+          </p>
         )}
 
         {/* Transfer FROM → TO display */}
