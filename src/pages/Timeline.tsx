@@ -1418,45 +1418,6 @@ const Timeline = () => {
 
   const days = getDays();
 
-  // Compute day boundaries for cross-day drag
-  const [dayBoundaries, setDayBoundaries] = useState<Array<{ dayDate: Date; topPx: number; bottomPx: number; gridTopPx?: number }>>([]);
-
-  useEffect(() => {
-    if (!mainScrollRef.current || days.length === 0) return;
-    // Recompute boundaries after layout settles
-    const timer = setTimeout(() => {
-      const container = mainScrollRef.current;
-      if (!container) return;
-      const containerRect = container.getBoundingClientRect();
-      const boundaries: Array<{ dayDate: Date; topPx: number; bottomPx: number; gridTopPx?: number }> = [];
-      for (const day of days) {
-        const key = format(day, 'yyyy-MM-dd');
-        const el = dayRefsMap.current.get(key);
-        if (!el) continue;
-        const rect = el.getBoundingClientRect();
-        const gridEl = el.querySelector('[data-grid-top]');
-        const gridRect = gridEl ? gridEl.getBoundingClientRect() : rect;
-        boundaries.push({
-          dayDate: day,
-          topPx: rect.top - containerRect.top + container.scrollTop,
-          bottomPx: rect.bottom - containerRect.top + container.scrollTop,
-          gridTopPx: gridRect.top - containerRect.top + container.scrollTop,
-        });
-      }
-      setDayBoundaries(boundaries);
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [days, entries, loading]);
-
-  // Ref callback for day elements
-  const setDayRef = useCallback((day: Date) => (el: HTMLDivElement | null) => {
-    const key = format(day, 'yyyy-MM-dd');
-    if (el) {
-      dayRefsMap.current.set(key, el);
-    } else {
-      dayRefsMap.current.delete(key);
-    }
-  }, []);
 
   if (!currentUser) return null;
 
@@ -1554,49 +1515,37 @@ const Timeline = () => {
             {/* Timeline main content */}
             {(!isMobile || mobileView === 'timeline') && (
               <main ref={mainScrollRef} className="flex-1 overflow-y-auto pb-20">
-                {days.map((day, index) => {
-                  const dayStr = format(day, 'yyyy-MM-dd');
-                  const tzInfo = dayTimezoneMap.get(dayStr);
-                  const dayLoc = dayLocationMap.get(dayStr);
-                  return (
-                    <CalendarDay
-                      ref={setDayRef(day)}
-                      key={day.toISOString()}
-                      date={day}
-                      entries={getEntriesForDay(day)}
-                      allEntries={scheduledEntries}
-                      formatTime={formatTime}
-                      homeTimezone={homeTimezone}
-                      userLat={dayLoc?.lat ?? userLat}
-                      userLng={dayLoc?.lng ?? userLng}
-                      votingLocked={trip.voting_locked}
-                      userId={currentUser?.id}
-                      userVotes={userVotes}
-                      onVoteChange={fetchData}
-                      onCardTap={handleCardTap}
-                      travelSegments={travelSegments}
-                      weatherData={getWeatherForDay(day)}
-                      dayLabel={isUndated ? `Day ${index + 1}` : undefined}
-                      dayIndex={index}
-                      isFirstDay={index === 0}
-                      isLastDay={index === days.length - 1}
-                      onAddBetween={handleAddBetween}
-                      onAddTransport={handleAddTransport}
-                      onGenerateTransport={handleGenerateTransportDirect}
-                      onDragSlot={handleDragSlot}
-                      onEntryTimeChange={handleEntryTimeChange}
-                      onDropFromPanel={(entryId, hourOffset) => handleDropOnTimeline(entryId, day, hourOffset)}
-                      onModeSwitchConfirm={handleModeSwitchConfirm}
-                      onDeleteTransport={handleDeleteTransport}
-                      activeTz={tzInfo?.activeTz}
-                      dayFlights={tzInfo?.flights}
-                      isEditor={isEditor}
-                      onToggleLock={handleToggleLock}
-                      scrollContainerRef={mainScrollRef}
-                      dayBoundaries={dayBoundaries}
-                    />
-                  );
-                })}
+                <ContinuousTimeline
+                  days={days}
+                  entries={scheduledEntries}
+                  allEntries={entries}
+                  weatherData={weatherData}
+                  travelSegments={travelSegments}
+                  dayTimezoneMap={dayTimezoneMap}
+                  dayLocationMap={dayLocationMap}
+                  homeTimezone={homeTimezone}
+                  formatTime={formatTime}
+                  userId={currentUser?.id}
+                  userVotes={userVotes}
+                  votingLocked={trip.voting_locked}
+                  isEditor={isEditor}
+                  userLat={userLat}
+                  userLng={userLng}
+                  onCardTap={handleCardTap}
+                  onEntryTimeChange={handleEntryTimeChange}
+                  onAddBetween={handleAddBetween}
+                  onAddTransport={handleAddTransport}
+                  onGenerateTransport={handleGenerateTransportDirect}
+                  onDragSlot={handleDragSlot}
+                  onClickSlot={() => {}}
+                  onDropFromPanel={handleDropOnTimeline}
+                  onModeSwitchConfirm={handleModeSwitchConfirm}
+                  onDeleteTransport={handleDeleteTransport}
+                  onToggleLock={handleToggleLock}
+                  onVoteChange={fetchData}
+                  scrollContainerRef={mainScrollRef}
+                  isUndated={isUndated}
+                />
               </main>
             )}
 

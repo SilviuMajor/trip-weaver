@@ -194,7 +194,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
     startHour,
     onCommit: handleDragCommit,
     scrollContainerRef,
-    dayBoundaries,
+    totalHours: 24,
+    gridTopPx: 0,
   });
 
   // Locked-entry drag feedback
@@ -737,8 +738,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                         {canDrag && !flightGroup && (
                           <div
                             className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
-                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartHour, origEndHour, dragTz, dayDate)}
-                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartHour, origEndHour, dragTz, dayDate)}
+                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartHour, origEndHour, dragTz)}
+                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartHour, origEndHour, dragTz)}
                             onTouchMove={onTouchMove}
                             onTouchEnd={onTouchEnd}
                           />
@@ -799,8 +800,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                               return (
                                 <div
                                   className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
-                                  onMouseDown={(e) => onMouseDown(e, flightGroup.checkin!.id, 'resize-top', groupStartHour, groupStartHour + ciDurationH, dragTz, dayDate)}
-                                  onTouchStart={(e) => onTouchStart(e, flightGroup.checkin!.id, 'resize-top', groupStartHour, groupStartHour + ciDurationH, dragTz, dayDate)}
+                                  onMouseDown={(e) => onMouseDown(e, flightGroup.checkin!.id, 'resize-top', groupStartHour, groupStartHour + ciDurationH, dragTz)}
+                                  onTouchStart={(e) => onTouchStart(e, flightGroup.checkin!.id, 'resize-top', groupStartHour, groupStartHour + ciDurationH, dragTz)}
                                   onTouchMove={onTouchMove}
                                   onTouchEnd={onTouchEnd}
                                 />
@@ -811,8 +812,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                               return (
                                 <div
                                   className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
-                                  onMouseDown={(e) => onMouseDown(e, flightGroup.checkout!.id, 'resize-bottom', groupEndHour - coDurationH, groupEndHour, dragTz, dayDate)}
-                                  onTouchStart={(e) => onTouchStart(e, flightGroup.checkout!.id, 'resize-bottom', groupEndHour - coDurationH, groupEndHour, dragTz, dayDate)}
+                                  onMouseDown={(e) => onMouseDown(e, flightGroup.checkout!.id, 'resize-bottom', groupEndHour - coDurationH, groupEndHour, dragTz)}
+                                  onTouchStart={(e) => onTouchStart(e, flightGroup.checkout!.id, 'resize-bottom', groupEndHour - coDurationH, groupEndHour, dragTz)}
                                   onTouchMove={onTouchMove}
                                   onTouchEnd={onTouchEnd}
                                 />
@@ -894,13 +895,13 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                               linkedType={entry.linked_type}
                               canEdit={isEditor}
                               onDragStart={canDrag ? (e) => {
-                                onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz, dayDate);
+                                onMouseDown(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
                               } : isLocked ? (e) => {
                                 e.stopPropagation();
                                 handleLockedAttempt(entry.id);
                               } : undefined}
                               onTouchDragStart={canDrag ? (e) => {
-                                onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz, dayDate);
+                                onTouchStart(e as any, entry.id, 'move', origStartHour, origEndHour, dragTz);
                               } : isLocked ? (e) => {
                                 e.stopPropagation();
                                 handleLockedAttempt(entry.id);
@@ -932,8 +933,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                         {canDrag && !flightGroup && !isTransport && (
                           <div
                             className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
-                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz, dayDate)}
-                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz, dayDate)}
+                            onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz)}
+                            onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartHour, origEndHour, dragTz)}
                             onTouchMove={onTouchMove}
                             onTouchEnd={onTouchEnd}
                           />
