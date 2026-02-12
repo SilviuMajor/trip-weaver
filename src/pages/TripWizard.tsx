@@ -36,7 +36,7 @@ const TripWizard = () => {
   const [endDate, setEndDate] = useState('');
   const [datesUnknown, setDatesUnknown] = useState(false);
   const [durationDays, setDurationDays] = useState(3);
-  const [timezone, setTimezone] = useState('Europe/Amsterdam');
+  const [timezone, setTimezone] = useState('Europe/London');
   const [categories, setCategories] = useState<CategoryPreset[]>([]);
   const [members, setMembers] = useState<MemberDraft[]>([]);
 
@@ -55,12 +55,12 @@ const TripWizard = () => {
     }
   }, [authLoading, isAdmin, navigate]);
 
-  // Auto-set timezone from outbound flight arrival
+  // Auto-set timezone from outbound flight departure (home timezone)
   useEffect(() => {
-    if (outboundFlight?.arrivalTz) {
-      setTimezone(outboundFlight.arrivalTz);
+    if (outboundFlight?.departureTz) {
+      setTimezone(outboundFlight.departureTz);
     }
-  }, [outboundFlight?.arrivalTz]);
+  }, [outboundFlight?.departureTz]);
 
   const handleNext = () => setStep(s => Math.min(s + 1, STEPS.length - 1));
   const handleBack = () => setStep(s => Math.max(s - 1, 0));
@@ -162,7 +162,7 @@ const TripWizard = () => {
         start_date: datesUnknown ? null : startDate,
         end_date: datesUnknown ? null : endDate,
         duration_days: datesUnknown ? durationDays : null,
-        timezone,
+        home_timezone: timezone,
         category_presets: categories.length > 0 ? categories : null,
         owner_id: adminUser?.id ?? null,
       };

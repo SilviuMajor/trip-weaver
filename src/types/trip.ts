@@ -19,7 +19,7 @@ export interface Trip {
   start_date: string | null;
   end_date: string | null;
   duration_days: number | null;
-  timezone: string;
+  home_timezone: string;
   voting_locked: boolean;
   owner_id: string | null;
   category_presets: CategoryPreset[] | null;

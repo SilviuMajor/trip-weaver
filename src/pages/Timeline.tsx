@@ -40,17 +40,17 @@ const Timeline = () => {
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const tripTimezone = trip?.timezone ?? 'Europe/Amsterdam';
+  const homeTimezone = trip?.home_timezone ?? 'Europe/London';
 
-  const formatTime = useCallback((isoString: string) => {
+  const formatTime = useCallback((isoString: string, tz?: string) => {
     const d = new Date(isoString);
     return d.toLocaleTimeString('en-GB', {
-      timeZone: tripTimezone,
+      timeZone: tz || homeTimezone,
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
     });
-  }, [tripTimezone]);
+  }, [homeTimezone]);
 
   // Unified sheet state
   const [sheetMode, setSheetMode] = useState<'create' | 'view' | null>(null);
@@ -60,6 +60,7 @@ const Timeline = () => {
   const [prefillStartTime, setPrefillStartTime] = useState<string | undefined>();
   const [prefillEndTime, setPrefillEndTime] = useState<string | undefined>();
   const [prefillCategory, setPrefillCategory] = useState<string | undefined>();
+  const [sheetResolvedTz, setSheetResolvedTz] = useState<string | undefined>();
 
   // Category sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -232,7 +233,7 @@ const Timeline = () => {
     const days = getDays();
 
     // Auto-detect starting TZ from first flight's departure airport
-    let currentTz = tripTimezone;
+    let currentTz = homeTimezone;
     const allFlightEntries = scheduledEntries
       .filter(e => e.options[0]?.category === 'flight' && e.options[0]?.departure_tz)
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
@@ -289,7 +290,7 @@ const Timeline = () => {
     }
 
     return map;
-  }, [trip, scheduledEntries, tripTimezone]);
+  }, [trip, scheduledEntries, homeTimezone]);
 
   // Compute per-day location (lat/lng) based on flights for sun gradient & weather
   const dayLocationMap = useMemo(() => {
@@ -328,7 +329,7 @@ const Timeline = () => {
       // Check if any flight lands on or before this day
       while (flightIdx < allFlights.length) {
         const flight = allFlights[flightIdx];
-        const flightDay = getDateInTimezone(flight.end_time, tripTimezone);
+        const flightDay = getDateInTimezone(flight.end_time, homeTimezone);
         if (flightDay <= dayStr) {
           // After this flight, location is arrival
           const opt = flight.options[0];
@@ -357,12 +358,12 @@ const Timeline = () => {
     }
 
     return map;
-  }, [trip, scheduledEntries, tripTimezone]);
+  }, [trip, scheduledEntries, homeTimezone]);
 
   const getEntriesForDay = (day: Date): EntryWithOptions[] => {
     const dayStr = format(day, 'yyyy-MM-dd');
     const tzInfo = dayTimezoneMap.get(dayStr);
-    const tz = tzInfo?.activeTz || tripTimezone;
+    const tz = tzInfo?.activeTz || homeTimezone;
     return scheduledEntries.filter(entry => {
       const entryDay = getDateInTimezone(entry.start_time, tz);
       return entryDay === dayStr;
@@ -375,6 +376,15 @@ const Timeline = () => {
   };
 
   const handleCardTap = (entry: EntryWithOptions, option: EntryOption) => {
+    // Compute resolved TZ for this entry's day
+    let entryResolvedTz = homeTimezone;
+    for (const [dayStr, info] of dayTimezoneMap) {
+      if (getDateInTimezone(entry.start_time, info.activeTz) === dayStr) {
+        entryResolvedTz = info.activeTz;
+        break;
+      }
+    }
+    setSheetResolvedTz(entryResolvedTz);
     setSheetMode('view');
     setSheetEntry(entry);
     setSheetOption(option);
@@ -390,6 +400,10 @@ const Timeline = () => {
     setPrefillEndTime(undefined);
     setTransportContext(null);
     setGapContext(ctx ?? null);
+    // Resolve TZ for the prefill time's day
+    const prefillDay = getDateInTimezone(prefillTime, homeTimezone);
+    const tzInfo = dayTimezoneMap.get(prefillDay);
+    setSheetResolvedTz(tzInfo?.activeTz || homeTimezone);
     setSheetMode('create');
     setSheetEntry(null);
     setSheetOption(null);
@@ -749,7 +763,7 @@ const Timeline = () => {
 
     const dayKey = format(dayDate, 'yyyy-MM-dd');
     const tzInfo = dayTimezoneMap.get(dayKey);
-    const resolvedTz = resolveDropTz(hourOffset, tzInfo, tripTimezone);
+    const resolvedTz = resolveDropTz(hourOffset, tzInfo, homeTimezone);
     const startIso = localToUTC(dateStr, `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`, resolvedTz);
     const endIso = localToUTC(dateStr, `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`, resolvedTz);
 
@@ -998,15 +1012,17 @@ const Timeline = () => {
         ? format(addDays(parseISO(REFERENCE_DATE), dayIndex), 'yyyy-MM-dd')
         : format(addDays(parseISO(trip.start_date!), dayIndex), 'yyyy-MM-dd');
 
+      const dayTzInfo = dayTimezoneMap.get(dayDateStr);
+      const insertTz = dayTzInfo?.activeTz || homeTimezone;
       const startIso = localToUTC(
         dayDateStr,
         `${String(defaultStartHour).padStart(2, '0')}:${String(defaultStartMin).padStart(2, '0')}`,
-        tripTimezone
+        insertTz
       );
       const endIso = localToUTC(
         dayDateStr,
         `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`,
-        tripTimezone
+        insertTz
       );
 
       // Clone entry
@@ -1138,7 +1154,13 @@ const Timeline = () => {
         }
 
         // Helper: get calendar day key in trip timezone
-        const getDayKey = (isoTime: string) => getDateInTimezone(isoTime, tripTimezone);
+        const getDayKey = (isoTime: string) => {
+          // Use per-day resolved TZ for accurate day grouping
+          for (const [dayStr, info] of dayTimezoneMap) {
+            if (getDateInTimezone(isoTime, info.activeTz) === dayStr) return dayStr;
+          }
+          return getDateInTimezone(isoTime, homeTimezone);
+        };
 
         // Group by calendar day in trip timezone
         const dayGroupsForPush = new Map<string, any[]>();
@@ -1369,7 +1391,7 @@ const Timeline = () => {
                     entries={getEntriesForDay(day)}
                     allEntries={scheduledEntries}
                     formatTime={formatTime}
-                    tripTimezone={tripTimezone}
+                    homeTimezone={homeTimezone}
                     userLat={dayLoc?.lat ?? userLat}
                     userLng={dayLoc?.lng ?? userLng}
                     votingLocked={trip.voting_locked}
@@ -1494,12 +1516,13 @@ const Timeline = () => {
                 setPrefillCategory(undefined);
                 setTransportContext(null);
                 setGapContext(null);
+                setSheetResolvedTz(undefined);
               }
             }}
             tripId={trip.id}
             onSaved={fetchData}
             trip={trip}
-            // View mode props
+            resolvedTz={sheetResolvedTz}
             entry={sheetEntry}
             option={sheetOption}
             formatTime={formatTime}
