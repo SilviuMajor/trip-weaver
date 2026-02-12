@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Plus, LogOut, Settings, MoreVertical, Link2, Trash2, Copy } from 'lucide-react';
@@ -38,6 +38,7 @@ const Dashboard = () => {
   const { adminUser, isAdmin, loading: authLoading, signOut } = useAdminAuth();
   const { displayName } = useProfile(adminUser?.id);
   const [trips, setTrips] = useState<Trip[]>([]);
+  const [tripDestinations, setTripDestinations] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [deleteTrip, setDeleteTrip] = useState<Trip | null>(null);
   const navigate = useNavigate();
@@ -56,7 +57,48 @@ const Dashboard = () => {
       .eq('owner_id', adminUser.id)
       .order('start_date', { ascending: false });
 
-    setTrips((data ?? []) as unknown as Trip[]);
+    const fetchedTrips = (data ?? []) as unknown as Trip[];
+    setTrips(fetchedTrips);
+
+    // Auto-generate destination list from entry data
+    if (fetchedTrips.length > 0) {
+      const tripIds = fetchedTrips.map(t => t.id);
+      const { data: entries } = await supabase
+        .from('entries')
+        .select('id, trip_id')
+        .in('trip_id', tripIds);
+      if (entries && entries.length > 0) {
+        const entryIds = entries.map(e => e.id);
+        const { data: options } = await supabase
+          .from('entry_options')
+          .select('entry_id, location_name, arrival_location, category')
+          .in('entry_id', entryIds);
+        if (options) {
+          const entryTripMap = new Map<string, string>();
+          entries.forEach(e => entryTripMap.set(e.id, e.trip_id));
+
+          const destMap: Record<string, Set<string>> = {};
+          options.forEach(opt => {
+            if (opt.category === 'transfer' || opt.category === 'airport_processing') return;
+            const tid = entryTripMap.get(opt.entry_id);
+            if (!tid) return;
+            if (!destMap[tid]) destMap[tid] = new Set();
+            const loc = opt.arrival_location || opt.location_name;
+            if (loc) {
+              const city = loc.split(',')[0].split(' - ').pop()?.trim();
+              if (city) destMap[tid].add(city);
+            }
+          });
+
+          const result: Record<string, string> = {};
+          for (const [tid, cities] of Object.entries(destMap)) {
+            if (cities.size > 0) result[tid] = [...cities].slice(0, 4).join(', ');
+          }
+          setTripDestinations(result);
+        }
+      }
+    }
+
     setLoading(false);
   };
 
@@ -162,8 +204,8 @@ const Dashboard = () => {
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate font-display text-lg font-bold">{trip.name}</h3>
-                  {trip.destination && (
-                    <p className="truncate text-sm text-muted-foreground">📍 {trip.destination}</p>
+                  {(tripDestinations[trip.id] || trip.destination) && (
+                    <p className="truncate text-sm text-muted-foreground">📍 {tripDestinations[trip.id] || trip.destination}</p>
                   )}
                   <p className="text-sm text-muted-foreground">
                     {trip.start_date && trip.end_date

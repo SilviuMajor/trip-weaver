@@ -36,8 +36,8 @@ interface CalendarDayProps {
   date: Date;
   entries: EntryWithOptions[];
   allEntries?: EntryWithOptions[];
-  formatTime: (iso: string) => string;
-  tripTimezone: string;
+  formatTime: (iso: string, tz?: string) => string;
+  homeTimezone: string;
   userLat: number | null;
   userLng: number | null;
   votingLocked: boolean;
@@ -75,7 +75,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
   entries,
   allEntries = [],
   formatTime,
-  tripTimezone,
+  homeTimezone,
   userLat,
   userLng,
   votingLocked,
@@ -138,7 +138,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
 
     const primaryOpt = entry?.options[0];
     const isFlight = primaryOpt?.category === 'flight' && primaryOpt?.departure_tz && primaryOpt?.arrival_tz;
-    const startTz = isFlight ? primaryOpt.departure_tz! : (tz || activeTz || tripTimezone);
+    const startTz = isFlight ? primaryOpt.departure_tz! : (tz || activeTz || homeTimezone);
     const endTz = isFlight ? primaryOpt.arrival_tz! : startTz;
 
     const isMove = dragType === 'move';
@@ -160,7 +160,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
     if (entry) {
       const linkedOpt = entry.options[0];
       const linkedEntries = allEntries.filter(e => e.linked_flight_id === entry.id);
-      const fallbackTz = tz || activeTz || tripTimezone;
+      const fallbackTz = tz || activeTz || homeTimezone;
 
       linkedEntries.forEach(linked => {
         const linkedTz = linked.linked_type === 'checkin'
@@ -186,7 +186,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
         onEntryTimeChange(linked.id, newLinkedStartIso, newLinkedEndIso);
       });
     }
-  }, [onEntryTimeChange, dayDate, tripTimezone, activeTz, sortedEntries, allEntries]);
+  }, [onEntryTimeChange, dayDate, homeTimezone, activeTz, sortedEntries, allEntries]);
 
   const { dragState, wasDraggedRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
     pixelsPerHour: PIXELS_PER_HOUR,
@@ -214,8 +214,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
     for (let i = 0; i < sortedEntries.length - 1; i++) {
       const a = sortedEntries[i];
       const b = sortedEntries[i + 1];
-      const aTzs = resolveEntryTz(a, dayFlights, activeTz, tripTimezone);
-      const bTzs = resolveEntryTz(b, dayFlights, activeTz, tripTimezone);
+      const aTzs = resolveEntryTz(a, dayFlights, activeTz, homeTimezone);
+      const bTzs = resolveEntryTz(b, dayFlights, activeTz, homeTimezone);
       const aOpt = a.options[0];
       const aIsFlight = aOpt?.category === 'flight' && aOpt.departure_tz && aOpt.arrival_tz;
       let aEnd: number;
@@ -234,7 +234,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
       }
     }
     return map;
-  }, [sortedEntries, dayFlights, activeTz, tripTimezone]);
+  }, [sortedEntries, dayFlights, activeTz, homeTimezone]);
 
   useEffect(() => {
     const conflictCount = overlapMap.size;
@@ -245,7 +245,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
   }, [overlapMap]);
 
   const getWeatherForEntry = (entry: EntryWithOptions) => {
-    const hour = Math.floor(getHourInTimezone(entry.start_time, tripTimezone));
+    const { startTz } = resolveEntryTz(entry, dayFlights, activeTz, homeTimezone);
+    const hour = Math.floor(getHourInTimezone(entry.start_time, startTz));
     const dateStr = format(dayDate, 'yyyy-MM-dd');
     return weatherData.find(w => w.date === dateStr && w.hour === hour);
   };
@@ -429,8 +430,8 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                 if (idx >= visibleEntries.length - 1) return null;
                 const nextEntry = visibleEntries[idx + 1];
 
-                const aTzs = resolveEntryTz(entry, dayFlights, activeTz, tripTimezone);
-                const bTzs = resolveEntryTz(nextEntry, dayFlights, activeTz, tripTimezone);
+                const aTzs = resolveEntryTz(entry, dayFlights, activeTz, homeTimezone);
+                const bTzs = resolveEntryTz(nextEntry, dayFlights, activeTz, homeTimezone);
 
                 // Use flight group bounds for gap endpoints
                 const aGroup = flightGroupMap.get(entry.id);
@@ -527,7 +528,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                               const flightEndMs = new Date(dayFlights[0].flightEndUtc).getTime();
                               return entryUtcMs >= flightEndMs ? dayFlights[0].destinationTz : dayFlights[0].originTz;
                             }
-                            return activeTz || tripTimezone;
+                            return activeTz || homeTimezone;
                           })();
                           (onGenerateTransport || onAddTransport)!(entry.id, nextEntry.id, entry.end_time, fromResolvedTz);
                         } else if (onAddBetween) {
@@ -589,7 +590,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                 const isLocked = entry.is_locked;
                 let entryStartHour: number;
                 let entryEndHour: number;
-                let resolvedTz = activeTz || tripTimezone;
+                let resolvedTz = activeTz || homeTimezone;
 
                 if (isDragged && dragState) {
                   entryStartHour = dragState.currentStartHour;

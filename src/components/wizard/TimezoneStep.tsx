@@ -16,8 +16,8 @@ const TIMEZONES = [
 
 const TimezoneStep = ({ value, onChange }: TimezoneStepProps) => (
   <div>
-    <h2 className="mb-2 text-2xl font-bold">What timezone?</h2>
-    <p className="mb-6 text-sm text-muted-foreground">This helps with time display</p>
+    <h2 className="mb-2 text-2xl font-bold">Where are you starting from?</h2>
+    <p className="mb-6 text-sm text-muted-foreground">Select your home timezone</p>
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger>
         <SelectValue />

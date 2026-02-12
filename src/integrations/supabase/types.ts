@@ -372,12 +372,12 @@ export type Database = {
           duration_days: number | null
           emoji: string | null
           end_date: string | null
+          home_timezone: string
           id: string
           image_url: string | null
           name: string
           owner_id: string | null
           start_date: string | null
-          timezone: string
           updated_at: string
           voting_locked: boolean
           walk_threshold_min: number
@@ -391,12 +391,12 @@ export type Database = {
           duration_days?: number | null
           emoji?: string | null
           end_date?: string | null
+          home_timezone?: string
           id?: string
           image_url?: string | null
           name: string
           owner_id?: string | null
           start_date?: string | null
-          timezone?: string
           updated_at?: string
           voting_locked?: boolean
           walk_threshold_min?: number
@@ -410,12 +410,12 @@ export type Database = {
           duration_days?: number | null
           emoji?: string | null
           end_date?: string | null
+          home_timezone?: string
           id?: string
           image_url?: string | null
           name?: string
           owner_id?: string | null
           start_date?: string | null
-          timezone?: string
           updated_at?: string
           voting_locked?: boolean
           walk_threshold_min?: number

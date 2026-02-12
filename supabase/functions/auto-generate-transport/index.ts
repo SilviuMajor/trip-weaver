@@ -172,7 +172,7 @@ Deno.serve(async (req) => {
     if (tripErr || !trip) throw new Error('Trip not found');
 
     const walkThreshold = trip.walk_threshold_min ?? 10;
-    const timezone = trip.timezone || 'Europe/Amsterdam';
+    const homeTimezone = trip.home_timezone || 'Europe/London';
 
     // 2. Fetch all scheduled entries with options
     const { data: entries, error: entriesErr } = await supabase
@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 3. Group entries by day using trip timezone (not UTC substring)
+    // 3. Group entries by day using flight-aware per-day timezone resolution
     function getDateInTz(isoString: string, tz: string): string {
       const d = new Date(isoString);
       const formatter = new Intl.DateTimeFormat('en-US', {
@@ -213,9 +213,49 @@ Deno.serve(async (req) => {
       return `${get('year')}-${get('month')}-${get('day')}`;
     }
 
+    // Build flight-aware per-day timezone map (mirrors client-side dayTimezoneMap in src/pages/Timeline.tsx)
+    const flightEntries = entries
+      .filter((e: any) => {
+        const opt = optionsByEntry.get(e.id);
+        return opt?.category === 'flight' && opt?.departure_tz && opt?.arrival_tz;
+      })
+      .sort((a: any, b: any) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+
+    // Start with home timezone, or first flight's departure TZ
+    let currentDayTz = homeTimezone;
+    if (flightEntries.length > 0) {
+      const firstFlightOpt = optionsByEntry.get(flightEntries[0].id);
+      if (firstFlightOpt?.departure_tz) currentDayTz = firstFlightOpt.departure_tz;
+    }
+
+    // Build per-day TZ map by processing flights chronologically
+    const perDayTz = new Map<string, string>();
+    const allDayStrs = new Set<string>();
+    for (const entry of entries) {
+      allDayStrs.add(getDateInTz(entry.start_time, currentDayTz));
+    }
+    // First pass: assign current TZ to all days
+    for (const dayStr of [...allDayStrs].sort()) {
+      perDayTz.set(dayStr, currentDayTz);
+    }
+    // Second pass: update TZ based on flight arrivals
+    let runningTz = currentDayTz;
+    for (const flight of flightEntries) {
+      const flightOpt = optionsByEntry.get(flight.id);
+      const arrivalDay = getDateInTz(flight.end_time, flightOpt?.arrival_tz || runningTz);
+      runningTz = flightOpt?.arrival_tz || runningTz;
+      // All days from arrival day onward use the new TZ
+      for (const dayStr of [...allDayStrs].sort()) {
+        if (dayStr >= arrivalDay) {
+          perDayTz.set(dayStr, runningTz);
+        }
+      }
+    }
+
     const dayGroups = new Map<string, any[]>();
     for (const entry of entries) {
-      const dayStr = getDateInTz(entry.start_time, timezone);
+      // Use per-day resolved TZ for grouping
+      const dayStr = getDateInTz(entry.start_time, perDayTz.get(getDateInTz(entry.start_time, currentDayTz)) || currentDayTz);
       if (!dayGroups.has(dayStr)) dayGroups.set(dayStr, []);
       dayGroups.get(dayStr)!.push(entry);
     }

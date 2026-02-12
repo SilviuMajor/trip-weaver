@@ -140,7 +140,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated }: HotelWizar
 
     setSaving(true);
     try {
-      const tz = trip.timezone;
+      const tz = trip.home_timezone;
 
       for (const hotel of hotelsToCreate) {
         for (const nightIdx of hotel.selectedNights) {

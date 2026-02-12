@@ -136,10 +136,13 @@ interface EntrySheetProps {
   trip?: Trip | null;
   onSaved: () => void;
 
+  // Resolved timezone for the entry's day (from dayTimezoneMap / resolveEntryTz)
+  resolvedTz?: string;
+
   // View mode
   entry?: EntryWithOptions | null;
   option?: EntryOption | null;
-  formatTime?: (iso: string) => string;
+  formatTime?: (iso: string, tz?: string) => string;
   userLat?: number | null;
   userLng?: number | null;
   votingLocked?: boolean;
@@ -162,6 +165,7 @@ type Step = 'category' | 'details';
 
 const EntrySheet = ({
   mode, open, onOpenChange, tripId, trip, onSaved,
+  resolvedTz: resolvedTzProp,
   entry, option, formatTime: formatTimeProp, userLat, userLng,
   votingLocked, userVotes = [], onVoteChange, onMoveToIdeas,
   editEntry, editOption, prefillStartTime, prefillEndTime, prefillCategory, transportContext,
@@ -226,7 +230,7 @@ const EntrySheet = ({
   const isEditing = !!editEntry;
   const isFlight = categoryId === 'flight';
   const isTransfer = categoryId === 'transfer';
-  const tripTimezone = trip?.timezone ?? 'Europe/Amsterdam';
+  const homeTimezone = trip?.home_timezone ?? 'Europe/London';
   const defaultCheckinHours = trip?.default_checkin_hours ?? 2;
   const defaultCheckoutMin = trip?.default_checkout_min ?? 30;
   const selectedCategory = PREDEFINED_CATEGORIES.find(c => c.id === categoryId);
@@ -250,8 +254,9 @@ const EntrySheet = ({
   useEffect(() => {
     if (mode !== 'create') return;
     if (editEntry && open) {
-      const { date: sDate, time: sTime } = utcToLocal(editEntry.start_time, tripTimezone);
-      const { time: eTime } = utcToLocal(editEntry.end_time, tripTimezone);
+      const editTz = resolvedTzProp || homeTimezone;
+      const { date: sDate, time: sTime } = utcToLocal(editEntry.start_time, editTz);
+      const { time: eTime } = utcToLocal(editEntry.end_time, editTz);
       setDate(sDate);
       setStartTime(sTime);
       setEndTime(eTime);
@@ -286,17 +291,17 @@ const EntrySheet = ({
   useEffect(() => {
     if (mode !== 'create') return;
     if (prefillStartTime && open && !editEntry) {
-      const effectiveTz = transportContext?.resolvedTz || tripTimezone;
+      const effectiveTz = transportContext?.resolvedTz || homeTimezone;
       const { date: d, time: t } = utcToLocal(prefillStartTime, effectiveTz);
       setStartTime(t);
       if (!isUndated) setDate(d);
     }
-  }, [prefillStartTime, open, editEntry, isUndated, tripTimezone, mode, transportContext]);
+  }, [prefillStartTime, open, editEntry, isUndated, homeTimezone, mode, transportContext]);
 
   useEffect(() => {
     if (mode !== 'create') return;
     if (prefillEndTime && open && !editEntry) {
-      const { time: eT } = utcToLocal(prefillEndTime, tripTimezone);
+      const { time: eT } = utcToLocal(prefillEndTime, homeTimezone);
       setEndTime(eT);
       if (prefillStartTime) {
         const startDt = new Date(prefillStartTime);
@@ -305,13 +310,13 @@ const EntrySheet = ({
         if (diffMin > 0) setDurationMin(diffMin);
       }
     }
-  }, [prefillEndTime, prefillStartTime, open, editEntry, tripTimezone, mode]);
+  }, [prefillEndTime, prefillStartTime, open, editEntry, homeTimezone, mode]);
 
   const applySmartDefaults = useCallback((cat: CategoryDef) => {
     const h = cat.defaultStartHour;
     const m = cat.defaultStartMin;
     if (prefillStartTime && !isEditing) {
-      const effectiveTz = transportContext?.resolvedTz || tripTimezone;
+      const effectiveTz = transportContext?.resolvedTz || homeTimezone;
       const { time: pTime } = utcToLocal(prefillStartTime, effectiveTz);
       const [pH, pM] = pTime.split(':').map(Number);
       setStartTime(`${String(pH).padStart(2, '0')}:${String(pM).padStart(2, '0')}`);
@@ -328,7 +333,7 @@ const EntrySheet = ({
       const endM = endTotalMin % 60;
       setEndTime(`${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`);
     }
-  }, [prefillStartTime, isEditing, tripTimezone, transportContext]);
+  }, [prefillStartTime, isEditing, homeTimezone, transportContext]);
 
   useEffect(() => {
     if (mode !== 'create') return;
@@ -624,8 +629,8 @@ const EntrySheet = ({
       const placeholderDate = isUndated
         ? format(addDays(parseISO(REFERENCE_DATE), Number(selectedDay)), 'yyyy-MM-dd')
         : (date || format(new Date(), 'yyyy-MM-dd'));
-      const startIso = localToUTC(placeholderDate, '00:00', tripTimezone);
-      const endIso = localToUTC(placeholderDate, '01:00', tripTimezone);
+      const startIso = localToUTC(placeholderDate, '00:00', homeTimezone);
+      const endIso = localToUTC(placeholderDate, '01:00', homeTimezone);
       const scheduledDay = isUndated ? Number(selectedDay) : null;
 
       const { data: d, error } = await supabase
@@ -656,7 +661,7 @@ const EntrySheet = ({
     // When transport context exists, derive date from prefillStartTime
     let entryDate: string;
     if (transportContext && prefillStartTime) {
-      const { date: d } = utcToLocal(prefillStartTime, tripTimezone);
+      const { date: d } = utcToLocal(prefillStartTime, homeTimezone);
       entryDate = d;
     } else {
       entryDate = isUndated ? format(addDays(parseISO(REFERENCE_DATE), Number(selectedDay)), 'yyyy-MM-dd') : date;
@@ -675,11 +680,12 @@ const EntrySheet = ({
       } else if (isTransfer && transportContext) {
         // Fix 1: Use prefillStartTime directly (already ISO from departing event's end)
         const blockDur = Math.ceil(durationMin / 5) * 5;
-        startIso = prefillStartTime || localToUTC(entryDate, startTime, tripTimezone);
+        startIso = prefillStartTime || localToUTC(entryDate, startTime, homeTimezone);
         endIso = new Date(new Date(startIso).getTime() + blockDur * 60000).toISOString();
       } else {
-        startIso = localToUTC(entryDate, startTime, tripTimezone);
-        endIso = localToUTC(entryDate, endTime, tripTimezone);
+        const saveTz = resolvedTzProp || homeTimezone;
+        startIso = localToUTC(entryDate, startTime, saveTz);
+        endIso = localToUTC(entryDate, endTime, saveTz);
       }
 
       let entryId: string;
@@ -844,8 +850,9 @@ const EntrySheet = ({
   // ─── Generic time save (view mode) ───
   const handleGenericTimeSave = async (which: 'start' | 'end', newTimeStr: string) => {
     if (!entry || !trip) return;
-    const dateStr = utcToLocal(entry.start_time, tripTimezone).date;
-    const newUtc = localToUTC(dateStr, newTimeStr, tripTimezone);
+    const viewTz = resolvedTzProp || homeTimezone;
+    const dateStr = utcToLocal(entry.start_time, viewTz).date;
+    const newUtc = localToUTC(dateStr, newTimeStr, viewTz);
     const field = which === 'start' ? 'start_time' : 'end_time';
     const { error } = await supabase.from('entries').update({ [field]: newUtc } as any).eq('id', entry.id);
     if (error) { toast({ title: 'Failed to save time', variant: 'destructive' }); return; }
@@ -877,7 +884,7 @@ const EntrySheet = ({
   // Save flight departure/arrival time and cascade to linked checkin/checkout
   const handleFlightTimeSave = async (type: 'departure' | 'arrival', newTimeStr: string) => {
     if (!entry || !option) return;
-    const tz = type === 'departure' ? (option.departure_tz || tripTimezone) : (option.arrival_tz || tripTimezone);
+    const tz = type === 'departure' ? (option.departure_tz || homeTimezone) : (option.arrival_tz || homeTimezone);
 
     // Parse the new HH:MM in the relevant timezone and build a full ISO timestamp
     const currentISO = type === 'departure' ? entry.start_time : entry.end_time;
