@@ -1,63 +1,54 @@
 
-# Part 1: Fix Google Maps Links + Part 2: Remove Destination Field
 
-## Part 1 — Fix Google Maps Links
+# Fix Static Map Preview + Verify Google Maps Links
 
-### Problem
+## Issue 2 — Google Maps Links: Already Fixed
 
-There are two issues with Google Maps links:
+The Google Maps links in both `MapPreview.tsx` and `EntryCard.tsx` are already using the correct format:
+- `https://www.google.com/maps/search/?api=1&query={lat},{lng}`
+- Both have `target="_blank"` and `rel="noopener noreferrer"`
+- No mobile-specific URL schemes (`maps://`, `comgooglemaps://`) exist in the codebase
 
-1. **MapPreview component** (shown in the event detail sheet): Uses `https://www.google.com/maps?q={lat},{lng}` which is an older format. Should use the official `https://www.google.com/maps/search/?api=1&query={lat},{lng}` format for better cross-platform support (opens in Maps app on mobile, new tab on desktop).
+No changes needed here.
 
-2. **EntryCard (timeline cards)**: The MapPin icon on event cards only shows distance -- it is NOT a link to Google Maps. There is no way to tap a location on the card to open maps. We need to add a tappable location/address element on the full-size EntryCard.
+## Issue 1 — Static Map Preview Not Loading
+
+### Root Cause
+
+The current static map URL uses `https://staticmap.openstreetmap.de/staticmap.php?...` — a free, community-run OpenStreetMap tile service that is unreliable and frequently fails to load images.
+
+The Google Maps API key (`GOOGLE_MAPS_API_KEY`) is stored as a server-side secret and is only accessible from backend functions, not from client-side code. Exposing it in a client-side URL would be a security risk.
+
+### Solution: Edge Function Proxy for Static Maps
+
+Create a lightweight edge function that proxies the Google Static Maps API request. The client calls the edge function with lat/lng, and the function fetches the static map image using the API key server-side, then returns the image bytes.
 
 ### Changes
+
+**New file: `supabase/functions/static-map/index.ts`**
+
+A simple edge function that:
+- Accepts `lat`, `lng`, `zoom` (default 15), and `size` (default 600x200) as query params
+- Fetches `https://maps.googleapis.com/maps/api/staticmap?center={lat},{lng}&zoom={zoom}&size={size}&markers=color:red%7C{lat},{lng}&key={GOOGLE_MAPS_API_KEY}`
+- Returns the image bytes with appropriate `Content-Type: image/png` and cache headers (e.g., `Cache-Control: public, max-age=86400`)
+- Returns a 400 if lat/lng missing, 500 if API key not configured
 
 **File: `src/components/timeline/MapPreview.tsx`**
 
-- Update the Google Maps URL from `https://www.google.com/maps?q={lat},{lng}` to `https://www.google.com/maps/search/?api=1&query={lat},{lng}`
-- If `place_id` is available (it is not currently passed as a prop), use the place ID format instead -- but since `place_id` is not stored in `entry_options`, we will use the lat/lng format which works correctly
-- The `target="_blank"` and `rel="noopener noreferrer"` are already in place, which handles desktop (new tab) and mobile (Maps app) correctly
+- Replace the OpenStreetMap static map URL with a call to the new edge function:
+  ```
+  const staticMapUrl = `${supabaseUrl}/functions/v1/static-map?lat=${latitude}&lng=${longitude}`;
+  ```
+- Import `supabaseUrl` from the environment (`import.meta.env.VITE_SUPABASE_URL`)
+- Add an `onError` handler on the `<img>` tag to hide the image container if loading fails (graceful fallback)
 
-**File: `src/components/timeline/EntryCard.tsx`**
+**No other files changed.** EntryCard links and Google Maps links are already correct.
 
-- In the full-size card layout (the default, lines 683-896), add a tappable location row below the title that opens Google Maps
-- Show `option.location_name` with a MapPin icon; tapping it opens `https://www.google.com/maps/search/?api=1&query={lat},{lng}` in a new tab
-- Only render this when `option.location_name` exists and `option.latitude`/`option.longitude` are available
-- Use `e.stopPropagation()` to prevent the card's onClick from firing
-- For the condensed card layout (lines 588-681), add a similar but smaller tappable location line
+### Test Cases
 
----
+1. Open an event detail sheet with a location -- static map renders showing the pin
+2. Events without lat/lng -- MapPreview not rendered (already handled by parent)
+3. Static map image fails to load -- image container hidden gracefully
+4. Tap Google Maps button in MapPreview -- opens correct location in new tab (desktop) / Maps app (mobile)
+5. Tap location link on event card -- opens Google Maps correctly
 
-## Part 2 — Remove Destination Field from Trip Settings
-
-### Problem
-
-The "Destination" field in Trip Settings is redundant since destinations are now auto-generated from event locations on the dashboard.
-
-### Changes
-
-**File: `src/pages/TripSettings.tsx`**
-
-- Remove the `tripDestination` state variable (line 51)
-- Remove `setTripDestination(t.destination ?? '')` from the data fetch (line 88)
-- The section header comment on line 251 says "Name and Destination" -- update to just "Trip Name"
-- No destination input field is currently rendered (it was already removed from the JSX based on the memory note), so the main cleanup is removing the unused state variable and the fetch assignment
-
----
-
-## What is NOT changed
-
-- Auto-generated destination logic on dashboard
-- Event card styling (beyond adding the tappable location link)
-- Google Places search functionality
-- Transport card rendering
-- EntrySheet MapPreview layout (only the URL format)
-
-## Test cases
-
-1. Tap location on any full-size event card -- Google Maps opens with correct location
-2. Tap Google Maps button in event detail sheet (MapPreview) -- opens correct location
-3. Works on desktop (new tab) and mobile (Maps app)
-4. Trip Settings page no longer has destination-related state
-5. Dashboard trip card still shows auto-generated destinations
