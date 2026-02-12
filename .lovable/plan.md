@@ -1,54 +1,56 @@
 
 
-# Fix Static Map Preview + Verify Google Maps Links
+# Add Notes Field to Event Cards
 
-## Issue 2 — Google Maps Links: Already Fixed
+## Database Migration
 
-The Google Maps links in both `MapPreview.tsx` and `EntryCard.tsx` are already using the correct format:
-- `https://www.google.com/maps/search/?api=1&query={lat},{lng}`
-- Both have `target="_blank"` and `rel="noopener noreferrer"`
-- No mobile-specific URL schemes (`maps://`, `comgooglemaps://`) exist in the codebase
+Add a `notes` column to the `entries` table:
 
-No changes needed here.
+```sql
+ALTER TABLE entries ADD COLUMN notes text DEFAULT NULL;
+```
 
-## Issue 1 — Static Map Preview Not Loading
+This is a nullable text column with no character limit.
 
-### Root Cause
+## Type Update
 
-The current static map URL uses `https://staticmap.openstreetmap.de/staticmap.php?...` — a free, community-run OpenStreetMap tile service that is unreliable and frequently fails to load images.
+Update the `Entry` interface in `src/types/trip.ts` to include `notes?: string | null`.
 
-The Google Maps API key (`GOOGLE_MAPS_API_KEY`) is stored as a server-side secret and is only accessible from backend functions, not from client-side code. Exposing it in a client-side URL would be a security risk.
+## EntryCard Changes (`src/components/timeline/EntryCard.tsx`)
 
-### Solution: Edge Function Proxy for Static Maps
+**Props**: Add `notes?: string | null` to `EntryCardProps`.
 
-Create a lightweight edge function that proxies the Google Static Maps API request. The client calls the edge function with lat/lng, and the function fetches the static map image using the API key server-side, then returns the image bytes.
+**Full-size card (line ~810, after the location link and before the transfer/time sections)**: Insert a notes display block:
+- Only render when `notes` is truthy
+- Show text in `text-xs` with `text-muted-foreground` (or `text-white/70` when card has a background image)
+- CSS: `line-clamp-2` for 2-line truncation with ellipsis
+- Style: regular weight, slightly smaller than event name
 
-### Changes
+**Condensed card (line ~650 area)**: Similar but even smaller (`text-[9px]`, `line-clamp-1`).
 
-**New file: `supabase/functions/static-map/index.ts`**
+## EntrySheet Changes (`src/components/timeline/EntrySheet.tsx`)
 
-A simple edge function that:
-- Accepts `lat`, `lng`, `zoom` (default 15), and `size` (default 600x200) as query params
-- Fetches `https://maps.googleapis.com/maps/api/staticmap?center={lat},{lng}&zoom={zoom}&size={size}&markers=color:red%7C{lat},{lng}&key={GOOGLE_MAPS_API_KEY}`
-- Returns the image bytes with appropriate `Content-Type: image/png` and cache headers (e.g., `Cache-Control: public, max-age=86400`)
-- Returns a 400 if lat/lng missing, 500 if API key not configured
+**View mode (after the website field, around line 1387, before the Map section)**: Add an editable notes textarea:
+- For editors: show a `<Textarea>` with placeholder "Add a note..."
+- For non-editors: show notes text if present, otherwise nothing
+- Save on blur using `supabase.from('entries').update({ notes }).eq('id', entry.id)` then call `onSaved()`
+- Use a local `notesValue` state initialized from `entry.notes`
 
-**File: `src/components/timeline/MapPreview.tsx`**
+## CalendarDay Changes (`src/components/timeline/CalendarDay.tsx`)
 
-- Replace the OpenStreetMap static map URL with a call to the new edge function:
-  ```
-  const staticMapUrl = `${supabaseUrl}/functions/v1/static-map?lat=${latitude}&lng=${longitude}`;
-  ```
-- Import `supabaseUrl` from the environment (`import.meta.env.VITE_SUPABASE_URL`)
-- Add an `onError` handler on the `<img>` tag to hide the image container if loading fails (graceful fallback)
+Pass `notes={entry.notes}` to the `EntryCard` component (line ~879).
 
-**No other files changed.** EntryCard links and Google Maps links are already correct.
+## Timeline.tsx
 
-### Test Cases
+No changes needed -- the entries query already uses `select('*')` which will include the new `notes` column automatically.
 
-1. Open an event detail sheet with a location -- static map renders showing the pin
-2. Events without lat/lng -- MapPreview not rendered (already handled by parent)
-3. Static map image fails to load -- image container hidden gracefully
-4. Tap Google Maps button in MapPreview -- opens correct location in new tab (desktop) / Maps app (mobile)
-5. Tap location link on event card -- opens Google Maps correctly
+## Files Changed
+
+| File | Change |
+|------|--------|
+| Migration SQL | Add `notes` text column to `entries` |
+| `src/types/trip.ts` | Add `notes` to `Entry` interface |
+| `src/components/timeline/EntryCard.tsx` | Add `notes` prop, render 2-line truncated notes on full-size and condensed cards |
+| `src/components/timeline/EntrySheet.tsx` | Add editable textarea for notes in view mode |
+| `src/components/timeline/CalendarDay.tsx` | Pass `notes` prop to EntryCard |
 
