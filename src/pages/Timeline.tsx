@@ -1498,7 +1498,7 @@ const Timeline = () => {
         </div>
       ) : (
         <>
-          {/* Day pill - fixed between nav and scroll container */}
+          {/* Day pill - position:fixed, pinned below tab bar */}
           {days.length > 0 && (() => {
             const dayDate = days[currentDayIndex];
             const dayStr = format(dayDate, 'yyyy-MM-dd');
@@ -1512,8 +1512,11 @@ const Timeline = () => {
               } catch { /* ignore */ }
             }
             return (
-              <div className="flex justify-center py-1 bg-background/90 backdrop-blur-md border-b border-border/30 z-30">
-                <div className="inline-flex items-center gap-1 rounded-full bg-background border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-sm">
+              <div
+                className="fixed left-1/2 -translate-x-1/2 z-50 pointer-events-none"
+                style={{ top: '98px' }}
+              >
+                <div className="inline-flex items-center gap-1 rounded-full bg-background/95 backdrop-blur-md border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-md">
                   <span>{isUndated ? `Day ${currentDayIndex + 1}` : format(dayDate, 'EEE d MMM').toUpperCase()}</span>
                   <span className="text-muted-foreground/60">·</span>
                   <span className="text-muted-foreground">{tzAbbrev}</span>
