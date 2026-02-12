@@ -747,7 +747,7 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                   <div key={entry.id}>
                     <div
                       className={cn(
-                        'absolute pr-1 group',
+                        'absolute pr-1 group overflow-visible',
                         isDragged && 'opacity-80 z-30',
                         !isDragged && 'z-10'
                       )}
@@ -1028,120 +1028,119 @@ const CalendarDay = forwardRef<HTMLDivElement, CalendarDayProps>(({
                             </button>
                           );
                         })()}
-                      </div>
-                    </div>
-
-                    {/* SNAP button below transport cards */}
-                    {isTransport && (() => {
-                      // Find the next non-linked entry in sortedEntries
-                      let nextVisible = entry.to_entry_id
-                        ? sortedEntries.find(e => e.id === entry.to_entry_id)
-                        : null;
-                      // Fallback: find next chronological non-transport, non-linked entry
-                      if (!nextVisible) {
-                        const entryIdx = sortedEntries.findIndex(e => e.id === entry.id);
-                        for (let i = entryIdx + 1; i < sortedEntries.length; i++) {
-                          const candidate = sortedEntries[i];
-                          const cOpt = candidate.options[0];
-                          const isTransport = cOpt?.category === 'transfer' || 
-                            (candidate.from_entry_id != null && candidate.to_entry_id != null) ||
-                            ['drive to', 'walk to', 'transit to', 'cycle to'].some(p => (cOpt?.name?.toLowerCase() ?? '').startsWith(p));
-                          if (!isTransport && !candidate.linked_flight_id) {
-                            nextVisible = candidate;
-                            break;
-                          }
-                        }
-                      }
-                      if (!nextVisible) return null;
-
-                      const transportEnd = new Date(entry.end_time).getTime();
-                      const nextStart = new Date(nextVisible.start_time).getTime();
-                      const gapMs = nextStart - transportEnd;
-                      console.log('[SNAP-DEBUG]', {
-                        entryName: primaryOption.name,
-                        entryEndUtc: entry.end_time,
-                        nextEntryName: nextVisible.options[0]?.name,
-                        nextEntryStartUtc: nextVisible.start_time,
-                        gapMs,
-                        hasToEntryId: !!entry.to_entry_id,
-                        nextIsLocked: nextVisible.is_locked,
-                        shouldShowSnap: gapMs > 0,
-                      });
-                      if (gapMs <= 0) return null;
-
-                      const handleSnapNext = async () => {
-                        if (nextVisible.is_locked) {
-                          toast.error('This event is locked and cannot be moved');
-                          return;
-                        }
-
-                        const transportEndMs = new Date(entry.end_time).getTime();
-                        const duration = new Date(nextVisible.end_time).getTime() - new Date(nextVisible.start_time).getTime();
-
-                        // Recalculate transport duration for the current mode
-                        const fromAddr = primaryOption.departure_location;
-                        const toAddr = primaryOption.arrival_location;
-                        let finalTransportEndMs = transportEndMs;
-
-                        if (fromAddr && toAddr) {
-                          try {
-                            const nameLower = primaryOption.name.toLowerCase();
-                            let currentMode = 'transit';
-                            if (nameLower.startsWith('walk')) currentMode = 'walk';
-                            else if (nameLower.startsWith('drive')) currentMode = 'drive';
-                            else if (nameLower.startsWith('cycle') || nameLower.startsWith('bicycl')) currentMode = 'bicycle';
-
-                            const { data: dirData, error: dirError } = await supabase.functions.invoke('google-directions', {
-                              body: {
-                                fromAddress: fromAddr,
-                                toAddress: toAddr,
-                                mode: currentMode,
-                                departureTime: entry.start_time,
-                              },
-                            });
-
-                            if (!dirError && dirData?.duration_min != null) {
-                              const blockDur = Math.ceil(dirData.duration_min / 5) * 5;
-                              const newTransportEnd = new Date(new Date(entry.start_time).getTime() + blockDur * 60000).toISOString();
-                              finalTransportEndMs = new Date(newTransportEnd).getTime();
-
-                              await supabase.from('entries')
-                                .update({ end_time: newTransportEnd })
-                                .eq('id', entry.id);
-
-                              if (dirData.distance_km != null) {
-                                await supabase.from('entry_options')
-                                  .update({ distance_km: dirData.distance_km, route_polyline: dirData.polyline ?? null } as any)
-                                  .eq('id', primaryOption.id);
+                        {/* SNAP button below transport cards */}
+                        {isTransport && (() => {
+                          // Find the next non-linked entry in sortedEntries
+                          let nextVisible = entry.to_entry_id
+                            ? sortedEntries.find(e => e.id === entry.to_entry_id)
+                            : null;
+                          // Fallback: find next chronological non-transport, non-linked entry
+                          if (!nextVisible) {
+                            const entryIdx = sortedEntries.findIndex(e => e.id === entry.id);
+                            for (let i = entryIdx + 1; i < sortedEntries.length; i++) {
+                              const candidate = sortedEntries[i];
+                              const cOpt = candidate.options[0];
+                              const isTransport = cOpt?.category === 'transfer' || 
+                                (candidate.from_entry_id != null && candidate.to_entry_id != null) ||
+                                ['drive to', 'walk to', 'transit to', 'cycle to'].some(p => (cOpt?.name?.toLowerCase() ?? '').startsWith(p));
+                              if (!isTransport && !candidate.linked_flight_id) {
+                                nextVisible = candidate;
+                                break;
                               }
                             }
-                          } catch (err) {
-                            console.error('Transport recalculation failed:', err);
                           }
-                        }
+                          if (!nextVisible) return null;
 
-                        // Snap next event to transport end
-                        const newStart = new Date(finalTransportEndMs).toISOString();
-                        const newEnd = new Date(finalTransportEndMs + duration).toISOString();
+                          const transportEnd = new Date(entry.end_time).getTime();
+                          const nextStart = new Date(nextVisible.start_time).getTime();
+                          const gapMs = nextStart - transportEnd;
+                          console.log('[SNAP-DEBUG]', {
+                            entryName: primaryOption.name,
+                            entryEndUtc: entry.end_time,
+                            nextEntryName: nextVisible.options[0]?.name,
+                            nextEntryStartUtc: nextVisible.start_time,
+                            gapMs,
+                            hasToEntryId: !!entry.to_entry_id,
+                            nextIsLocked: nextVisible.is_locked,
+                            shouldShowSnap: gapMs > 0,
+                          });
+                          if (gapMs <= 0) return null;
 
-                        await supabase.from('entries')
-                          .update({ start_time: newStart, end_time: newEnd })
-                          .eq('id', nextVisible.id);
+                          const handleSnapNext = async () => {
+                            if (nextVisible.is_locked) {
+                              toast.error('This event is locked and cannot be moved');
+                              return;
+                            }
 
-                        onVoteChange();
-                        toast.success('Snapped next event into place');
-                      };
+                            const transportEndMs = new Date(entry.end_time).getTime();
+                            const duration = new Date(nextVisible.end_time).getTime() - new Date(nextVisible.start_time).getTime();
 
-                      return (
-                        <button
-                          onClick={handleSnapNext}
-                          className="absolute z-20 left-1/2 -translate-x-1/2 rounded-full bg-green-100 dark:bg-green-900/30 px-3 py-0.5 text-[10px] font-bold text-green-600 dark:text-green-300 border border-green-200 dark:border-green-800/40 hover:bg-green-200 dark:hover:bg-green-800/40 transition-colors"
-                          style={{ top: height + 2 }}
-                        >
-                          SNAP
-                        </button>
-                      );
-                    })()}
+                            // Recalculate transport duration for the current mode
+                            const fromAddr = primaryOption.departure_location;
+                            const toAddr = primaryOption.arrival_location;
+                            let finalTransportEndMs = transportEndMs;
+
+                            if (fromAddr && toAddr) {
+                              try {
+                                const nameLower = primaryOption.name.toLowerCase();
+                                let currentMode = 'transit';
+                                if (nameLower.startsWith('walk')) currentMode = 'walk';
+                                else if (nameLower.startsWith('drive')) currentMode = 'drive';
+                                else if (nameLower.startsWith('cycle') || nameLower.startsWith('bicycl')) currentMode = 'bicycle';
+
+                                const { data: dirData, error: dirError } = await supabase.functions.invoke('google-directions', {
+                                  body: {
+                                    fromAddress: fromAddr,
+                                    toAddress: toAddr,
+                                    mode: currentMode,
+                                    departureTime: entry.start_time,
+                                  },
+                                });
+
+                                if (!dirError && dirData?.duration_min != null) {
+                                  const blockDur = Math.ceil(dirData.duration_min / 5) * 5;
+                                  const newTransportEnd = new Date(new Date(entry.start_time).getTime() + blockDur * 60000).toISOString();
+                                  finalTransportEndMs = new Date(newTransportEnd).getTime();
+
+                                  await supabase.from('entries')
+                                    .update({ end_time: newTransportEnd })
+                                    .eq('id', entry.id);
+
+                                  if (dirData.distance_km != null) {
+                                    await supabase.from('entry_options')
+                                      .update({ distance_km: dirData.distance_km, route_polyline: dirData.polyline ?? null } as any)
+                                      .eq('id', primaryOption.id);
+                                  }
+                                }
+                              } catch (err) {
+                                console.error('Transport recalculation failed:', err);
+                              }
+                            }
+
+                            // Snap next event to transport end
+                            const newStart = new Date(finalTransportEndMs).toISOString();
+                            const newEnd = new Date(finalTransportEndMs + duration).toISOString();
+
+                            await supabase.from('entries')
+                              .update({ start_time: newStart, end_time: newEnd })
+                              .eq('id', nextVisible.id);
+
+                            onVoteChange();
+                            toast.success('Snapped next event into place');
+                          };
+
+                          return (
+                            <button
+                              onClick={handleSnapNext}
+                              className="absolute z-20 left-1/2 -translate-x-1/2 rounded-full bg-green-100 dark:bg-green-900/30 px-3 py-0.5 text-[10px] font-bold text-green-600 dark:text-green-300 border border-green-200 dark:border-green-800/40 hover:bg-green-200 dark:hover:bg-green-800/40 transition-colors"
+                              style={{ top: height + 2 }}
+                            >
+                              SNAP
+                            </button>
+                          );
+                        })()}
+                      </div>
+                    </div>
 
                     {/* Travel segment connector */}
                     {showTravelSeg && (
