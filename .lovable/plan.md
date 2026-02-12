@@ -1,156 +1,108 @@
 
-# Fix dayTimezoneMap activeTz + SNAP Button + Remove Debug Logs
 
-## Root Cause
+# Fix Card Position Mismatch, Gutter Labels, and SNAP Debug
 
-Three distinct issues, all clearly identified:
+## Root Cause: Gutter Double-Counts TZ Offset
 
-### 1. `activeTz` never transitions on flight days
+The timeline grid has two coordinate systems fighting each other:
 
-In `Timeline.tsx` line 286, `activeTz` is set to `currentTz` which is the departure TZ (set on line 264). The arrival TZ is only applied to `currentTz` on line 288 for the **next** day. The flight day itself always has `activeTz = departureTz`.
+- **Cards** are positioned using `getHourInTimezone(entry.start_time, resolvedTz)`. For post-flight entries, `resolvedTz = Europe/Amsterdam`, so Cocktails gets `startHour = 12.25`. Card top = `12.25 * PIXELS_PER_HOUR`.
 
-This affects:
-- `getEntriesForDay` (line 366-368): day-filtering uses departure TZ
-- `handleDragCommit` (CalendarDay line 141): drag fallback uses `activeTz`
-- `resolveTimezoneForTime` (line 381): matches day using `info.activeTz`
+- **Gutter labels** in `TimeSlotGrid` detect it's a flight day (`hasDualTz = true`), then for hours after the flight midpoint, display `hour + tzOffset`. Hour 12 on the pixel grid becomes label "13:00" (12 + 1h CET offset).
 
-The per-entry rendering in CalendarDay (lines 620-636) works correctly because it independently checks `entry.start_time >= flightEndUtc`. But all other downstream consumers of `activeTz` are wrong.
+Result: A card at pixel position 12.25 visually appears at the gutter's "13:15" mark instead of "12:15".
 
-**Fix**: After building the flights array for a flight day, set `activeTz` to the last flight's **destination** TZ. This is the correct "post-flight" TZ for the majority of the day. Pre-flight entries are handled by `resolveEntryTz()` which checks flight boundaries regardless of `activeTz`.
-
-### 2. `flightEndUtc` missing from TypeScript type
-
-Line 230 declares flights as `Array<{ originTz, destinationTz, flightStartHour, flightEndHour }>` — no `flightEndUtc`. But line 283 adds it. This forces `(lastFlight as any).flightEndUtc` casts in `resolveTimezoneForTime` (line 384).
-
-**Fix**: Add `flightEndUtc: string` to the type declaration.
-
-### 3. SNAP button requires `to_entry_id` with no fallback
-
-Line 1013-1015: `nextVisible` is only found via `entry.to_entry_id`. Old transport entries (and even some new ones) may have `to_entry_id = NULL`, causing `nextVisible = null` and the SNAP button to never render.
-
-**Fix**: Add a fallback that finds the next chronological non-transport, non-linked entry in `sortedEntries` when `to_entry_id` is null.
-
----
+The fix is simple: since cards already position themselves in the correct local-time hours, the gutter labels should just show the raw hour numbers without any offset. The gutter is a neutral 0-23 scale; pre-flight cards use departure-TZ hours and post-flight cards use destination-TZ hours, and both are already at the correct pixel positions.
 
 ## Changes
 
-### File: `src/pages/Timeline.tsx`
+### Fix 1: Remove gutter label TZ offset (TimeSlotGrid.tsx)
 
-**1. Fix type declaration (line 230):**
-Add `flightEndUtc` to the flights array type:
+**File: `src/components/timeline/TimeSlotGrid.tsx`** (lines 192-217)
+
+Remove the entire dual-TZ label offset logic. Replace with a single simple label for all hours:
+
 ```typescript
-const map = new Map<string, { 
-  activeTz: string; 
-  flights: Array<{ 
-    originTz: string; destinationTz: string; 
-    flightStartHour: number; flightEndHour: number; 
-    flightEndUtc: string;
-  }> 
-}>();
+{hours.map(hour => {
+  const displayHour = `${String(hour).padStart(2, '0')}:00`;
+
+  return (
+    <div
+      key={hour}
+      className="absolute left-0 right-0 border-t border-border/30"
+      style={{ top: (hour - startHour) * pixelsPerHour }}
+    >
+      <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -46, width: 30 }}>
+        {displayHour}
+      </span>
+    </div>
+  );
+})}
 ```
 
-**2. Fix activeTz transition (line 286):**
-Change from:
-```typescript
-map.set(dayStr, { activeTz: currentTz, flights });
-```
-To:
-```typescript
-// activeTz = destination TZ after last flight (most entries on flight day are post-flight)
-const postFlightTz = flightEntries[flightEntries.length - 1].options[0].arrival_tz!;
-map.set(dayStr, { activeTz: postFlightTz, flights });
-```
+Also remove the now-unused `getHourTz`, `getTzOffsetHours`, `tzInfo` computed values, the `hasDualTz` variable, and the `getUtcOffsetHoursDiff` / `getUtcOffsetMinutes` imports (since the gutter no longer needs them). Keep the `flights` prop in the interface for TimeSlotGrid since it's still used for slot click TZ resolution.
 
-This means for the flight day, `activeTz` = destination TZ. Pre-flight entries are correctly resolved by `resolveEntryTz()` which checks `entry.start_time < flightEndUtc` and returns `originTz`.
+### Fix 2: Add POSITION-DEBUG log (CalendarDay.tsx)
 
-**3. Remove `as any` casts in `resolveTimezoneForTime` (lines 384, 386):**
-Since `flightEndUtc` is now in the type, change:
-```typescript
-if ((lastFlight as any).flightEndUtc) {
-  ...new Date((lastFlight as any).flightEndUtc)...
-```
-To:
-```typescript
-if (lastFlight.flightEndUtc) {
-  ...new Date(lastFlight.flightEndUtc)...
-```
+**File: `src/components/timeline/CalendarDay.tsx`** (after line 670)
 
-**4. Fix `dayLocationMap` flight day TZ (line 332):**
-Currently uses `homeTimezone`. Change to use the flight's own arrival TZ:
-```typescript
-const flightOpt = flight.options[0];
-const flightArrTz = flightOpt?.arrival_tz || homeTimezone;
-const flightDay = getDateInTimezone(flight.end_time, flightArrTz);
-```
+Add a temporary debug log right where the CSS top is computed:
 
-### File: `src/components/timeline/CalendarDay.tsx`
-
-**1. Fix SNAP button fallback (lines 1013-1016):**
-Replace:
 ```typescript
-const nextVisible = entry.to_entry_id
-  ? sortedEntries.find(e => e.id === entry.to_entry_id)
-  : null;
-if (!nextVisible) return null;
-```
-With:
-```typescript
-let nextVisible = entry.to_entry_id
-  ? sortedEntries.find(e => e.id === entry.to_entry_id)
-  : null;
-// Fallback: find next chronological non-transport, non-linked entry
-if (!nextVisible) {
-  const entryIdx = sortedEntries.findIndex(e => e.id === entry.id);
-  for (let i = entryIdx + 1; i < sortedEntries.length; i++) {
-    const candidate = sortedEntries[i];
-    if (!isTransportEntry(candidate) && !candidate.linked_flight_id) {
-      nextVisible = candidate;
-      break;
-    }
-  }
-}
-if (!nextVisible) return null;
-```
-
-Note: `isTransportEntry` is defined earlier in the same render scope (line 422). However, the SNAP button code is inside the per-entry render block (line 592+) which is a child scope. We need to either move `isTransportEntry` to be accessible here, or inline the check. Since `isTransportEntry` is already defined in the parent IIFE (line 422), the SNAP code at line 1011 is inside the same IIFE and has access to it.
-
-**2. Add SNAP-DEBUG logging (temporary):**
-After computing `gapMs`, add:
-```typescript
-console.log('[SNAP-DEBUG]', {
-  entryName: primaryOption.name,
-  entryEndUtc: entry.end_time,
-  nextEntryName: nextVisible.options[0]?.name,
-  nextEntryStartUtc: nextVisible.start_time,
-  gapMs,
-  isTransport,
-  hasToEntryId: !!entry.to_entry_id,
-  nextIsLocked: nextVisible.is_locked,
-  shouldShowSnap: gapMs > 0,
+console.log('[POSITION-DEBUG]', primaryOption.name, {
+  entryStartHour,
+  groupStartHour,
+  topPx: top,
+  heightPx: height,
+  pixelsPerHour: PIXELS_PER_HOUR,
+  resolvedTz,
+  activeTz,
 });
 ```
 
-**3. Remove all TZ-DEBUG console.logs:**
-- Remove lines 606-607 (the `_preResolvedTz` diagnostic variable)
-- Remove lines 643-646 (the `[TZ-DEBUG]` console.log block)
+### Fix 3: Verify SNAP-DEBUG path (CalendarDay.tsx)
 
----
+The SNAP-DEBUG log at line 1038 is already present. The issue is likely that the data migration for transport category didn't execute, so `isTransport` (line 704) is false and the SNAP block at line 1013 is never entered.
 
-## What is NOT changed
+Add a broader debug log inside the `sortedEntries.map` loop, right after the `isTransport` calculation (after line 709):
 
-- `resolveEntryTz()` in timezoneUtils.ts (already correct -- checks flight boundaries)
-- CalendarDay per-entry TZ rendering logic (lines 620-636) -- already correct
-- Transport generation UTC arithmetic
-- SNAP click handler logic (the `handleSnapNext` function)
-- Gap button detection logic (already uses `resolveEntryTz`)
-- EntrySheet `resolvedTz` prop plumbing (already fixed)
-- `resolveTimezoneForTime` helper (already correct, just removing `as any`)
+```typescript
+if (primaryOption.name?.toLowerCase().includes('drive') || 
+    primaryOption.name?.toLowerCase().includes('walk') ||
+    primaryOption.name?.toLowerCase().includes('transit')) {
+  console.log('[TRANSPORT-DEBUG]', primaryOption.name, {
+    category: primaryOption.category,
+    isTransport,
+    fromEntryId: entry.from_entry_id,
+    toEntryId: entry.to_entry_id,
+  });
+}
+```
 
-## Expected outcome after fix
+This will tell us whether the data migration actually set `category = 'transfer'` on the old transport entries.
 
-- `activeTz` = `Europe/Amsterdam` for the flight day (post-flight)
-- `activeTz` = `Europe/Amsterdam` for all subsequent days until another flight
-- Card positions match card time labels (no 1-hour offset)
-- SNAP button appears for any transport with a gap to its next event
-- No excessive TZ-DEBUG logging
-- SNAP-DEBUG logs available for verification (temporary)
+### Fix 4: activeTz for pre-flight entries (no code change needed)
+
+The TZ-DEBUG shows `resolvedTz=Europe/London` for the coach (pre-flight), which is correct. The `activeTz=Europe/Amsterdam` is misleading but harmless for rendering because the per-entry `resolvedTz` override (lines 618-633) correctly detects pre-flight entries and switches to `originTz`.
+
+The only downstream impact of `activeTz` being the destination TZ is:
+- `handleDragCommit` fallback (line 141): If dragging a pre-flight entry, it uses `activeTz` (Amsterdam) instead of London. This is a minor edge case that can be addressed later.
+- TimeSlotGrid slot clicks: clicking a pre-flight time slot uses Amsterdam TZ. Also minor.
+
+These are acceptable trade-offs for now. The critical rendering path (card positions + gutter labels) will be fixed.
+
+## Files Changed
+
+| File | Changes |
+|------|---------|
+| `src/components/timeline/TimeSlotGrid.tsx` | Remove dual-TZ label offset logic; simplify to raw hour display; remove unused computed values and imports |
+| `src/components/timeline/CalendarDay.tsx` | Add POSITION-DEBUG and TRANSPORT-DEBUG temporary console.logs |
+
+## Expected Outcome
+
+- Gutter labels show 00:00 through 23:00 without TZ offset
+- Card at `startHour=12.25` aligns with the 12:00-13:00 gutter range (correct)
+- Pre-flight cards at `startHour=5.0` align with the 05:00 gutter mark (correct)
+- POSITION-DEBUG logs confirm card pixel positions match their startHour values
+- TRANSPORT-DEBUG logs reveal whether the data migration applied `category='transfer'`
+- SNAP-DEBUG logs appear if transport entries are correctly detected
