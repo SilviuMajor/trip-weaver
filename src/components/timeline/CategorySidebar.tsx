@@ -20,6 +20,7 @@ interface CategorySidebarProps {
   onAddEntry?: (categoryId: string) => void;
   onDuplicate?: (entry: EntryWithOptions) => void;
   onInsert?: (entry: EntryWithOptions) => void;
+  compact?: boolean;
 }
 
 interface DeduplicatedEntry {
@@ -38,6 +39,7 @@ const CategorySidebar = ({
   onAddEntry,
   onDuplicate,
   onInsert,
+  compact = false,
 }: CategorySidebarProps) => {
   const isMobile = useIsMobile();
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
@@ -283,10 +285,14 @@ const CategorySidebar = ({
     <div
       className={cn(
         'shrink-0 border-l border-border bg-background overflow-hidden transition-all duration-300',
-        'w-[40vw] max-w-[500px]'
+        open
+          ? compact
+            ? 'w-[25vw]'
+            : 'w-[30vw] max-w-[500px]'
+          : 'w-0'
       )}
     >
-      {panelContent}
+      {open && panelContent}
     </div>
   );
 };

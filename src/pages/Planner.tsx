@@ -177,9 +177,7 @@ const Planner = () => {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <TimelineHeader trip={trip} tripId={tripId ?? ''} />
-      <TripNavBar activeTab="planner" onTabChange={(tab) => {
-        if (tab === 'timeline') navigate(`/trip/${tripId}/timeline`);
-      }} />
+      <TripNavBar liveOpen={false} plannerOpen={true} isMobile={false} onToggleLive={() => {}} onTogglePlanner={() => {}} onTimelineOnly={() => navigate(`/trip/${tripId}/timeline`)} />
 
       {loading ? (
         <div className="flex flex-1 items-center justify-center">
