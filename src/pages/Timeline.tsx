@@ -18,6 +18,7 @@ import TripNavBar from '@/components/timeline/TripNavBar';
 import CalendarDay from '@/components/timeline/CalendarDay';
 import EntrySheet from '@/components/timeline/EntrySheet';
 import CategorySidebar from '@/components/timeline/CategorySidebar';
+import LivePanel from '@/components/timeline/LivePanel';
 import ConflictResolver from '@/components/timeline/ConflictResolver';
 import DayPickerDialog from '@/components/timeline/DayPickerDialog';
 import HotelWizard from '@/components/timeline/HotelWizard';
@@ -63,8 +64,9 @@ const Timeline = () => {
   // Category sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-
-
+  // Live panel state
+  const [liveOpen, setLiveOpen] = useState(false);
+  const [mobileView, setMobileView] = useState<'timeline' | 'live'>('timeline');
   // Conflict resolution state
   const [conflictOpen, setConflictOpen] = useState(false);
   const [currentConflict, setCurrentConflict] = useState<ConflictInfo | null>(null);
@@ -1395,8 +1397,35 @@ const Timeline = () => {
         tripId={tripId ?? ''}
       />
       <TripNavBar
-        activeTab={sidebarOpen ? 'planner' : 'timeline'}
-        onTabChange={(tab) => setSidebarOpen(tab === 'planner')}
+        liveOpen={liveOpen}
+        plannerOpen={sidebarOpen}
+        isMobile={isMobile}
+        mobileView={mobileView}
+        onToggleLive={() => {
+          if (isMobile) {
+            setMobileView(mobileView === 'live' ? 'timeline' : 'live');
+            setSidebarOpen(false);
+          } else {
+            setLiveOpen(!liveOpen);
+          }
+        }}
+        onTogglePlanner={() => {
+          if (isMobile) {
+            setMobileView('timeline');
+            setSidebarOpen(!sidebarOpen);
+          } else {
+            setSidebarOpen(!sidebarOpen);
+          }
+        }}
+        onTimelineOnly={() => {
+          if (isMobile) {
+            setMobileView('timeline');
+            setSidebarOpen(false);
+          } else {
+            setLiveOpen(false);
+            setSidebarOpen(false);
+          }
+        }}
       />
 
       {/* Floating Action Button */}
@@ -1436,53 +1465,70 @@ const Timeline = () => {
       ) : (
         <>
           <div className="flex flex-1 overflow-hidden">
-            <main ref={mainScrollRef} className="flex-1 overflow-y-auto pb-20">
-              {days.map((day, index) => {
-                const dayStr = format(day, 'yyyy-MM-dd');
-                const tzInfo = dayTimezoneMap.get(dayStr);
-                const dayLoc = dayLocationMap.get(dayStr);
-                return (
-                  <CalendarDay
-                    ref={setDayRef(day)}
-                    key={day.toISOString()}
-                    date={day}
-                    entries={getEntriesForDay(day)}
-                    allEntries={scheduledEntries}
-                    formatTime={formatTime}
-                    homeTimezone={homeTimezone}
-                    userLat={dayLoc?.lat ?? userLat}
-                    userLng={dayLoc?.lng ?? userLng}
-                    votingLocked={trip.voting_locked}
-                    userId={currentUser?.id}
-                    userVotes={userVotes}
-                    onVoteChange={fetchData}
-                    onCardTap={handleCardTap}
-                    travelSegments={travelSegments}
-                    weatherData={getWeatherForDay(day)}
-                    dayLabel={isUndated ? `Day ${index + 1}` : undefined}
-                    dayIndex={index}
-                    isFirstDay={index === 0}
-                    isLastDay={index === days.length - 1}
-                    onAddBetween={handleAddBetween}
-                    onAddTransport={handleAddTransport}
-                    onGenerateTransport={handleGenerateTransportDirect}
-                    onDragSlot={handleDragSlot}
-                    onEntryTimeChange={handleEntryTimeChange}
-                    onDropFromPanel={(entryId, hourOffset) => handleDropOnTimeline(entryId, day, hourOffset)}
-                    onModeSwitchConfirm={handleModeSwitchConfirm}
-                    onDeleteTransport={handleDeleteTransport}
-                    activeTz={tzInfo?.activeTz}
-                    dayFlights={tzInfo?.flights}
-                    isEditor={isEditor}
-                    onToggleLock={handleToggleLock}
-                    scrollContainerRef={mainScrollRef}
-                    dayBoundaries={dayBoundaries}
-                  />
-                );
-              })}
-            </main>
+            {/* Desktop Live panel */}
+            {!isMobile && (
+              <LivePanel
+                open={liveOpen}
+                onOpenChange={setLiveOpen}
+                compact={liveOpen && sidebarOpen}
+              />
+            )}
 
-            {/* Desktop sidebar */}
+            {/* Mobile Live full-screen takeover */}
+            {isMobile && mobileView === 'live' && (
+              <LivePanel open={true} onOpenChange={() => setMobileView('timeline')} />
+            )}
+
+            {/* Timeline main content */}
+            {(!isMobile || mobileView === 'timeline') && (
+              <main ref={mainScrollRef} className="flex-1 overflow-y-auto pb-20">
+                {days.map((day, index) => {
+                  const dayStr = format(day, 'yyyy-MM-dd');
+                  const tzInfo = dayTimezoneMap.get(dayStr);
+                  const dayLoc = dayLocationMap.get(dayStr);
+                  return (
+                    <CalendarDay
+                      ref={setDayRef(day)}
+                      key={day.toISOString()}
+                      date={day}
+                      entries={getEntriesForDay(day)}
+                      allEntries={scheduledEntries}
+                      formatTime={formatTime}
+                      homeTimezone={homeTimezone}
+                      userLat={dayLoc?.lat ?? userLat}
+                      userLng={dayLoc?.lng ?? userLng}
+                      votingLocked={trip.voting_locked}
+                      userId={currentUser?.id}
+                      userVotes={userVotes}
+                      onVoteChange={fetchData}
+                      onCardTap={handleCardTap}
+                      travelSegments={travelSegments}
+                      weatherData={getWeatherForDay(day)}
+                      dayLabel={isUndated ? `Day ${index + 1}` : undefined}
+                      dayIndex={index}
+                      isFirstDay={index === 0}
+                      isLastDay={index === days.length - 1}
+                      onAddBetween={handleAddBetween}
+                      onAddTransport={handleAddTransport}
+                      onGenerateTransport={handleGenerateTransportDirect}
+                      onDragSlot={handleDragSlot}
+                      onEntryTimeChange={handleEntryTimeChange}
+                      onDropFromPanel={(entryId, hourOffset) => handleDropOnTimeline(entryId, day, hourOffset)}
+                      onModeSwitchConfirm={handleModeSwitchConfirm}
+                      onDeleteTransport={handleDeleteTransport}
+                      activeTz={tzInfo?.activeTz}
+                      dayFlights={tzInfo?.flights}
+                      isEditor={isEditor}
+                      onToggleLock={handleToggleLock}
+                      scrollContainerRef={mainScrollRef}
+                      dayBoundaries={dayBoundaries}
+                    />
+                  );
+                })}
+              </main>
+            )}
+
+            {/* Desktop Planner panel */}
             {!isMobile && (
               <CategorySidebar
                 open={sidebarOpen}
@@ -1509,12 +1555,12 @@ const Timeline = () => {
                 }}
                 onDuplicate={handleDuplicate}
                 onInsert={handleInsert}
+                compact={liveOpen && sidebarOpen}
               />
             )}
           </div>
 
-
-          {/* Mobile sidebar */}
+          {/* Mobile Planner overlay */}
           {isMobile && (
             <CategorySidebar
               open={sidebarOpen}
@@ -1543,7 +1589,6 @@ const Timeline = () => {
               onInsert={handleInsert}
             />
           )}
-
           <EntrySheet
             mode={sheetMode ?? 'create'}
             open={sheetOpen}

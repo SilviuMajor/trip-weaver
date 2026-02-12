@@ -1,15 +1,47 @@
-import { Calendar, ClipboardList } from 'lucide-react';
+import { Calendar, ClipboardList, Radio } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface TripNavBarProps {
-  activeTab: 'timeline' | 'planner';
-  onTabChange: (tab: 'timeline' | 'planner') => void;
+  liveOpen: boolean;
+  plannerOpen: boolean;
+  isMobile: boolean;
+  mobileView?: 'timeline' | 'live';
+  onToggleLive: () => void;
+  onTogglePlanner: () => void;
+  onTimelineOnly: () => void;
 }
 
-const TripNavBar = ({ activeTab, onTabChange }: TripNavBarProps) => {
+const TripNavBar = ({
+  liveOpen,
+  plannerOpen,
+  isMobile,
+  mobileView = 'timeline',
+  onToggleLive,
+  onTogglePlanner,
+  onTimelineOnly,
+}: TripNavBarProps) => {
   const tabs = [
-    { key: 'timeline' as const, label: 'Timeline', icon: Calendar },
-    { key: 'planner' as const, label: 'Planner', icon: ClipboardList },
+    {
+      key: 'live' as const,
+      label: 'Live',
+      icon: Radio,
+      active: isMobile ? mobileView === 'live' : liveOpen,
+      onClick: onToggleLive,
+    },
+    {
+      key: 'timeline' as const,
+      label: 'Timeline',
+      icon: Calendar,
+      active: isMobile ? mobileView === 'timeline' && !plannerOpen : !liveOpen && !plannerOpen,
+      onClick: onTimelineOnly,
+    },
+    {
+      key: 'planner' as const,
+      label: 'Planner',
+      icon: ClipboardList,
+      active: isMobile ? plannerOpen : plannerOpen,
+      onClick: onTogglePlanner,
+    },
   ];
 
   return (
@@ -18,10 +50,10 @@ const TripNavBar = ({ activeTab, onTabChange }: TripNavBarProps) => {
         {tabs.map(tab => (
           <button
             key={tab.key}
-            onClick={() => onTabChange(tab.key)}
+            onClick={tab.onClick}
             className={cn(
               'flex flex-1 items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors',
-              activeTab === tab.key
+              tab.active
                 ? 'text-primary border-b-2 border-primary font-semibold'
                 : 'text-muted-foreground hover:text-foreground'
             )}

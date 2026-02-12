@@ -35,7 +35,7 @@ const Live = () => {
         trip={trip}
         tripId={tripId ?? ''}
       />
-      <TripNavBar activeTab="timeline" onTabChange={() => navigate(`/trip/${tripId}/timeline`)} />
+      <TripNavBar liveOpen={false} plannerOpen={false} isMobile={false} onToggleLive={() => {}} onTogglePlanner={() => {}} onTimelineOnly={() => navigate(`/trip/${tripId}/timeline`)} />
 
       <div className="flex flex-1 items-center justify-center p-6">
         <div className="text-center">
