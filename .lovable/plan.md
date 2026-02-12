@@ -1,102 +1,92 @@
 
-# Midnight Day Marker Redesign + Sticky Floating Day Pill
 
-## Part 1 -- Midnight Day Marker Redesign
+# Fix Day Pill Timezone + Sticky Positioning
 
-**File: `src/components/timeline/ContinuousTimeline.tsx`**
+## Fix 1 — Timezone on day pills uses wrong TZ
 
-Replace the current midnight day marker block (lines 500-544) with a cleaner layout:
+**Root cause**: `getTzAbbrev(dayDate)` at line 129 uses `tzInfo.activeTz`, which on flight days resolves to the **destination** timezone. But midnight (00:00) of a flight day is still in the **origin** timezone -- the flight hasn't departed yet.
 
-**Current** (lines 507-543): A stacked block in the gutter showing day name, TZ abbreviation, and optional TODAY badge, positioned at `left: -80`. Plus a dashed midnight line for `dayIndex > 0`.
+**File**: `src/components/timeline/ContinuousTimeline.tsx`
 
-**New**: The `00:00` hour label continues to render normally from the hour lines loop (already works -- `globalHour % 24 === 0` produces "00:00"). The midnight marker becomes:
+**Change**: Create a new helper `getMidnightTzAbbrev(dayDate)` that resolves the timezone at midnight for each day:
 
-- A small pill/badge positioned to the **right** of the 00:00 label, inline with the hour line
-- Pill content: `SUN 22 FEB . CET` (day name, date, dot separator, TZ abbreviation)
-- Pill style: `rounded-full bg-secondary/80 px-2 py-0.5 text-[9px] font-semibold text-secondary-foreground` (warm beige/tan from the app palette)
-- Positioned at `left: -12` (just right of the 00:00 label which ends around left: -16), `top: globalHour * 80 - 8`
-- For `dayIndex === 0` (globalHour 0), append "Trip Begins" text or a small flag emoji inside the pill: `SUN 22 FEB . CET . Trip Begins`
-- TODAY badge: If `isToday(day)`, add a small `bg-primary text-primary-foreground` "TODAY" tag beside or below the pill
-- Keep the dashed midnight line for `dayIndex > 0` (unchanged)
-- Add a `data-day-marker` attribute and `data-day-index` to each midnight marker div for the IntersectionObserver in Part 2
+- Look up `dayTimezoneMap` for the day's date string
+- If the day has flights (`tzInfo.flights.length > 0`), use `flights[0].originTz` -- this is the timezone at midnight before any flight departs
+- If no flights, use `tzInfo.activeTz` as normal
+- Convert the resolved IANA timezone to an abbreviation using `Intl.DateTimeFormat`
 
-Remove the old stacked gutter block with `left: -80` and the `flex-col items-end` layout.
+Apply this helper to:
+- The inline midnight day pills (line 542, replacing `getTzAbbrev(day)`)
+- The sticky pill's TZ abbreviation (line 471, replacing `getTzAbbrev(days[currentDayIndex])`)
 
-## Part 2 -- Sticky Floating Day Pill
+This ensures:
+- Day 1 (flight departs London): pill shows "GMT" (origin TZ at midnight)
+- Day 2 (already in Amsterdam): pill shows "CET" (activeTz, no flights that day, or originTz of any Day 2 flight)
 
-**File: `src/components/timeline/ContinuousTimeline.tsx`**
+## Fix 2 — Sticky pill must be fixed at top, horizontally centred
 
-Add scroll-tracking state and a sticky pill element:
+**Root cause**: The sticky pill at line 476 uses `sticky top-0` but it scrolls away because the outer wrapper scrolls. The pill also needs to be centred, not left-aligned.
 
-1. **State**: `const [currentDayIndex, setCurrentDayIndex] = useState(0)`
+**Changes** (same file):
 
-2. **Scroll listener** (useEffect): Attach a scroll event listener to `scrollContainerRef.current`. On scroll:
-   - Calculate approximate day: `Math.floor(scrollTop / (24 * PIXELS_PER_HOUR))` after accounting for `gridTopPx`
-   - More precisely: `dayIndex = Math.max(0, Math.min(days.length - 1, Math.floor((scrollTop - gridTopPx + 60) / (24 * PIXELS_PER_HOUR))))`
-   - The `+ 60` offset accounts for the sticky pill being ~60px from the top of the scroll area, so the day transitions as the midnight line passes behind the pill
-   - `setCurrentDayIndex(clamped value)`
+1. **Centre the pill**: Change the sticky pill wrapper from `flex justify-start pl-1` to `flex justify-center`. This centres the pill horizontally in the timeline area.
 
-3. **Sticky pill element**: Rendered as a `position: sticky; top: 0` element at the top of the ContinuousTimeline's outer wrapper (above the grid):
-   - Actually, since the scroll container is `<main>`, the sticky element should be inside the component but with `position: sticky; top: 0; z-index: 40`
-   - Wrap the existing content in a container, and place the sticky pill as a sibling before the grid
-   - Content: `SUN 22 FEB . CET` derived from `days[currentDayIndex]`
-   - Style: `sticky top-0 z-40 flex items-center gap-1.5 rounded-full bg-background/80 backdrop-blur-sm border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-sm`
-   - Left-aligned: wrap in a div with `flex justify-start pl-1 py-1`
-   - TZ derived from `dayTimezoneMap.get(format(days[currentDayIndex], 'yyyy-MM-dd'))`
+2. **Ensure sticky works**: The pill's parent `<div className="mx-auto max-w-2xl px-4 py-2">` is inside the scroll container (`<main>`). `position: sticky; top: 0` should work here as long as there's no `overflow: hidden` on an ancestor between the sticky element and the scroll container. The sticky div needs to be a direct child of a container that doesn't clip overflow.
 
-4. **Smooth transition**: The pill text updates instantly when `currentDayIndex` changes (no animation needed -- the scroll tracking makes it feel natural).
+   Move the sticky pill **outside** the `max-w-2xl` wrapper so it's a sibling, not a child. Wrap the entire return in a fragment: the sticky pill as the first element (full-width, centred content), then the existing `max-w-2xl` content below.
 
-## Detailed Code Changes
+3. **Improve readability**: Add slightly stronger background and shadow to the pill so it's clearly visible over scrolling content. Use `bg-background/90 backdrop-blur-md shadow-md` instead of `bg-background/80 backdrop-blur-sm shadow-sm`.
+
+4. **Z-index**: Keep `z-40` -- above cards (`z-10`-`z-20`) and weather, below modals/sheets (`z-50`).
+
+## Detailed code changes
 
 ### `src/components/timeline/ContinuousTimeline.tsx`
 
-**Add state** (near line 95):
+**Add `getMidnightTzAbbrev` helper** (replace or supplement `getTzAbbrev`, around line 128):
 ```typescript
-const [currentDayIndex, setCurrentDayIndex] = useState(0);
+const getMidnightTzAbbrev = useCallback((dayDate: Date): string => {
+  const dayStr = format(dayDate, 'yyyy-MM-dd');
+  const tzInfo = dayTimezoneMap.get(dayStr);
+  if (!tzInfo) return '';
+  // At midnight, use the origin TZ (before any flight departs that day)
+  const tz = tzInfo.flights.length > 0 ? tzInfo.flights[0].originTz : tzInfo.activeTz;
+  try {
+    return new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'short' })
+      .formatToParts(dayDate).find(p => p.type === 'timeZoneName')?.value || '';
+  } catch { return ''; }
+}, [dayTimezoneMap]);
 ```
 
-**Add scroll listener** (new useEffect, after the gridTopPx effect):
-```typescript
-useEffect(() => {
-  const container = scrollContainerRef?.current;
-  if (!container || days.length === 0) return;
-  const handleScroll = () => {
-    const scrollTop = container.scrollTop;
-    const adjustedScroll = scrollTop - gridTopPx + 60;
-    const dayIdx = Math.floor(adjustedScroll / (24 * PIXELS_PER_HOUR));
-    const clamped = Math.max(0, Math.min(days.length - 1, dayIdx));
-    setCurrentDayIndex(clamped);
-  };
-  container.addEventListener('scroll', handleScroll, { passive: true });
-  handleScroll(); // initial
-  return () => container.removeEventListener('scroll', handleScroll);
-}, [scrollContainerRef, gridTopPx, days.length]);
-```
+**Update inline midnight pills** (line 542): Change `getTzAbbrev(day)` to `getMidnightTzAbbrev(day)`
 
-**Add sticky pill** (inside the return, before the grid div, around line 444):
+**Update sticky pill TZ** (line 471): Change `getTzAbbrev(days[currentDayIndex])` to `getMidnightTzAbbrev(days[currentDayIndex])`
+
+**Restructure return** (lines 473-485): Move sticky pill outside the `max-w-2xl` wrapper and centre it:
 ```tsx
-{/* Sticky floating day pill */}
-<div className="sticky top-0 z-40 flex justify-start pl-1 py-1">
-  <div className="inline-flex items-center gap-1 rounded-full bg-background/80 backdrop-blur-sm border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-sm">
-    <span>{isUndated ? `Day ${currentDayIndex + 1}` : format(days[currentDayIndex], 'EEE d MMM').toUpperCase()}</span>
-    <span className="text-muted-foreground/60">.</span>
-    <span className="text-muted-foreground">{tzAbbrev}</span>
-    {!isUndated && isToday(days[currentDayIndex]) && (
-      <span className="ml-1 rounded-full bg-primary px-1.5 py-0 text-[8px] font-semibold text-primary-foreground">TODAY</span>
-    )}
-  </div>
-</div>
+return (
+  <>
+    {/* Sticky floating day pill - outside max-w-2xl for proper sticky */}
+    <div className="sticky top-0 z-40 flex justify-center py-1">
+      <div className="inline-flex items-center gap-1 rounded-full bg-background/90 backdrop-blur-md border border-border/50 px-3 py-1 text-xs font-semibold text-foreground shadow-md">
+        <span>{isUndated ? `Day ${currentDayIndex + 1}` : format(days[currentDayIndex], 'EEE d MMM').toUpperCase()}</span>
+        <span className="text-muted-foreground/60">·</span>
+        <span className="text-muted-foreground">{stickyTzAbbrev}</span>
+        {!isUndated && days[currentDayIndex] && isToday(days[currentDayIndex]) && (
+          <span className="ml-1 rounded-full bg-primary px-1.5 py-0 text-[8px] font-semibold text-primary-foreground">TODAY</span>
+        )}
+      </div>
+    </div>
+
+    <div className="mx-auto max-w-2xl px-4 py-2">
+      {/* ... rest of grid content unchanged ... */}
+    </div>
+  </>
+);
 ```
 
-Where `tzAbbrev` is computed from the current day's timezone info (a small helper or inline).
-
-**Replace midnight markers** (lines 500-544): New version renders a pill beside the hour line instead of a stacked gutter label.
-
-## What Does NOT Change
-
-- Hour line rendering (00:00 still shows in gutter)
-- Card positioning, drag/drop, SNAP
+## What does NOT change
+- Inline midnight pill content and positioning (just TZ text fix)
+- Hour line rendering, card positioning, drag/drop, SNAP
 - Transport connectors, weather gutter, sunrise/sunset gradient
-- TZ change badges at flight boundaries
-- "Trip Begins" / "Trip Ends" full-width banners (keep or integrate "Trip Begins" into the first midnight pill)
-- All other timeline functionality
+- Any other timeline functionality
