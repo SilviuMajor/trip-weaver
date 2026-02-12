@@ -100,13 +100,13 @@ const TripSettings = () => {
     setSaving(true);
     const { error } = await supabase
       .from('trips')
-      .update({ name: tripName.trim(), destination: tripDestination.trim() || null } as any)
+      .update({ name: tripName.trim() } as any)
       .eq('id', tripId);
     if (error) {
       toast({ title: 'Failed to save', description: error.message, variant: 'destructive' });
     } else {
       toast({ title: 'Settings saved!' });
-      setTrip(prev => prev ? { ...prev, name: tripName.trim(), destination: tripDestination.trim() || null } : prev);
+      setTrip(prev => prev ? { ...prev, name: tripName.trim() } : prev);
     }
     setSaving(false);
   };
@@ -252,8 +252,6 @@ const TripSettings = () => {
         <section className="space-y-3">
           <Label htmlFor="trip-name" className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Trip Name</Label>
           <Input id="trip-name" value={tripName} onChange={(e) => setTripName(e.target.value)} />
-          <Label htmlFor="trip-destination" className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Destination</Label>
-          <Input id="trip-destination" value={tripDestination} onChange={(e) => setTripDestination(e.target.value)} placeholder="Amsterdam, Netherlands" />
           <Button onClick={handleSave} disabled={saving} size="sm">
             <Save className="mr-1.5 h-4 w-4" />
             {saving ? 'Saving…' : 'Save'}

@@ -375,16 +375,28 @@ const Timeline = () => {
     return weatherData.filter(w => w.date === dayStr);
   };
 
-  const handleCardTap = (entry: EntryWithOptions, option: EntryOption) => {
-    // Compute resolved TZ for this entry's day
-    let entryResolvedTz = homeTimezone;
+  // Resolve correct TZ for a given UTC time, accounting for flight boundaries
+  const resolveTimezoneForTime = useCallback((isoTime: string): string => {
     for (const [dayStr, info] of dayTimezoneMap) {
-      if (getDateInTimezone(entry.start_time, info.activeTz) === dayStr) {
-        entryResolvedTz = info.activeTz;
-        break;
+      if (getDateInTimezone(isoTime, info.activeTz) === dayStr) {
+        if (info.flights.length > 0) {
+          const lastFlight = info.flights[info.flights.length - 1];
+          if ((lastFlight as any).flightEndUtc) {
+            const timeMs = new Date(isoTime).getTime();
+            const flightEndMs = new Date((lastFlight as any).flightEndUtc).getTime();
+            if (timeMs >= flightEndMs) {
+              return lastFlight.destinationTz;
+            }
+          }
+        }
+        return info.activeTz;
       }
     }
-    setSheetResolvedTz(entryResolvedTz);
+    return homeTimezone;
+  }, [dayTimezoneMap, homeTimezone]);
+
+  const handleCardTap = (entry: EntryWithOptions, option: EntryOption) => {
+    setSheetResolvedTz(resolveTimezoneForTime(entry.start_time));
     setSheetMode('view');
     setSheetEntry(entry);
     setSheetOption(option);
@@ -400,10 +412,7 @@ const Timeline = () => {
     setPrefillEndTime(undefined);
     setTransportContext(null);
     setGapContext(ctx ?? null);
-    // Resolve TZ for the prefill time's day
-    const prefillDay = getDateInTimezone(prefillTime, homeTimezone);
-    const tzInfo = dayTimezoneMap.get(prefillDay);
-    setSheetResolvedTz(tzInfo?.activeTz || homeTimezone);
+    setSheetResolvedTz(resolveTimezoneForTime(prefillTime));
     setSheetMode('create');
     setSheetEntry(null);
     setSheetOption(null);
@@ -562,6 +571,7 @@ const Timeline = () => {
   const handleDragSlot = (startIso: string, endIso: string) => {
     setPrefillStartTime(startIso);
     setPrefillEndTime(endIso);
+    setSheetResolvedTz(resolveTimezoneForTime(startIso));
     setSheetMode('create');
     setSheetEntry(null);
     setSheetOption(null);
@@ -1591,6 +1601,7 @@ const Timeline = () => {
             tripId={trip.id}
             trip={trip}
             onCreated={fetchData}
+            dayTimezoneMap={dayTimezoneMap}
           />
         </>
       )}
