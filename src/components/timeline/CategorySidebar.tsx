@@ -267,7 +267,7 @@ const CategorySidebar = ({
   if (isMobile) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="w-full sm:w-[380px] overflow-y-auto p-0">
+        <SheetContent side="right" className="w-[60vw] min-w-[280px] overflow-y-auto p-0">
           <SheetHeader className="sr-only">
             <SheetTitle>Planner</SheetTitle>
           </SheetHeader>
@@ -283,7 +283,7 @@ const CategorySidebar = ({
     <div
       className={cn(
         'shrink-0 border-l border-border bg-background overflow-hidden transition-all duration-300',
-        'w-[320px]'
+        'w-[40vw] max-w-[500px]'
       )}
     >
       {panelContent}

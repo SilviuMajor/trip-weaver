@@ -616,7 +616,7 @@ const EntryCard = ({
         {firstImage && (
           <div className="absolute inset-0">
             <img src={firstImage} alt={option.name} className="h-full w-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-black/5" />
           </div>
         )}
         <div className={cn(
@@ -733,7 +733,7 @@ const EntryCard = ({
       {firstImage ? (
         <div className="absolute inset-0">
           <img src={firstImage} alt={option.name} className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-black/5" />
         </div>
       ) : (
         <div className="absolute inset-0" style={{ background: tintBg }} />
