@@ -407,7 +407,7 @@ const EntryCard = ({
                 <Clock className="h-3 w-3" />
                 <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
               </div>
-              {isLocked && <Lock className="h-3 w-3 text-muted-foreground/60" />}
+              {isLocked && <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary"><Lock className="h-2.5 w-2.5 text-primary-foreground" /></span>}
             </div>
             {(option as any).route_polyline && (
               <div className="mt-1">
