@@ -47,6 +47,7 @@ const TripSettings = () => {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [members, setMembers] = useState<TripUser[]>([]);
   const [walkThreshold, setWalkThreshold] = useState(10);
+  const [defaultTransportMode, setDefaultTransportMode] = useState('transit');
   const [tripName, setTripName] = useState('');
   
   const [saving, setSaving] = useState(false);
@@ -88,6 +89,7 @@ const TripSettings = () => {
         
         setTripEmoji(t.emoji ?? '');
         setWalkThreshold((tripData as any).walk_threshold_min ?? 10);
+        setDefaultTransportMode((tripData as any).default_transport_mode ?? 'transit');
       }
       setMembers((membersData ?? []) as unknown as TripUser[]);
       setLoading(false);
@@ -591,6 +593,32 @@ const TripSettings = () => {
                 >
                   <Save className="mr-1 h-3.5 w-3.5" />Save
                 </Button>
+              </div>
+            </div>
+
+            {/* Default transport mode */}
+            <div className="space-y-2">
+              <Label htmlFor="default-transport" className="text-sm font-medium">Default transport mode</Label>
+              <p className="text-xs text-muted-foreground">
+                The magnet snap will use this mode to size transport blocks and name them
+              </p>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={defaultTransportMode}
+                  onValueChange={async (v) => {
+                    setDefaultTransportMode(v);
+                    await supabase.from('trips').update({ default_transport_mode: v } as any).eq('id', tripId!);
+                    toast({ title: `Default transport set to ${v}` });
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="walk">Walk</SelectItem>
+                    <SelectItem value="transit">Transit</SelectItem>
+                    <SelectItem value="drive">Drive</SelectItem>
+                    <SelectItem value="bicycle">Cycle</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>

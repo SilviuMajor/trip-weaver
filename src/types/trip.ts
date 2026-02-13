@@ -28,6 +28,7 @@ export interface Trip {
   emoji: string | null;
   image_url: string | null;
   walk_threshold_min: number;
+  default_transport_mode: string;
   created_at: string;
   updated_at: string;
 }
