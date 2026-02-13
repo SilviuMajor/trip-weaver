@@ -738,7 +738,7 @@ const ContinuousTimeline = ({
                     height,
                     left: '0%',
                     width: '100%',
-                    zIndex: isDragged ? 30 : hasConflict ? 10 + index : 10,
+                    zIndex: isDragged ? 30 : isTransport ? 20 : hasConflict ? 10 + index : 10,
                   }}
                 >
                 <div className="relative h-full">
