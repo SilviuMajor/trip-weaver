@@ -28,6 +28,27 @@ import VoteButton from './VoteButton';
 import RouteMapPreview from './RouteMapPreview';
 import { cn } from '@/lib/utils';
 
+function decodePolylineEndpoint(encoded: string): { lat: number; lng: number } | null {
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    let shift = 0, result = 0, byte;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+    shift = 0; result = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+  }
+  return { lat: lat / 1e5, lng: lng / 1e5 };
+}
+
 const REFERENCE_DATE = '2099-01-01';
 
 // ─── Inline Field (click-to-edit for view mode) ───
@@ -1412,18 +1433,23 @@ const EntrySheet = ({
                       </div>
 
                       {/* Route map */}
-                      {(option as any).route_polyline && (
-                        <RouteMapPreview
-                          polyline={(option as any).route_polyline}
-                          fromAddress={option.departure_location || ''}
-                          toAddress={option.arrival_location || ''}
-                          travelMode={modeLabel.toLowerCase()}
-                          size="full"
-                          destLat={option.latitude}
-                          destLng={option.longitude}
-                          destName={(option.arrival_location || '').split(',')[0].trim()}
-                        />
-                      )}
+                      {(() => {
+                        const polylineStr = (option as any).route_polyline;
+                        if (!polylineStr) return null;
+                        const dest = decodePolylineEndpoint(polylineStr);
+                        return (
+                          <RouteMapPreview
+                            polyline={polylineStr}
+                            fromAddress={option.departure_location || ''}
+                            toAddress={option.arrival_location || ''}
+                            travelMode={modeLabel.toLowerCase()}
+                            size="full"
+                            destLat={dest?.lat ?? null}
+                            destLng={dest?.lng ?? null}
+                            destName={(option.arrival_location || '').split(',')[0].trim()}
+                          />
+                        );
+                      })()}
 
                       {/* Time (de-emphasized) */}
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
