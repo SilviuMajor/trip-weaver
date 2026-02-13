@@ -479,23 +479,32 @@ const Timeline = () => {
     const nextOldEnd = nextEvent.end_time;
     const nextDuration = new Date(nextOldEnd).getTime() - new Date(nextOldStart).getTime();
 
-    // Case A: Transport exists → snap next event to transport end
+    // Case A: Transport exists → move transport + next event to close gaps
     if (transportEntry) {
-      const transportEndMs = new Date(transportEntry.end_time).getTime();
-      const newStart = new Date(transportEndMs).toISOString();
-      const newEnd = new Date(transportEndMs + nextDuration).toISOString();
+      const transportOldStart = transportEntry.start_time;
+      const transportOldEnd = transportEntry.end_time;
+      const transportDuration = new Date(transportOldEnd).getTime() - new Date(transportOldStart).getTime();
+
+      const entryEndMs = new Date(entry.end_time).getTime();
+      const newTransportStart = new Date(entryEndMs).toISOString();
+      const newTransportEnd = new Date(entryEndMs + transportDuration).toISOString();
+      const newNextStart = new Date(entryEndMs + transportDuration).toISOString();
+      const newNextEnd = new Date(entryEndMs + transportDuration + nextDuration).toISOString();
 
       pushAction({
         description: `Snap ${nextEvent.options[0]?.name || 'event'}`,
         undo: async () => {
+          await supabase.from('entries').update({ start_time: transportOldStart, end_time: transportOldEnd }).eq('id', transportEntry!.id);
           await supabase.from('entries').update({ start_time: nextOldStart, end_time: nextOldEnd }).eq('id', nextEvent!.id);
         },
         redo: async () => {
-          await supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', nextEvent!.id);
+          await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transportEntry!.id);
+          await supabase.from('entries').update({ start_time: newNextStart, end_time: newNextEnd }).eq('id', nextEvent!.id);
         },
       });
 
-      await supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', nextEvent.id);
+      await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transportEntry.id);
+      await supabase.from('entries').update({ start_time: newNextStart, end_time: newNextEnd }).eq('id', nextEvent.id);
       sonnerToast.success('Snapped into place');
       await fetchData();
       return;
