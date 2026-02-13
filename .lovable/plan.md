@@ -1,65 +1,71 @@
 
 
-# Fix Touch Drag: Suppress Native Long-Press + Ghost Card Visibility
+# Fix Touch Drag: Keep Planner Mounted + Real Ghost Card
 
 ## Overview
-Two bugs with the touch drag system: (1) the browser's native long-press gesture fires before our 400ms timer, and (2) the ghost card doesn't appear because the initial touch position isn't captured and document-level listeners aren't used.
+Two fixes: (1) Instead of unmounting the Planner sheet during drag (which kills the touch context on iOS), hide it visually while keeping it in the DOM. (2) Replace the simplified ghost card with a real `SidebarEntryCard` component plus a time indicator pill.
 
 ---
 
 ## Changes
 
-### 1. SidebarEntryCard.tsx -- Suppress native gestures + pass initial position
+### 1. CategorySidebar.tsx -- Add `hiddenForDrag` prop
 
-**CSS on card div**: Add inline styles to prevent text selection, callout menu, and double-tap zoom:
-- `WebkitUserSelect: 'none'`
-- `userSelect: 'none'`
-- `WebkitTouchCallout: 'none'`
-- `touchAction: 'manipulation'`
+- Add `hiddenForDrag?: boolean` to `CategorySidebarProps`
+- On the mobile `Sheet` branch, wrap it in a `<div>` that applies `opacity: 0, pointerEvents: 'none', position: 'fixed', zIndex: -1` when `hiddenForDrag` is true. This hides both the sheet content and backdrop overlay while keeping the DOM intact.
 
-**Context menu**: Add `onContextMenu={(e) => e.preventDefault()}` to the card div.
+### 2. Timeline.tsx -- Hide instead of close + real ghost card
 
-**Timer**: Reduce from 400ms to 300ms.
+**New state:**
+- `touchDragHidePlanner: boolean` (default `false`)
 
-**Prop signature change**: `onTouchDragStart` now passes initial position:
-```text
-onTouchDragStart?: (entry: EntryWithOptions, initialPosition: { x: number; y: number }) => void;
-```
+**New ref:**
+- `touchDragEntryRef` (mirrors `touchDragEntry` via useEffect, same pattern as `touchDragGlobalHourRef`)
 
-In the timer callback, pass `touchStartRef.current` as the initial position.
+**handleTouchDragStart changes:**
+- Replace `setSidebarOpen(false)` with `setTouchDragHidePlanner(true)`
+- Everything else stays the same (set entry, position, 3s timeout)
 
-### 2. CategorySidebar.tsx -- Update prop passthrough
+**handleTouchEnd / cleanupTouchDrag changes:**
+- After cleanup, set `setTouchDragHidePlanner(false)` and `setSidebarOpen(false)` to properly close the planner
+- Use `touchDragEntryRef.current` instead of `touchDragEntry` in the closure (same stale-closure fix as globalHour)
 
-Update the `onTouchDragStart` prop type to include the initial position parameter. Pass it through unchanged.
+**Document-level useEffect:**
+- Update `handleTouchEnd` to use `touchDragEntryRef.current` instead of the stale `touchDragEntry` from closure
 
-### 3. Timeline.tsx -- Document-level listeners + initial position + ref for stale closure
+**CategorySidebar props:**
+- Pass `hiddenForDrag={touchDragHidePlanner}` to the mobile `CategorySidebar` instance
 
-**handleTouchDragStart**: Accept `initialPosition` parameter, call `setTouchDragPosition(initialPosition)` immediately so the ghost is visible from the start.
-
-**Add a ref** `touchDragGlobalHourRef` that mirrors `touchDragGlobalHour` state (via a small useEffect) to avoid stale closures in the document listener.
-
-**Replace the overlay's React touch handlers** with a `useEffect` that adds document-level `touchmove`, `touchend`, and `touchcancel` listeners when `touchDragEntry` is set. This is critical because when the Planner sheet closes, the original touch source element is removed from the DOM, and iOS won't deliver synthetic React touch events to the overlay.
-
-The `useEffect`:
-- `touchmove`: preventDefault, update position, calculate globalHour, auto-scroll
-- `touchend`: if `touchDragGlobalHourRef.current` is valid, call `handleDropOnTimeline`; then cleanup
-- `touchcancel`: cleanup
-- Cleanup on unmount removes all three listeners
-
-**Overlay div**: Becomes `pointer-events-none` (purely visual), renders the ghost card when `touchDragPosition` is set. No touch handlers on the div itself.
+**Ghost card replacement:**
+- Import `SidebarEntryCard` at top of Timeline.tsx
+- Replace the simplified ghost `<div>` with a `<SidebarEntryCard entry={touchDragEntry} />` wrapped in a sized container
+- Add a time indicator pill below the card: a `bg-primary` rounded pill with the snapped time in `text-primary-foreground`
 
 ---
 
 ## Technical Details
 
-### Why document listeners?
-When `onTouchDragStart` fires, the Planner sheet closes and the `SidebarEntryCard` is unmounted. On iOS, touch events "belong" to the element that received `touchstart`. Once that element is removed, no other element receives the remaining touch events via React's synthetic system. Document-level native listeners still receive them.
+### Why hide instead of close?
+iOS Safari cancels active touches when their originating DOM element is removed. `setSidebarOpen(false)` unmounts the Sheet and the SidebarEntryCard inside it, killing the touch session. Document-level `touchmove` listeners then stop receiving events. Hiding via CSS keeps the element in the DOM and preserves the touch context.
 
-### Stale closure fix
-The `handleTouchEnd` inside the useEffect closure captures `touchDragGlobalHour` at effect setup time. Since it only runs once (when `touchDragEntry` changes), the value would be stale. A ref (`touchDragGlobalHourRef`) updated via a separate useEffect solves this.
+### Ghost card rendering
+```text
+Container: absolute, 180px wide, opacity 0.8, scale(0.9), drop-shadow
+  -> <SidebarEntryCard entry={touchDragEntry} />  (no click/drag handlers)
+  -> Time pill: absolute, -bottom-6, centered, bg-primary, rounded-full
+     -> "HH:MM" in text-[11px] font-bold text-primary-foreground
+```
 
-### Files changed
-1. `src/components/timeline/SidebarEntryCard.tsx` -- CSS, timer, prop signature
-2. `src/components/timeline/CategorySidebar.tsx` -- prop type update
-3. `src/pages/Timeline.tsx` -- document listeners, initial position, ref
+### Stale closure for touchDragEntry
+The `handleTouchEnd` in the document listener useEffect captures `touchDragEntry` at setup time. Since the effect only re-runs when `touchDragEntry` changes (and it's set once at drag start), the value should be correct. However, to be safe and consistent with the globalHour pattern, we add `touchDragEntryRef` mirrored via useEffect.
+
+### Cleanup sequence on touchEnd
+1. Call `handleDropOnTimeline` if valid position
+2. `setTouchDragHidePlanner(false)` -- un-hide the planner
+3. `setSidebarOpen(false)` -- now actually close it
+4. Clear all drag state (entry, position, globalHour, timeout)
+
+## Files Changed
+1. `src/components/timeline/CategorySidebar.tsx` -- add `hiddenForDrag` prop + wrapper div
+2. `src/pages/Timeline.tsx` -- hide-instead-of-close logic, entry ref, real ghost card with SidebarEntryCard
 
