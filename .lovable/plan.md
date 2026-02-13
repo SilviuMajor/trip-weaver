@@ -1,82 +1,39 @@
 
-# Dynamic Timeline Zoom with Pinch, Scroll, and Settings Toggle
 
-## Overview
-Make `PIXELS_PER_HOUR` dynamic via a zoom multiplier (0.5x-2.0x), controlled by pinch-to-zoom on mobile, Ctrl+scroll on desktop, and a double-tap reset. Add sub-hour grid lines at higher zoom levels, a floating zoom indicator, and a toggle in Settings to enable/disable the feature.
+# Fix Mobile Pinch-to-Zoom
+
+## Problem
+Pinch-to-zoom works on desktop (Ctrl+scroll / trackpad) but not on mobile because:
+1. iOS Safari intercepts two-finger pinch gestures at the browser level before JavaScript event handlers fire. `e.preventDefault()` in `touchstart`/`touchmove` is not sufficient on iOS -- the browser needs a CSS `touch-action` hint to relinquish control of the pinch gesture.
+2. The `useEffect` that registers pinch listeners depends only on `[zoomEnabled]`. When the `<main>` element unmounts (e.g., switching to live view) and remounts, `mainScrollRef.current` changes but the effect doesn't re-run, so listeners are never re-attached.
 
 ## Changes
 
-### 1. `src/components/timeline/ContinuousTimeline.tsx` -- Accept dynamic `pixelsPerHour` prop
-- Remove `const PIXELS_PER_HOUR = 80` constant (line 19)
-- Add `pixelsPerHour: number` and `onResetZoom?: () => void` to the `ContinuousTimelineProps` interface
-- Replace all ~24 occurrences of `PIXELS_PER_HOUR` with the `pixelsPerHour` prop
-- Pass `pixelsPerHour` to the `useDragResize` hook (line 309)
-- Add sub-hour grid lines after the existing hour lines block:
-  - 30-min lines when `pixelsPerHour > 96` (border-border/15)
-  - 15-min lines when `pixelsPerHour > 140` (border-border/10)
-  - 30-min gutter labels when `pixelsPerHour > 96` (text-[9px], low opacity)
-- Add double-tap detection on the slot area (`onTouchEnd` handler) that calls `onResetZoom` on two taps within 300ms
+### 1. `src/pages/Timeline.tsx` -- Add `touch-action` style and fix dependencies
 
-### 2. `src/pages/Timeline.tsx` -- Zoom state, gestures, and dynamic `pixelsPerHour`
-- Remove `const PIXELS_PER_HOUR = 80` (line 1430)
-- Add zoom state with sessionStorage persistence:
-  ```
-  const zoomEnabled = localStorage.getItem('timeline-zoom-enabled') !== 'false';
-  const [zoomLevel, setZoomLevel] = useState(() => {
-    if (!zoomEnabled) return 1.0;
-    const saved = sessionStorage.getItem('timeline-zoom');
-    return saved ? parseFloat(saved) : 1.0;
-  });
-  const pixelsPerHour = 80 * zoomLevel;
-  ```
-- Add `zoomLevelRef` to track current zoom in event handlers
-- Replace `PIXELS_PER_HOUR` in touch drag calculation (~line 1451) with `pixelsPerHour`
-- Pass `pixelsPerHour` and `onResetZoom={() => setZoomLevel(1.0)}` to `ContinuousTimeline`
+**Add `touch-action: pan-y` to the `<main>` element** (line ~2157):
+- When `zoomEnabled` is true, set `style={{ touchAction: 'pan-y' }}` on the `<main ref={mainScrollRef}>`. This tells the browser to only handle vertical scrolling natively and let JavaScript handle all other gestures (including pinch).
+- When `zoomEnabled` is false, omit the style (default browser behavior).
 
-**Pinch-to-zoom (mobile)** -- `useEffect` on `mainScrollRef`:
-- Track two-finger distance on `touchstart`/`touchmove`/`touchend`
-- Scale zoom between 0.5 and 2.0 based on pinch ratio
-- Anchor scroll position to the midpoint of the two fingers so content doesn't jump
-- Guard with `if (!zoomEnabled) return`
-- Use `{ passive: false }` and `e.preventDefault()` to suppress browser zoom
+**Fix pinch `useEffect` dependencies** (line 1580):
+- Change `[zoomEnabled]` to `[zoomEnabled, isMobile, mobileView]` so that when the mobile view switches from live back to timeline, the effect re-runs and re-attaches listeners to the freshly mounted `<main>` element.
 
-**Ctrl+scroll (desktop)** -- `useEffect` on `mainScrollRef`:
-- Listen for `wheel` events where `e.ctrlKey || e.metaKey`
-- Apply delta to zoom with anchor at cursor Y position
-- Guard with `if (!zoomEnabled) return`
-- Use `{ passive: false }` and `e.preventDefault()`
-
-**Zoom indicator** -- floating pill at bottom-centre:
-- Shows `Math.round(zoomLevel * 100)%` text
-- Appears on zoom change, fades after 1.2 seconds
-- Hidden when zoom is disabled
-
-**Persist zoom** -- `useEffect` writes `zoomLevel` to `sessionStorage`
-
-### 3. `src/pages/Settings.tsx` -- Zoom enable/disable toggle
-- Import `Switch` from `@/components/ui/switch`
-- Add `zoomEnabled` state backed by `localStorage('timeline-zoom-enabled')`, default `true`
-- Add a "Timeline" section below the Display Name field with:
-  - "Pinch-to-zoom" label
-  - "Enable pinch and scroll zoom on the timeline" description
-  - `Switch` component that toggles the localStorage value
+**Fix wheel `useEffect` dependencies** (line 1610):
+- Same change: `[zoomEnabled]` to `[zoomEnabled, isMobile, mobileView]`.
 
 ### Files changed
-1. `src/components/timeline/ContinuousTimeline.tsx` -- dynamic prop, sub-hour lines, double-tap reset
-2. `src/pages/Timeline.tsx` -- zoom state, pinch gesture, Ctrl+scroll, indicator, sessionStorage
-3. `src/pages/Settings.tsx` -- zoom toggle switch
+1. `src/pages/Timeline.tsx` -- add `touch-action` style to scroll container, fix effect dependencies
 
 ### What does NOT change
-- Card rendering logic (cards auto-scale since positions use pixelsPerHour)
-- Drag/resize mechanics (useDragResize already accepts pixelsPerHour)
-- Weather, transport, hotel systems
-- Planner sidebar
-- Desktop drag and drop behavior
+- Pinch gesture logic (distance calculation, anchor math, zoom clamping)
+- Desktop Ctrl+scroll behavior
+- Sub-hour grid lines
+- Zoom indicator
+- Settings toggle
+- Any other touch interactions (drag-to-move, long-press)
 
 ### Technical notes
-- Zoom range: 0.5x (40px/hr) to 2.0x (160px/hr), default 1.0x (80px/hr)
-- Sub-hour lines: 30-min at >120% zoom (>96px/hr), 15-min at >175% (>140px/hr)
-- Pinch anchor math: converts the midpoint finger position to a global hour, then after zoom change, adjusts scrollTop so that same hour stays at the same screen position
-- `e.preventDefault()` on pinch and Ctrl+wheel prevents browser-level zoom
-- Setting defaults to enabled; stored in localStorage so it persists across sessions
-- Zoom level stored in sessionStorage so it resets per browser session
+- `touch-action: pan-y` allows vertical scrolling but prevents the browser from handling pinch-zoom, two-finger pan, etc. This is exactly what we want: the timeline scrolls vertically as normal, but pinch is handled by our JS.
+- Adding `mobileView` to the dependency array ensures the cleanup/re-register cycle runs whenever the `<main>` element is unmounted and remounted.
+- `isMobile` is included for completeness in case the viewport changes mid-session (e.g., rotating a tablet).
+
