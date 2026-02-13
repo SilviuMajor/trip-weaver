@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { Copy, GripVertical, ArrowRightToLine, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { findCategory } from '@/lib/categories';
@@ -10,6 +11,7 @@ interface SidebarEntryCardProps {
   onClick?: () => void;
   onDuplicate?: (entry: EntryWithOptions) => void;
   onInsert?: (entry: EntryWithOptions) => void;
+  onTouchDragStart?: (entry: EntryWithOptions) => void;
   usageCount?: number;
   isFlight?: boolean;
 }
@@ -24,9 +26,12 @@ const formatDuration = (startIso: string, endIso: string): string => {
   return `${h}h ${m}m`;
 };
 
-const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, usageCount, isFlight }: SidebarEntryCardProps) => {
+const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, onTouchDragStart, usageCount, isFlight }: SidebarEntryCardProps) => {
   const option = entry.options[0];
   if (!option) return null;
+
+  const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const cat = findCategory(option.category ?? '');
   const emoji = cat?.emoji ?? '📌';
@@ -48,6 +53,32 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
       draggable={isDraggable}
       onDragStart={(e) => isDraggable && onDragStart?.(e, entry)}
       onClick={onClick}
+      onTouchStart={(e) => {
+        if (!isDraggable || !onTouchDragStart) return;
+        const touch = e.touches[0];
+        touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+        touchTimerRef.current = setTimeout(() => {
+          onTouchDragStart(entry);
+          touchTimerRef.current = null;
+        }, 400);
+      }}
+      onTouchMove={(e) => {
+        if (touchTimerRef.current && touchStartRef.current) {
+          const touch = e.touches[0];
+          const dx = touch.clientX - touchStartRef.current.x;
+          const dy = touch.clientY - touchStartRef.current.y;
+          if (Math.sqrt(dx * dx + dy * dy) > 10) {
+            clearTimeout(touchTimerRef.current);
+            touchTimerRef.current = null;
+          }
+        }
+      }}
+      onTouchEnd={() => {
+        if (touchTimerRef.current) {
+          clearTimeout(touchTimerRef.current);
+          touchTimerRef.current = null;
+        }
+      }}
       className={cn(
         'group relative flex flex-col rounded-xl border border-border overflow-hidden transition-all',
         isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',

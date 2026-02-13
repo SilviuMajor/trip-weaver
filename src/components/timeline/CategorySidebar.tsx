@@ -20,6 +20,7 @@ interface CategorySidebarProps {
   onAddEntry?: (categoryId: string) => void;
   onDuplicate?: (entry: EntryWithOptions) => void;
   onInsert?: (entry: EntryWithOptions) => void;
+  onTouchDragStart?: (entry: EntryWithOptions) => void;
   compact?: boolean;
 }
 
@@ -41,6 +42,7 @@ const CategorySidebar = ({
   onAddEntry,
   onDuplicate,
   onInsert,
+  onTouchDragStart,
   compact = false,
 }: CategorySidebarProps) => {
   const isMobile = useIsMobile();
@@ -253,6 +255,7 @@ const CategorySidebar = ({
                       onClick={() => onCardTap?.(original)}
                       onDuplicate={isFlight ? undefined : onDuplicate}
                       onInsert={isFlight ? undefined : onInsert}
+                      onTouchDragStart={onTouchDragStart}
                       usageCount={usageCount}
                       isFlight={isFlight}
                     />
@@ -288,6 +291,7 @@ const CategorySidebar = ({
                     onClick={() => onCardTap?.(original)}
                     onDuplicate={isFlight ? undefined : onDuplicate}
                     onInsert={isFlight ? undefined : onInsert}
+                    onTouchDragStart={onTouchDragStart}
                     usageCount={usageCount}
                     isFlight={isFlight}
                   />

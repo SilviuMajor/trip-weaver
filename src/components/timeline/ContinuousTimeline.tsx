@@ -479,9 +479,10 @@ const ContinuousTimeline = ({
   return (
     <div className="mx-auto max-w-2xl px-4 pb-2 pt-[50px]">
       <div
-        ref={gridRef}
+      ref={gridRef}
         className="relative ml-20"
         data-grid-top
+        data-timeline-area
         style={{ height: containerHeight, minHeight: 200, marginRight: 24 }}
         onMouseDown={handleSlotMouseDown}
         onMouseMove={handleSlotMouseMove}
