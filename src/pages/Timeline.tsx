@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { addDays, parseISO, startOfDay, format, isPast, isToday } from 'date-fns';
@@ -155,6 +155,7 @@ const Timeline = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const mainScrollRef = useRef<HTMLElement>(null);
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
+  const [scrollContainerReady, setScrollContainerReady] = useState(false);
 
 
 
@@ -1577,7 +1578,7 @@ const Timeline = () => {
       el.removeEventListener('touchmove', handleTouchMove);
       el.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [zoomEnabled, isMobile, mobileView]);
+  }, [zoomEnabled, scrollContainerReady]);
 
   // Desktop zoom (Ctrl+scroll / trackpad pinch)
   useEffect(() => {
@@ -1607,7 +1608,7 @@ const Timeline = () => {
 
     el.addEventListener('wheel', handleWheel, { passive: false });
     return () => el.removeEventListener('wheel', handleWheel);
-  }, [zoomEnabled, isMobile, mobileView]);
+  }, [zoomEnabled, scrollContainerReady]);
 
 
   const handleApplyRecommendation = async (rec: Recommendation) => {
@@ -2154,7 +2155,10 @@ const Timeline = () => {
 
             {/* Timeline main content */}
             {(!isMobile || mobileView === 'timeline') && (
-              <main ref={mainScrollRef} className="flex-1 overflow-y-auto pb-20" style={zoomEnabled ? { touchAction: 'pan-y' } : undefined}>
+              <main ref={(el) => {
+                (mainScrollRef as React.MutableRefObject<HTMLElement | null>).current = el;
+                if (el && !scrollContainerReady) setScrollContainerReady(true);
+              }} className="flex-1 overflow-y-auto pb-20" style={zoomEnabled ? { touchAction: 'pan-y' } : undefined}>
                 <ContinuousTimeline
                   days={days}
                   entries={scheduledEntries}
