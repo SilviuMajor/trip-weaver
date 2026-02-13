@@ -1029,7 +1029,7 @@ const ContinuousTimeline = ({
                               <Loader2 className="h-3.5 w-3.5 animate-spin text-green-600" />
                             ) : (
                               <Magnet className={cn(
-                                "h-3.5 w-3.5 rotate-180",
+                                "h-3.5 w-3.5 rotate-[225deg]",
                                 nextEntryIsLocked ? "text-muted-foreground/40" : "text-green-600 dark:text-green-400"
                               )} />
                             )}
