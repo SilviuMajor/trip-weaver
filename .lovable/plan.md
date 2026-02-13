@@ -1,51 +1,42 @@
 
 
-# Rename Uber Buttons to Match Map Button Style
+# Fix: Single-Tap Transport Mode Switching on Mobile
 
-## What Changes
+## Problem
 
-All Uber buttons (in `RouteMapPreview.tsx` and `EntrySheet.tsx`) will be restyled to match the Apple Maps / Google Maps buttons -- compact outline style with just icon + "Uber" + external link icon.
+On mobile, switching transport mode requires two taps. This is caused by CSS hover states intercepting the first tap -- the browser shows the hover style on first touch, then fires the click on the second.
 
-### RouteMapPreview.tsx (line 116-122)
+## Solution
 
-Move the Uber button into the same `flex gap-2` row as Apple Maps and Google Maps, making it a third equal button:
+### TransportConnector.tsx
+
+**Lines 177-180** -- Replace `hover:opacity-80` with mobile-friendly active state and add `touch-action: manipulation` to eliminate the 300ms tap delay:
 
 ```tsx
-<div className="flex gap-2">
-  <Button variant="outline" size="sm" className="flex-1 text-xs" asChild>
-    <a href={appleMapsUrl} ...><Navigation className="mr-1 h-3 w-3" />Apple Maps</a>
-  </Button>
-  <Button variant="outline" size="sm" className="flex-1 text-xs" asChild>
-    <a href={googleMapsUrl} ...><ExternalLink className="mr-1 h-3 w-3" />Google Maps</a>
-  </Button>
-  {uberUrl && (
-    <Button variant="outline" size="sm" className="flex-1 text-xs" asChild>
-      <a href={uberUrl} ...><Car className="mr-1 h-3 w-3" />Uber<ExternalLink className="ml-1 h-3 w-3" /></a>
-    </Button>
+<button
+  key={mode}
+  onClick={(e) => { ... }}
+  style={{ touchAction: 'manipulation', ...(isSelected ? selectedStyle : undefined) }}
+  className={cn(
+    'flex flex-col items-center rounded-md px-1.5 py-0.5 transition-all',
+    !isSelected && 'opacity-50 active:opacity-80',
+    !modeData && 'opacity-20 pointer-events-none'
   )}
-</div>
+>
 ```
 
-- Same `variant="outline"` and `size="sm"` as the other buttons
-- Icon (Car) + "Uber" + ExternalLink arrow (matching Google Maps style)
-- No more separate row or black background
+Key changes:
+- `hover:opacity-80` becomes `active:opacity-80` -- responds instantly to touch without waiting for a second tap
+- `touchAction: 'manipulation'` on each mode button -- tells the browser this is a tap target, eliminating double-tap-to-zoom delay
 
-### EntrySheet.tsx (lines 1644-1656)
-
-Same treatment for the regular event Uber button -- change from full-width black to outline style with icon + "Uber" + external link icon:
-
-```tsx
-<Button variant="outline" size="sm" className="w-full text-xs" asChild>
-  <a href={...} ...>
-    <Car className="mr-1 h-3 w-3" /> Uber <ExternalLink className="ml-1 h-3 w-3" />
-  </a>
-</Button>
-```
-
-## Files Modified
+### Files Modified
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/RouteMapPreview.tsx` | Move Uber into button row, outline style, icon + "Uber" + ExternalLink |
-| `src/components/timeline/EntrySheet.tsx` | Same style change for regular event Uber button |
+| `src/components/timeline/TransportConnector.tsx` | Replace `hover:opacity-80` with `active:opacity-80`; add `touchAction: 'manipulation'` to mode buttons |
+
+### What Does NOT Change
+- Desktop hover behavior still works (active fires on mousedown which is fine)
+- Mode switching logic, refresh, delete, info tap -- all unchanged
+- Visual appearance of selected/unselected modes unchanged
 
