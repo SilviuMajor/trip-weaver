@@ -1409,16 +1409,12 @@ const Timeline = () => {
     setTouchDragPosition(initialPosition); // Ghost visible immediately
     // Hide planner visually but keep it mounted (preserves touch context on iOS)
     setTouchDragHidePlanner(true);
-    // 3-second cancel timeout
+    document.body.classList.add('touch-drag-active');
+    // 5-second cancel timeout
     if (touchDragTimeoutRef.current) clearTimeout(touchDragTimeoutRef.current);
     touchDragTimeoutRef.current = setTimeout(() => {
-      setTouchDragEntry(null);
-      setTouchDragPosition(null);
-      setTouchDragGlobalHour(null);
-      setTouchDragHidePlanner(false);
-      setSidebarOpen(false);
-      touchDragTimeoutRef.current = null;
-    }, 3000);
+      cleanupTouchDrag();
+    }, 5000);
   }, []);
 
   const cleanupTouchDrag = useCallback(() => {
@@ -1426,7 +1422,7 @@ const Timeline = () => {
     setTouchDragPosition(null);
     setTouchDragGlobalHour(null);
     setTouchDragHidePlanner(false);
-    setSidebarOpen(false);
+    document.body.classList.remove('touch-drag-active');
     if (touchDragTimeoutRef.current) {
       clearTimeout(touchDragTimeoutRef.current);
       touchDragTimeoutRef.current = null;
@@ -2281,21 +2277,21 @@ const Timeline = () => {
       {touchDragEntry && touchDragPosition && (
         <div className="fixed inset-0 z-[100] pointer-events-none">
           <div
-            className="absolute"
+            className="pointer-events-none absolute z-[101]"
             style={{
-              left: touchDragPosition.x - 90,
+              left: touchDragPosition.x - (window.innerWidth * 0.3 - 12),
               top: touchDragPosition.y - 40,
-              width: 180,
+              width: 'calc(60vw - 24px)',
+              minWidth: 256,
               opacity: 0.8,
-              transform: 'scale(0.9)',
+              transform: 'scale(0.85)',
               filter: 'drop-shadow(0 8px 16px rgba(0,0,0,0.2))',
             }}
           >
             <SidebarEntryCard entry={touchDragEntry} />
-            {/* Time indicator overlay */}
             {touchDragGlobalHour !== null && touchDragGlobalHour >= 0 && (
-              <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-primary px-2 py-0.5 shadow-md">
-                <span className="text-[11px] font-bold text-primary-foreground">
+              <div className="mt-1 flex justify-center">
+                <span className="rounded-full bg-primary px-2.5 py-0.5 text-[11px] font-bold text-primary-foreground shadow-md">
                   {String(Math.floor((touchDragGlobalHour % 24))).padStart(2, '0')}:
                   {String(Math.round(((touchDragGlobalHour % 1) * 60))).padStart(2, '0')}
                 </span>
