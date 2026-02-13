@@ -1,97 +1,67 @@
 
-# Transport Connector: Mode Colours, Compressed Overlay, Info Sheet
+# Fix Compressed Transport Overlay Mode
 
-## Overview
+## Problem
 
-Rework the TransportConnector component with mode-based background colours, a compressed overlay mode for short transports, and a new transport overview sheet. Also swap the X icon for a trash icon and add an (i) info button.
+The current compressed mode shrinks the transport card to 60% width and centres it as a pill. The desired behaviour is:
 
-## Part 1 -- Mode-Based Background Colours
+- Always 100% width
+- Enforce a minimum height (~40px) so content is always readable
+- When the timeline gap is smaller than the min height, the card overflows equally above and below the gap boundary, overlaying adjacent event cards
+- Events are NOT pushed apart
 
-Update `TransportConnector.tsx` to apply a background colour based on the selected mode:
+## Changes
 
-| Mode | Colour (light) | Colour (dark) |
-|------|----------------|---------------|
-| Walk | `hsl(140, 40%, 85%)` | `hsla(140, 40%, 30%, 0.3)` |
-| Drive | `hsl(0, 40%, 85%)` | `hsla(0, 40%, 30%, 0.3)` |
-| Transit | `hsl(45, 50%, 85%)` | `hsla(45, 50%, 30%, 0.3)` |
-| Bicycle | `hsl(210, 40%, 85%)` | `hsla(210, 40%, 30%, 0.3)` |
+### 1. `TransportConnector.tsx` -- Remove 60% width, unify rendering
 
-Replace the static `bg-stone-100` class with a dynamic `style={{ backgroundColor }}` that changes based on `currentMode`. Add `transition-colors duration-300` for smooth switching.
+Remove the `isCompressed` branch entirely (lines 113-189). Instead, use a single render path:
 
-## Part 2 -- Info Icon and Trash Icon
+- Remove `width: '60%'` and `margin: '0 auto'` -- card is always 100% width
+- Remove the `rounded-full` pill shape for compressed mode
+- The component always renders the same structure (the "normal" mode, lines 192-290)
+- Change the `height` in the style to `Math.max(height, 40)` so the card never renders smaller than 40px
+- For short heights (< 80px), use the compact horizontal row layout (all 4 modes in a single row with smaller icons, no from/to labels, no distance line)
+- For taller heights (>= 80px), show the expanded layout with from/to labels and distance
+- Add `shadow-sm border-solid` (instead of `border-dashed`) when the card is in overlay mode (`height < 40`) to visually distinguish it from event cards it overlays
 
-**TransportConnector.tsx changes:**
+### 2. `ContinuousTimeline.tsx` -- Fix overlay positioning
 
-- Add a new `onInfoTap` prop to the component
-- Add an `Info` icon (from lucide-react) on the left side of the mode icons row, with a 32x32px minimum tap target. Tapping calls `onInfoTap`.
-- Replace the `X` icon with `Trash2` icon (from lucide-react). Same position, same two-tap delete behaviour.
-- Remove any `onClick` handler from the card body itself (the outer `div` already has `cursor-default`, so this is mostly about ensuring no click propagation triggers anything)
+Update the transport positioning logic (around line 737):
 
-## Part 3 -- Compressed Overlay Mode
+- Define `MIN_TRANSPORT_HEIGHT = 40`
+- When the gap `height < MIN_TRANSPORT_HEIGHT`:
+  - The rendered height becomes `MIN_TRANSPORT_HEIGHT`
+  - The top offset is adjusted to vertically centre the card on the gap: `top + (height / 2) - (MIN_TRANSPORT_HEIGHT / 2)`
+  - z-index is set to 20 (above event cards at 10)
+- When the gap `height >= MIN_TRANSPORT_HEIGHT`:
+  - Render normally: `top` and `height` as-is, z-index 10
+- Remove the old `top - 8` / `height + 16` logic
 
-When `height <= 50`, switch to compressed mode:
+### Summary of positioning logic
 
-**TransportConnector.tsx:**
-- New `isCompressed` flag: `height <= 50`
-- When compressed:
-  - Card width becomes `60%` and is centred: `style={{ width: '60%', margin: '0 auto' }}`
-  - Show content as a horizontal pill: selected mode emoji + duration, then smaller unselected mode icons
-  - Info (i) and trash icons shrink but remain accessible (min 28x28px tap target)
-  - Mode switching still works by tapping icons
+```text
+if (isTransport && height < MIN_TRANSPORT_HEIGHT):
+  renderedTop = top + (height / 2) - (MIN_TRANSPORT_HEIGHT / 2)
+  renderedHeight = MIN_TRANSPORT_HEIGHT
+  zIndex = 20
+else:
+  renderedTop = top
+  renderedHeight = height
+  zIndex = 10
+```
 
-**ContinuousTimeline.tsx:**
-- For transport entries, when `height <= 50`:
-  - Apply `z-index: 20` (above normal cards at z-10) so the compressed card overlays adjacent events
-  - Adjust the positioned `div` to allow the card to visually overflow by adding negative margins or extending height slightly (e.g., `top: top - 8, height: height + 16`) so the pill overlaps boundaries
-  - The `overflow-visible` class is already on the parent
+### Files Modified
 
-## Part 4 -- Transport Overview Sheet (New Component)
+| File | Change |
+|------|--------|
+| `src/components/timeline/TransportConnector.tsx` | Remove compressed branch, single render path with `minHeight: 40`, compact layout for short heights |
+| `src/components/timeline/ContinuousTimeline.tsx` | Replace overlay positioning with centred min-height logic |
 
-Create `src/components/timeline/TransportOverviewSheet.tsx`:
+### What Does NOT Change
 
-**Props:**
-- `open: boolean`
-- `onOpenChange: (open: boolean) => void`
-- `option: EntryOption`
-- `entry: EntryWithOptions`
-- `fromLabel: string`
-- `toLabel: string`
-- `selectedMode: string`
-- `onModeSelect: (mode, durationMin, distanceKm, polyline?) => void`
-- `onRefresh: () => void`
-- `isRefreshing: boolean`
-- `onDelete: () => void`
-
-**Content (using existing Sheet component):**
-1. **Title**: "Route" at top
-2. **From/To**: Full place names with arrow
-3. **Mode grid**: 4 mode cards in a 2x2 grid, each showing emoji + label + duration + distance. Selected mode highlighted with coloured border matching mode colour. Tapping switches mode.
-4. **Selected mode details**: Duration and distance shown prominently
-5. **Map preview**: Use existing `RouteMapPreview` component with `size="full"` if `route_polyline` exists
-6. **Refresh button**: Full-width secondary button
-7. **Delete button**: Full-width red destructive button at bottom. Tapping calls `onDelete` and closes sheet.
-8. **Close (X)**: 44x44px tap target, top-right
-
-**Integration in ContinuousTimeline.tsx:**
-- Add state: `transportSheetEntry` (the entry to show in the sheet, or null)
-- Pass `onInfoTap={() => setTransportSheetEntry(entry)}` to TransportConnector
-- Render `<TransportOverviewSheet>` once at the bottom of the component, controlled by `transportSheetEntry`
-
-## Files Modified
-
-| File | Changes |
-|------|---------|
-| `src/components/timeline/TransportConnector.tsx` | Mode colours, compressed mode, info icon, trash icon, `onInfoTap` prop |
-| `src/components/timeline/TransportOverviewSheet.tsx` | **NEW** -- transport overview sheet component |
-| `src/components/timeline/ContinuousTimeline.tsx` | Transport sheet state, pass `onInfoTap`, compressed overlay z-index/positioning |
-
-## What Does NOT Change
-
-- Transport connector positioning logic (global hour system)
-- Transport duration locking
-- Transport attachment logic (starts at exact end of departing event)
-- SNAP system behaviour
-- Drag chain behaviour
-- EntryCard transport variants (compact/medium/condensed/full in EntryCard.tsx -- these are separate from TransportConnector and used in different contexts)
-- Auto-scroll or continuous timeline
-- Flight cards, regular event cards
+- Mode-based background colours
+- Info (i) and trash icons, two-tap delete
+- Transport overview sheet
+- Mode switching
+- SNAP system, drag chain, continuous timeline
+- Event card positioning
