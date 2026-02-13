@@ -1175,19 +1175,10 @@ const EntrySheet = ({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md [&>button:last-child]:h-11 [&>button:last-child]:w-11 [&>button:last-child]:top-3 [&>button:last-child]:right-3 [&>button:last-child]:[&_svg]:h-6 [&>button:last-child]:[&_svg]:w-6">
           {/* Lock toggle in top-right, beside close button */}
-          {/* Delete button in header */}
-          {isEditor && (
-            <button
-              className="absolute top-3 right-[6.5rem] z-50 flex items-center justify-center h-11 w-11 rounded-sm hover:bg-destructive/10 transition-colors"
-              onClick={() => setDeleting(true)}
-            >
-              <Trash2 className="h-5 w-5 text-destructive" />
-            </button>
-          )}
-          {/* Lock toggle in top-right, beside close button */}
+          {/* Lock toggle in top-right */}
           {isEditor && option?.category !== 'flight' && option?.category !== 'transfer' && (
             <button
-              className="absolute top-3 right-14 z-50 flex items-center justify-center h-11 w-11 rounded-sm hover:bg-muted/50 transition-colors"
+              className="absolute top-3 right-[6.5rem] z-50 flex items-center justify-center h-11 w-11 rounded-sm hover:bg-muted/50 transition-colors"
               onClick={handleToggleLock}
               disabled={toggling}
             >
@@ -1195,6 +1186,15 @@ const EntrySheet = ({
                 ? <Lock className="h-5 w-5 text-primary fill-primary" />
                 : <LockOpen className="h-5 w-5 text-muted-foreground" />
               }
+            </button>
+          )}
+          {/* Delete button in header, next to close */}
+          {isEditor && (
+            <button
+              className="absolute top-3 right-14 z-50 flex items-center justify-center h-11 w-11 rounded-sm hover:bg-destructive/10 transition-colors"
+              onClick={() => setDeleting(true)}
+            >
+              <Trash2 className="h-5 w-5 text-destructive" />
             </button>
           )}
           <div className="space-y-4">
