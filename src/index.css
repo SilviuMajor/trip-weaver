@@ -116,3 +116,19 @@
     font-family: 'Playfair Display', serif;
   }
 }
+
+/* Hide Sheet overlays and content during touch drag */
+.touch-drag-active [data-radix-dialog-overlay],
+.touch-drag-active [vaul-overlay],
+.touch-drag-active [data-vaul-overlay] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.touch-drag-active [data-radix-dialog-content][data-state="open"],
+.touch-drag-active [vaul-drawer],
+.touch-drag-active [data-vaul-drawer] {
+  transform: translateX(100%) !important;
+  pointer-events: none !important;
+  transition: transform 150ms ease-out !important;
+}
