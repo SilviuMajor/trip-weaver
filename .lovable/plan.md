@@ -1,43 +1,116 @@
 
-# Fix Day Pill Scroll Detection + Bigger Inline Date Markers
 
-## Root Cause
+# Enrich Google Places Data: Full Integration
 
-The outer wrapper `<div className="flex min-h-screen flex-col">` uses `min-h-screen` instead of `h-screen`. This means the `<main>` element with `flex-1 overflow-y-auto` is never height-constrained -- it just grows to fit all content. The **page itself** (window/document) scrolls, not the `<main>` element.
+This is a multi-layer change that captures richer data from Google Places and displays it across the app. Here's the full breakdown:
 
-So when the scroll handler reads `container.scrollTop` from `<main>`, it's always 0. And `container.clientHeight` equals the full content height, not the visible viewport. The "centre" calculation then points to the middle of the entire timeline content, not the middle of what the user sees on screen.
+## Part 1 -- Database Migration
 
-## Fix Strategy
+Add new nullable columns to the `entry_options` table:
 
-**Option chosen**: Change the outer container from `min-h-screen` to `h-screen` so that the flex layout constrains `<main>` to the remaining viewport height. This activates `overflow-y-auto` on `<main>`, making it the actual scroll container. The scroll handler then correctly reads viewport-relative values.
+- `phone` (text) -- international phone number
+- `address` (text) -- full formatted address (separate from `location_name`)
+- `rating` (numeric) -- Google rating (e.g. 4.5)
+- `user_rating_count` (integer) -- number of reviews
+- `opening_hours` (jsonb) -- array of 7 weekday description strings
+- `google_maps_uri` (text) -- direct Google Maps link
+- `google_place_id` (text) -- Google place ID for future lookups
+- `price_level` (text) -- e.g. "PRICE_LEVEL_MODERATE"
 
-This is the cleanest fix because the rest of the code (drag/resize, scroll-to-now, etc.) already assumes `mainScrollRef` is the scroll container.
+All nullable, no defaults. Existing entries remain unaffected.
 
-## Changes
+## Part 2 -- Edge Function Update (`supabase/functions/google-places/index.ts`)
 
-### 1. `src/pages/Timeline.tsx` -- Fix outer container height
+- Expand `X-Goog-FieldMask` to include: `nationalPhoneNumber`, `internationalPhoneNumber`, `rating`, `userRatingCount`, `regularOpeningHours`, `googleMapsUri`, `priceLevel`, `types`
+- Return new fields in the JSON response: `phone`, `rating`, `userRatingCount`, `openingHours`, `googleMapsUri`, `priceLevel`, `placeTypes`
 
-Line 1426: Change `min-h-screen` to `h-screen`:
+## Part 3 -- Frontend Type Updates
 
-```tsx
-<div className="flex h-screen flex-col bg-background" ref={scrollRef}>
+**`PlacesAutocomplete.tsx`** -- Expand `PlaceDetails` interface to include all new fields. Update `handleSelect` to also pass `placeId` from the prediction through to `onPlaceSelect`.
+
+**`src/types/trip.ts`** -- Add matching fields to `EntryOption`: `phone`, `address`, `rating`, `user_rating_count`, `opening_hours`, `google_maps_uri`, `google_place_id`, `price_level`.
+
+## Part 4 -- Store Data on Save (`EntrySheet.tsx`)
+
+- Add state variables for all new fields: `phone`, `address`, `rating`, `userRatingCount`, `openingHours`, `googleMapsUri`, `placeId`, `priceLevel`
+- Update `handlePlaceSelect` to capture all new fields from the PlaceDetails response
+- Include all new fields in the `optionPayload` for both insert and update operations
+- Reset new state in the `reset()` function
+- When editing, pre-populate from `editOption`
+
+## Part 5 -- Display on Timeline Cards (`EntryCard.tsx`)
+
+For the full-size and condensed card variants (non-transport, non-flight):
+
+- Below the event name, add a rating line: "star 4.5 (1,234)" using the star emoji and formatted count
+- Only shown when `option.rating` exists
+- Small, subtle styling (`text-[10px]`) that doesn't clutter the card
+
+## Part 6 -- Display in Event Detail View (`EntrySheet.tsx` view mode)
+
+For non-flight, non-transport entries, add a new details section between the title and the time picker:
+
+1. **Rating** -- "star 4.5 (1,234 reviews)" with price level indicators ("money bag" x1-4)
+2. **Phone** -- Phone icon + number, wrapped in a `tel:` link for tap-to-call on mobile
+3. **Opening hours** -- Collapsible section. Collapsed: shows today's hours (e.g. "Open today: 9:00 AM - 9:00 PM"). Expanded: all 7 days listed
+4. **Google Maps link** -- "Open in Google Maps" button that opens `googleMapsUri` in a new tab. Shown near the existing map preview
+
+Website and address (via `location_name`) continue showing as they do now.
+
+## Part 7 -- Display on Sidebar Cards (`SidebarEntryCard.tsx`)
+
+Below the location name line, add:
+- "star 4.5 (1,234)" in the same subtle style as timeline cards
+- Only when rating data exists
+
+## Technical Details
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `supabase/functions/google-places/index.ts` | Expand field mask + return new fields |
+| `src/components/timeline/PlacesAutocomplete.tsx` | Expand `PlaceDetails` interface, pass `placeId` |
+| `src/types/trip.ts` | Add new fields to `EntryOption` |
+| `src/components/timeline/EntrySheet.tsx` | New state, capture on place select, save to DB, display in view mode |
+| `src/components/timeline/EntryCard.tsx` | Show rating on full + condensed cards |
+| `src/components/timeline/SidebarEntryCard.tsx` | Show rating below name |
+
+### Database Migration SQL
+
+```text
+ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS phone text;
+ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS address text;
+ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS rating numeric;
+ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS user_rating_count integer;
+ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS opening_hours jsonb;
+ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS google_maps_uri text;
+ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS google_place_id text;
+ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS price_level text;
 ```
 
-This single change makes the `<main>` element become the actual scroll container, so `scrollTop` and `clientHeight` work correctly.
+### Opening Hours Logic
 
-### 2. `src/components/timeline/ContinuousTimeline.tsx` -- Inline midnight markers: bigger and more obvious
+Google returns `regularOpeningHours.weekdayDescriptions` as an array of 7 strings like `["Monday: 9:00 AM - 5:00 PM", ...]`. To show "today's hours":
+- Get current day of week (0=Sunday in JS, but Google starts with Monday)
+- Map JS day index to the correct string in the array
+- Display that string when collapsed; show all 7 when expanded
 
-Lines 534-556: Update the inline midnight day marker styling:
+### Price Level Display
 
-- Increase text from `text-[9px]` to `text-xs` (12px)
-- Increase padding from `px-2 py-0.5` to `px-3 py-1`
-- Add a stronger background and border: `bg-secondary border border-border/40`
-- Increase the "TODAY" badge from `text-[8px]` to `text-[10px]`
-- Add a subtle shadow for depth
+```text
+PRICE_LEVEL_FREE        -> "Free"
+PRICE_LEVEL_INEXPENSIVE -> money bag
+PRICE_LEVEL_MODERATE    -> money bag money bag
+PRICE_LEVEL_EXPENSIVE   -> money bag money bag money bag
+PRICE_LEVEL_VERY_EXPENSIVE -> money bag money bag money bag money bag
+```
 
-### What does NOT change
-- The scroll calculation logic in the useEffect (lines 100-125) -- it's already correct, it just needs the scroll container to actually scroll
-- Fixed day pill position (stays at top: 110px)
-- Fixed day pill text size (stays at text-sm)
-- Timeline cards, drag/drop, transport connectors
-- Tab bar, header, navigation
+### What Does NOT Change
+
+- Timeline drag/drop, SNAP, transport connectors
+- Flight or transport card display
+- Photo handling (already working)
+- Navigation, tabs, panels
+- Existing entries without new data display correctly (all fields nullable)
+
