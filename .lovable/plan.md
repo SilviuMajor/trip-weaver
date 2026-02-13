@@ -1,70 +1,37 @@
 
-# Hotel-Aware Delete Dialog in EntrySheet
 
-## Overview
+# Remove Dead/Defunct Code
 
-When deleting a hotel entry (one with `hotel_id` on its option), show a 3-button dialog instead of the standard 2-button one. Non-hotel entries remain unchanged.
+## Changes
 
----
+### 1. Delete files
+- `src/components/timeline/TravelSegmentCard.tsx`
+- `src/pages/StyleShowcase.tsx`
+- `src/components/timeline/CalendarDay.tsx`
 
-## Changes to `src/components/timeline/EntrySheet.tsx`
+### 2. `src/components/timeline/ContinuousTimeline.tsx`
+- Remove line 12: `import TravelSegmentCard from './TravelSegmentCard';`
+- Remove `travelSegments: TravelSegment[]` from the props interface (line 42)
+- Remove `travelSegments,` from the destructured props (line 75)
+- Remove `TravelSegment` from the type import on line 4 (if no longer used elsewhere in the file)
 
-### Replace the delete AlertDialog (lines 1698-1723)
+### 3. `src/pages/Timeline.tsx`
+- Remove `const [travelSegments, setTravelSegments] = useState<TravelSegment[]>([]);` (line 38)
+- Remove `supabase.from('travel_segments').select('*').eq('trip_id', tripId)` from the Promise.all (line 123), and remove `setTravelSegments(...)` (line 127). Adjust the destructuring accordingly.
+- Remove `travelSegments={travelSegments}` prop on ContinuousTimeline (line 1595)
+- Remove `TravelSegment` from the type import if no longer used
 
-Add conditional logic: if the current `option` has a `hotel_id`, render the hotel-specific dialog; otherwise render the existing generic one.
+### 4. `src/App.tsx`
+- Remove line 13: `import StyleShowcase from "./pages/StyleShowcase";`
+- Remove line 35: `<Route path="/styles" element={<StyleShowcase />} />`
 
-### Hotel-specific dialog
+## What does NOT change
+- Database tables/migrations (travel_segments table stays)
+- OptionSwiper, VoteButton, LivePanel, Live, UserSelect
+- All other timeline components
 
-**State additions:**
-- `hotelBlockCount: number` -- count of all entries sharing this `hotel_id`
-- Fetched on dialog open (when `deleting` becomes true and option has `hotel_id`)
-
-**On dialog open** (useEffect watching `deleting`):
-```tsx
-if (deleting && option?.hotel_id) {
-  // Query entry_options with same hotel_id to get count
-  const { data } = await supabase
-    .from('entry_options')
-    .select('entry_id')
-    .eq('hotel_id', option.hotel_id);
-  setHotelBlockCount(data?.length ?? 0);
-}
-```
-
-**Dialog content:**
-- Title: "Delete hotel block"
-- Description: "Do you want to delete just this block, or all blocks for {option.name}?"
-- Three vertically stacked full-width buttons:
-
-1. **"Delete All -- {count} blocks"** (destructive red):
-   - Query `entry_options` where `hotel_id` matches to get all `entry_id`s
-   - Delete from `entries` where `id` in that list
-   - Delete from `hotels` where `id` = `hotel_id`
-   - Close sheet, call `onSaved()`
-
-2. **"Just This Block"** (outline):
-   - Delete single entry by `entry.id` (existing logic)
-   - Close sheet, call `onSaved()`
-
-3. **"Cancel"** (ghost):
-   - Close dialog
-
-**Layout**: Use a `flex flex-col gap-2` container instead of the standard `AlertDialogFooter` row layout.
-
-### Non-hotel entries
-
-Keep the existing 2-button dialog exactly as-is (lines 1698-1723).
-
----
-
-## Files Modified
-
-| File | Change |
-|------|--------|
-| `src/components/timeline/EntrySheet.tsx` | Hotel-aware delete dialog with 3 buttons, hotel block count fetch |
-
-## What Does NOT Change
-
-- HotelWizard, transport, flight systems
-- Non-hotel delete behavior
-- Timeline rendering, EntryCard
+## Test expectations
+- App builds without errors
+- Timeline renders correctly
+- No `/styles` route
+- No console errors for removed components
