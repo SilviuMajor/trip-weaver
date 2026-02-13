@@ -1,68 +1,101 @@
 
-# Trip Ends Pill Position + Top Padding
 
-## Fix 1: Move "Trip Ends" pill to the END of the last day
+# Four Quick Fixes
 
-Currently the "Trip Ends" marker is rendered inside the `days.map()` loop at the last day's midnight position (`dayIndex * 24 * PIXELS_PER_HOUR`). It needs to be at `(dayIndex + 1) * 24 * PIXELS_PER_HOUR` -- the bottom of the last day.
+## Fix 1: TZ badge centered on flight portion
 
-**Approach**: Extract the "Trip Ends" marker out of the `days.map()` loop entirely and render it as a standalone element after the loop, positioned at `days.length * 24 * PIXELS_PER_HOUR`.
+**File**: `src/components/timeline/ContinuousTimeline.tsx` (lines 1204-1205)
 
-In `src/components/timeline/ContinuousTimeline.tsx`:
+Change:
+```typescript
+const globalFlightEndHour = dayIndex * 24 + f.flightEndHour;
+const badgeTop = globalFlightEndHour * PIXELS_PER_HOUR + PIXELS_PER_HOUR / 2 - 8;
+```
+To:
+```typescript
+const globalFlightMidHour = dayIndex * 24 + (f.flightStartHour + f.flightEndHour) / 2;
+const badgeTop = globalFlightMidHour * PIXELS_PER_HOUR - 8;
+```
 
-1. Remove the `dayIndex === days.length - 1` block (lines 572-589) from inside the `days.map()` loop.
+---
 
-2. After the `days.map()` closing (line 604), add a new standalone "Trip Ends" pill:
+## Fix 2: "Send to Planner" disabled when locked
 
+**File**: `src/components/timeline/EntrySheet.tsx` (lines 1682-1687)
+
+Replace the conditional hide with always-visible but disabled-when-locked:
 ```tsx
-{/* Trip Ends marker — positioned at end of last day */}
-{days.length > 0 && (
-  <div
-    className="absolute z-[16] flex items-center gap-1"
-    style={{ top: days.length * 24 * PIXELS_PER_HOUR - 8, left: -12 }}
-  >
-    <div className="inline-flex items-center gap-1 rounded-full bg-secondary border border-border/40 px-3 py-1 text-xs font-semibold text-secondary-foreground shadow-sm">
-      <span>🏁 Trip Ends</span>
-      {(() => {
-        const lastDay = days[days.length - 1];
-        const dayStr = format(lastDay, 'yyyy-MM-dd');
-        const isEmpty = !scheduledEntries.some(e => getDateInTimezone(e.start_time, homeTimezone) === dayStr);
-        return isEmpty && days.length > 1 ? (
-          <button
-            onClick={(e) => { e.stopPropagation(); onTrimDay?.('end'); }}
-            className="ml-1 text-[10px] text-muted-foreground/70 hover:text-destructive underline"
-          >
-            ✂ Trim
-          </button>
-        ) : null;
-      })()}
-    </div>
+{isEditor && onMoveToIdeas && option?.category !== 'transfer' && option?.category !== 'flight' && (
+  <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={isLocked}
+      onClick={() => {
+        if (isLocked) {
+          toast({ title: 'Unlock this entry first', description: 'Locked entries cannot be sent to the Planner.' });
+          return;
+        }
+        onMoveToIdeas(entry.id);
+      }}
+    >
+      <ClipboardList className="mr-1.5 h-3.5 w-3.5" /> Send to Planner
+    </Button>
   </div>
 )}
 ```
 
-3. Extend the container height to accommodate the Trip Ends pill below the last day. Change `containerHeight` from `totalHours * PIXELS_PER_HOUR` to `totalHours * PIXELS_PER_HOUR + 30` (enough space for the pill to not be clipped).
+The `disabled` prop greys out the button; the guard in `onClick` is a safety fallback.
 
-For a 1-day trip: "Trip Begins" appears at the top (hour 0), "Trip Ends" appears at the bottom (hour 24) -- properly separated.
+---
 
-## Fix 2: Add ~50px top padding
+## Fix 3: Planner sidebar independent scroll
 
-Add `paddingTop: 50` to the outer container div (line 477, the `mx-auto max-w-2xl px-4 py-2` div), or more precisely to the grid-relative container. The simplest approach: change `py-2` to include top padding.
+**File**: `src/components/timeline/CategorySidebar.tsx` (lines 318-331)
 
-Change line 477:
+Update the desktop container to be a flex column with explicit height:
 ```tsx
-<div className="mx-auto max-w-2xl px-4 pb-2 pt-[50px]">
+<div
+  className={cn(
+    'shrink-0 border-l border-border bg-background flex flex-col overflow-hidden transition-all duration-300',
+    open
+      ? compact ? 'w-[25vw]' : 'w-[30vw] max-w-[500px]'
+      : 'w-0'
+  )}
+  style={{ height: '100%' }}
+>
+  {open && panelContent}
+</div>
 ```
 
-This gives breathing room above the first hour label and Trip Begins pill.
+The `panelContent` variable (line 183) already uses `flex h-full flex-col`. The scrollable area inside it needs `flex-1 overflow-y-auto` -- will verify the inner scroll container has this. Since `panelContent` is defined at line 183 as `<div className="flex h-full flex-col">`, the structure should work once the parent has explicit height.
+
+---
+
+## Fix 4: Sticky header/nav stability
+
+**File**: `src/components/timeline/TimelineHeader.tsx` (line ~24)
+
+Add `will-change-transform` to the header element's className.
+
+**File**: `src/components/timeline/TripNavBar.tsx` (line ~48)
+
+Add `will-change-transform` to the nav container's className.
+
+---
 
 ## Files Modified
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/ContinuousTimeline.tsx` | Extract Trip Ends pill out of loop, position at end of last day; add 50px top padding; extend container height by 30px |
+| `src/components/timeline/ContinuousTimeline.tsx` | TZ badge position: midpoint of flight |
+| `src/components/timeline/EntrySheet.tsx` | Send to Planner: visible but disabled when locked |
+| `src/components/timeline/CategorySidebar.tsx` | Desktop sidebar: flex column with height constraint |
+| `src/components/timeline/TimelineHeader.tsx` | Add `will-change-transform` |
+| `src/components/timeline/TripNavBar.tsx` | Add `will-change-transform` |
 
 ## What Does NOT Change
-- Trip Begins position and logic
-- Trim button logic (preserved, just moved)
-- Auto-extend logic
-- All other timeline rendering
+- Flight card rendering, hotel system, transport system
+- Entry card drag/resize behavior
+- Weather system, auto-extend logic, trim logic
+
