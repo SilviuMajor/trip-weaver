@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { RefreshCw, Loader2, X } from 'lucide-react';
+import { RefreshCw, Loader2, Trash2, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { EntryWithOptions, EntryOption, TransportMode } from '@/types/trip';
 
@@ -9,6 +9,20 @@ const MODE_CONFIG: { mode: string; emoji: string; label: string; apiMode: string
   { mode: 'transit', emoji: '🚌', label: 'Transit', apiMode: 'transit' },
   { mode: 'bicycle', emoji: '🚲', label: 'Bike', apiMode: 'bicycle' },
 ];
+
+const MODE_COLORS_LIGHT: Record<string, string> = {
+  walk: 'hsl(140, 40%, 85%)',
+  drive: 'hsl(0, 40%, 85%)',
+  transit: 'hsl(45, 50%, 85%)',
+  bicycle: 'hsl(210, 40%, 85%)',
+};
+
+const MODE_COLORS_DARK: Record<string, string> = {
+  walk: 'hsla(140, 40%, 30%, 0.3)',
+  drive: 'hsla(0, 40%, 30%, 0.3)',
+  transit: 'hsla(45, 50%, 30%, 0.3)',
+  bicycle: 'hsla(210, 40%, 30%, 0.3)',
+};
 
 const fmtDur = (min: number): string => {
   const h = Math.floor(min / 60);
@@ -35,6 +49,7 @@ interface TransportConnectorProps {
   isRefreshing?: boolean;
   selectedMode?: string;
   onDelete?: () => void;
+  onInfoTap?: () => void;
 }
 
 const TransportConnector = ({
@@ -48,6 +63,7 @@ const TransportConnector = ({
   isRefreshing,
   selectedMode: selectedModeProp,
   onDelete,
+  onInfoTap,
 }: TransportConnectorProps) => {
   const transportModes: TransportMode[] = (option as any).transport_modes ?? [];
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -59,15 +75,13 @@ const TransportConnector = ({
     };
   }, []);
 
-  const handleDeleteTap = (e: React.MouseEvent) => {
+  const handleDeleteTap = (e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation();
     if (confirmingDelete) {
-      // Second tap — execute delete
       if (confirmTimer.current) clearTimeout(confirmTimer.current);
       setConfirmingDelete(false);
       onDelete?.();
     } else {
-      // First tap — enter confirm state
       setConfirmingDelete(true);
       confirmTimer.current = setTimeout(() => setConfirmingDelete(false), 3000);
     }
@@ -84,21 +98,106 @@ const TransportConnector = ({
   };
 
   const currentMode = detectCurrentMode();
-  const isCompact = height < 40;
+  const isCompressed = height <= 50;
   const showLabels = height >= 160;
 
   const selectedData = transportModes.find(m => m.mode === currentMode);
   const selectedDistance = selectedData ? fmtDist(selectedData.distance_km) : '';
 
+  // Detect dark mode
+  const isDark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
+  const backgroundColor = isDark
+    ? (MODE_COLORS_DARK[currentMode] || MODE_COLORS_DARK.transit)
+    : (MODE_COLORS_LIGHT[currentMode] || MODE_COLORS_LIGHT.transit);
+
+  if (isCompressed) {
+    // Compressed pill mode
+    const selectedCfg = MODE_CONFIG.find(c => c.apiMode === currentMode);
+    const durLabel = selectedData ? fmtDur(selectedData.duration_min) : '—';
+
+    return (
+      <div
+        className={cn(
+          'relative flex items-center justify-center rounded-full',
+          'border border-dashed border-stone-300/50 dark:border-stone-700/30',
+          'cursor-default select-none transition-colors duration-300'
+        )}
+        style={{ height, backgroundColor, width: '60%', margin: '0 auto' }}
+      >
+        <div className="flex items-center gap-1">
+          {/* Info icon */}
+          {onInfoTap && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onInfoTap(); }}
+              className="flex items-center justify-center rounded-full opacity-50 hover:opacity-80 transition-all"
+              style={{ minWidth: 28, minHeight: 28 }}
+            >
+              <Info className="h-3 w-3 text-muted-foreground" />
+            </button>
+          )}
+
+          {/* Selected mode pill */}
+          <span className="text-sm leading-none">{selectedCfg?.emoji}</span>
+          <span className="text-[10px] font-bold text-foreground/80">{durLabel}</span>
+
+          {/* Other mode icons */}
+          {MODE_CONFIG.filter(c => c.apiMode !== currentMode).map(({ emoji, apiMode }) => {
+            const modeData = transportModes.find(m => m.mode === apiMode);
+            return (
+              <button
+                key={apiMode}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (modeData) onModeSelect(apiMode, modeData.duration_min, modeData.distance_km, modeData.polyline);
+                }}
+                className={cn('text-xs opacity-40 hover:opacity-70 transition-all', !modeData && 'opacity-15 pointer-events-none')}
+                style={{ minWidth: 20, minHeight: 20 }}
+              >
+                {emoji}
+              </button>
+            );
+          })}
+
+          {/* Refresh */}
+          <button
+            onClick={(e) => { e.stopPropagation(); onRefresh(); }}
+            className="flex items-center justify-center rounded-full opacity-40 hover:opacity-70 transition-all"
+            style={{ minWidth: 28, minHeight: 28 }}
+          >
+            {isRefreshing ? (
+              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+            ) : (
+              <RefreshCw className="h-3 w-3 text-muted-foreground" />
+            )}
+          </button>
+
+          {/* Delete */}
+          {onDelete && (
+            <button
+              onClick={handleDeleteTap}
+              className={cn(
+                'flex items-center justify-center rounded-full transition-all',
+                confirmingDelete ? 'bg-red-500 text-white' : 'opacity-40 hover:opacity-70'
+              )}
+              style={{ minWidth: 28, minHeight: 28 }}
+            >
+              <Trash2 className={cn('h-3 w-3', confirmingDelete ? 'text-white' : 'text-muted-foreground')} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Normal (non-compressed) mode
   return (
     <div
       className={cn(
         'relative flex flex-col items-center justify-center rounded-lg',
-        'bg-stone-100 dark:bg-stone-900/20',
         'border border-dashed border-stone-300/50 dark:border-stone-700/30',
-        'cursor-default select-none overflow-hidden'
+        'cursor-default select-none overflow-hidden transition-colors duration-300'
       )}
-      style={{ height }}
+      style={{ height, backgroundColor }}
     >
       {/* From → To labels */}
       {showLabels && fromLabel && toLabel && (
@@ -107,8 +206,19 @@ const TransportConnector = ({
         </div>
       )}
 
-      {/* Mode icons row + refresh + delete */}
-      <div className={cn('flex items-center gap-1', isCompact ? 'gap-0.5' : 'gap-1.5')}>
+      {/* Mode icons row + info + refresh + delete */}
+      <div className={cn('flex items-center gap-1', height < 40 ? 'gap-0.5' : 'gap-1.5')}>
+        {/* Info button */}
+        {onInfoTap && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onInfoTap(); }}
+            className="flex flex-col items-center rounded-md px-1 py-0.5 opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
+            style={{ minWidth: 32, minHeight: 32 }}
+          >
+            <Info className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
+        )}
+
         {MODE_CONFIG.map(({ mode, emoji, apiMode }) => {
           const modeData = transportModes.find(m => m.mode === apiMode);
           const isSelected = currentMode === apiMode;
@@ -144,7 +254,7 @@ const TransportConnector = ({
           );
         })}
 
-        {/* Refresh button — inline */}
+        {/* Refresh button */}
         <button
           onClick={(e) => { e.stopPropagation(); onRefresh(); }}
           className="flex flex-col items-center rounded-md px-1.5 py-0.5 opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
@@ -156,7 +266,7 @@ const TransportConnector = ({
           )}
         </button>
 
-        {/* Delete button — inline, two-tap confirm */}
+        {/* Delete button — two-tap confirm */}
         {onDelete && (
           <button
             onClick={handleDeleteTap}
@@ -167,13 +277,13 @@ const TransportConnector = ({
                 : 'opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30'
             )}
           >
-            <X className={cn('h-3.5 w-3.5', confirmingDelete ? 'text-white' : 'text-muted-foreground')} />
+            <Trash2 className={cn('h-3.5 w-3.5', confirmingDelete ? 'text-white' : 'text-muted-foreground')} />
           </button>
         )}
       </div>
 
       {/* Distance for selected mode */}
-      {selectedDistance && !isCompact && (
+      {selectedDistance && height >= 40 && (
         <span className="text-[9px] text-muted-foreground/50 mt-0.5">{selectedDistance}</span>
       )}
     </div>
