@@ -1681,7 +1681,18 @@ const EntrySheet = ({
             {/* Editor actions */}
             {isEditor && onMoveToIdeas && option?.category !== 'transfer' && option?.category !== 'flight' && (
               <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
-                <Button variant="outline" size="sm" onClick={() => onMoveToIdeas(entry.id)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isLocked}
+                  onClick={() => {
+                    if (isLocked) {
+                      toast({ title: 'Unlock this entry first', description: 'Locked entries cannot be sent to the Planner.' });
+                      return;
+                    }
+                    onMoveToIdeas(entry.id);
+                  }}
+                >
                   <ClipboardList className="mr-1.5 h-3.5 w-3.5" /> Send to Planner
                 </Button>
               </div>

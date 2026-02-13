@@ -1201,8 +1201,8 @@ const ContinuousTimeline = ({
           const f = tzInfo.flights[0];
           const offset = getUtcOffsetHoursDiff(f.originTz, f.destinationTz);
           if (offset === 0) return null;
-          const globalFlightEndHour = dayIndex * 24 + f.flightEndHour;
-          const badgeTop = globalFlightEndHour * PIXELS_PER_HOUR + PIXELS_PER_HOUR / 2 - 8;
+          const globalFlightMidHour = dayIndex * 24 + (f.flightStartHour + f.flightEndHour) / 2;
+          const badgeTop = globalFlightMidHour * PIXELS_PER_HOUR - 8;
           return (
             <div key={`tz-${dayIndex}`} className="absolute z-[6]" style={{ top: badgeTop, left: -100, width: 46 }}>
               <span className="rounded-full bg-primary/20 border border-primary/30 px-2 py-0.5 text-[10px] font-bold text-primary whitespace-nowrap">

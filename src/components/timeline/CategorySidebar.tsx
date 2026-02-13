@@ -318,13 +318,14 @@ const CategorySidebar = ({
   return (
     <div
       className={cn(
-        'shrink-0 border-l border-border bg-background overflow-hidden transition-all duration-300',
+        'shrink-0 border-l border-border bg-background flex flex-col overflow-hidden transition-all duration-300',
         open
           ? compact
             ? 'w-[25vw]'
             : 'w-[30vw] max-w-[500px]'
           : 'w-0'
       )}
+      style={{ height: '100%' }}
     >
       {open && panelContent}
     </div>

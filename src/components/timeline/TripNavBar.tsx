@@ -45,7 +45,7 @@ const TripNavBar = ({
   ];
 
   return (
-    <div className="sticky top-[57px] z-20 border-b border-border bg-background/95 backdrop-blur-sm">
+    <div className="sticky top-[57px] z-20 border-b border-border bg-background/95 backdrop-blur-sm will-change-transform">
       <div className="mx-auto flex max-w-2xl">
         {tabs.map(tab => (
           <button
