@@ -30,7 +30,7 @@ async function autoExtendTripIfNeeded(
   tripId: string,
   entryEndIso: string,
   trip: Trip,
-  fetchData: () => Promise<void>
+  fetchData: () => Promise<any>
 ) {
   const REFERENCE_DATE_STR = '2099-01-01';
   if (trip.start_date) {
@@ -113,7 +113,7 @@ const Timeline = () => {
   const { calculateTravel } = useTravelCalculation();
 
   // Undo/Redo (fetchData ref will be set after declaration)
-  const fetchDataRef = useRef<() => Promise<void>>();
+  const fetchDataRef = useRef<() => Promise<EntryWithOptions[] | undefined>>();
   const { canUndo, canRedo, undo, redo, pushAction } = useUndoRedo(async () => { await fetchDataRef.current?.(); });
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -196,6 +196,7 @@ const Timeline = () => {
 
     setEntries(entriesWithOptions);
     setLoading(false);
+    return entriesWithOptions;
   }, [currentUser, tripId]);
 
   fetchDataRef.current = fetchData;
@@ -1784,7 +1785,20 @@ const Timeline = () => {
             }}
             tripId={trip.id}
             onSaved={async () => {
-              await fetchData();
+              const freshEntries = await fetchData();
+
+              // Refresh sheetEntry with latest data so lock state updates immediately
+              if (sheetEntry && freshEntries) {
+                const fresh = freshEntries.find(e => e.id === sheetEntry.id);
+                if (fresh) {
+                  setSheetEntry(fresh);
+                  if (sheetOption && fresh.options) {
+                    const freshOpt = fresh.options.find(o => o.id === sheetOption.id);
+                    if (freshOpt) setSheetOption(freshOpt);
+                  }
+                }
+              }
+
               // Auto-extend: check latest entry times after save
               if (trip && tripId) {
                 const { data: latest } = await supabase
