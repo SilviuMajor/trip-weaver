@@ -19,6 +19,7 @@ import TripNavBar from '@/components/timeline/TripNavBar';
 import ContinuousTimeline from '@/components/timeline/ContinuousTimeline';
 import EntrySheet from '@/components/timeline/EntrySheet';
 import CategorySidebar from '@/components/timeline/CategorySidebar';
+import SidebarEntryCard from '@/components/timeline/SidebarEntryCard';
 import LivePanel from '@/components/timeline/LivePanel';
 import ConflictResolver from '@/components/timeline/ConflictResolver';
 import DayPickerDialog from '@/components/timeline/DayPickerDialog';
@@ -114,6 +115,7 @@ const Timeline = () => {
   const [touchDragEntry, setTouchDragEntry] = useState<EntryWithOptions | null>(null);
   const [touchDragPosition, setTouchDragPosition] = useState<{ x: number; y: number } | null>(null);
   const [touchDragGlobalHour, setTouchDragGlobalHour] = useState<number | null>(null);
+  const [touchDragHidePlanner, setTouchDragHidePlanner] = useState(false);
   const touchDragTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Travel calculation
@@ -1392,22 +1394,29 @@ const Timeline = () => {
 
   // Touch drag from planner sidebar (mobile)
   const touchDragGlobalHourRef = useRef<number | null>(null);
+  const touchDragEntryRef = useRef<EntryWithOptions | null>(null);
 
-  // Keep ref in sync with state
+  // Keep refs in sync with state
   useEffect(() => {
     touchDragGlobalHourRef.current = touchDragGlobalHour;
   }, [touchDragGlobalHour]);
+  useEffect(() => {
+    touchDragEntryRef.current = touchDragEntry;
+  }, [touchDragEntry]);
 
   const handleTouchDragStart = useCallback((entry: EntryWithOptions, initialPosition: { x: number; y: number }) => {
     setTouchDragEntry(entry);
     setTouchDragPosition(initialPosition); // Ghost visible immediately
-    setSidebarOpen(false);
+    // Hide planner visually but keep it mounted (preserves touch context on iOS)
+    setTouchDragHidePlanner(true);
     // 3-second cancel timeout
     if (touchDragTimeoutRef.current) clearTimeout(touchDragTimeoutRef.current);
     touchDragTimeoutRef.current = setTimeout(() => {
       setTouchDragEntry(null);
       setTouchDragPosition(null);
       setTouchDragGlobalHour(null);
+      setTouchDragHidePlanner(false);
+      setSidebarOpen(false);
       touchDragTimeoutRef.current = null;
     }, 3000);
   }, []);
@@ -1416,6 +1425,8 @@ const Timeline = () => {
     setTouchDragEntry(null);
     setTouchDragPosition(null);
     setTouchDragGlobalHour(null);
+    setTouchDragHidePlanner(false);
+    setSidebarOpen(false);
     if (touchDragTimeoutRef.current) {
       clearTimeout(touchDragTimeoutRef.current);
       touchDragTimeoutRef.current = null;
@@ -1463,8 +1474,9 @@ const Timeline = () => {
     };
 
     const handleTouchEnd = () => {
-      if (touchDragGlobalHourRef.current !== null && touchDragEntry) {
-        handleDropOnTimeline(touchDragEntry.id, touchDragGlobalHourRef.current);
+      const entry = touchDragEntryRef.current;
+      if (touchDragGlobalHourRef.current !== null && entry) {
+        handleDropOnTimeline(entry.id, touchDragGlobalHourRef.current);
       }
       cleanupTouchDrag();
     };
@@ -2125,6 +2137,7 @@ const Timeline = () => {
               onDuplicate={handleDuplicate}
               onInsert={handleInsert}
               onTouchDragStart={handleTouchDragStart}
+              hiddenForDrag={touchDragHidePlanner}
             />
           )}
           <EntrySheet
@@ -2267,25 +2280,27 @@ const Timeline = () => {
       {/* Touch drag ghost overlay (mobile planner → timeline) — purely visual, pointer-events-none */}
       {touchDragEntry && touchDragPosition && (
         <div className="fixed inset-0 z-[100] pointer-events-none">
-          {/* Floating ghost card */}
           <div
-            className="absolute z-[101]"
+            className="absolute"
             style={{
-              left: touchDragPosition.x - 80,
-              top: touchDragPosition.y - 30,
-              width: 160,
-              opacity: 0.85,
+              left: touchDragPosition.x - 90,
+              top: touchDragPosition.y - 40,
+              width: 180,
+              opacity: 0.8,
+              transform: 'scale(0.9)',
+              filter: 'drop-shadow(0 8px 16px rgba(0,0,0,0.2))',
             }}
           >
-            <div className="rounded-xl border border-primary bg-background/95 backdrop-blur-sm shadow-lg px-3 py-2">
-              <p className="text-xs font-semibold truncate">{touchDragEntry.options[0]?.name}</p>
-              {touchDragGlobalHour !== null && (
-                <p className="text-[10px] text-primary font-bold mt-0.5">
+            <SidebarEntryCard entry={touchDragEntry} />
+            {/* Time indicator overlay */}
+            {touchDragGlobalHour !== null && touchDragGlobalHour >= 0 && (
+              <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-primary px-2 py-0.5 shadow-md">
+                <span className="text-[11px] font-bold text-primary-foreground">
                   {String(Math.floor((touchDragGlobalHour % 24))).padStart(2, '0')}:
                   {String(Math.round(((touchDragGlobalHour % 1) * 60))).padStart(2, '0')}
-                </p>
-              )}
-            </div>
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
