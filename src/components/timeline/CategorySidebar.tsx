@@ -20,7 +20,7 @@ interface CategorySidebarProps {
   onAddEntry?: (categoryId: string) => void;
   onDuplicate?: (entry: EntryWithOptions) => void;
   onInsert?: (entry: EntryWithOptions) => void;
-  onTouchDragStart?: (entry: EntryWithOptions) => void;
+  onTouchDragStart?: (entry: EntryWithOptions, initialPosition: { x: number; y: number }) => void;
   compact?: boolean;
 }
 

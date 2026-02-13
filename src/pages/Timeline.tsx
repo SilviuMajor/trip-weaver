@@ -1391,8 +1391,16 @@ const Timeline = () => {
   };
 
   // Touch drag from planner sidebar (mobile)
-  const handleTouchDragStart = useCallback((entry: EntryWithOptions) => {
+  const touchDragGlobalHourRef = useRef<number | null>(null);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    touchDragGlobalHourRef.current = touchDragGlobalHour;
+  }, [touchDragGlobalHour]);
+
+  const handleTouchDragStart = useCallback((entry: EntryWithOptions, initialPosition: { x: number; y: number }) => {
     setTouchDragEntry(entry);
+    setTouchDragPosition(initialPosition); // Ghost visible immediately
     setSidebarOpen(false);
     // 3-second cancel timeout
     if (touchDragTimeoutRef.current) clearTimeout(touchDragTimeoutRef.current);
@@ -1413,8 +1421,66 @@ const Timeline = () => {
       touchDragTimeoutRef.current = null;
     }
   }, []);
-
   const PIXELS_PER_HOUR = 80;
+  // Document-level touch listeners for drag (survives sidebar unmount)
+  useEffect(() => {
+    if (!touchDragEntry) return;
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      setTouchDragPosition({ x: touch.clientX, y: touch.clientY });
+
+      // Reset cancel timeout on movement
+      if (touchDragTimeoutRef.current) {
+        clearTimeout(touchDragTimeoutRef.current);
+        touchDragTimeoutRef.current = null;
+      }
+
+      // Calculate which global hour the finger is over
+      const timelineEl = document.querySelector('[data-timeline-area]');
+      if (timelineEl) {
+        const rect = timelineEl.getBoundingClientRect();
+        const relativeY = touch.clientY - rect.top;
+        const globalHour = relativeY / PIXELS_PER_HOUR;
+        const snapped = Math.round(globalHour * 4) / 4;
+        setTouchDragGlobalHour(snapped >= 0 ? snapped : null);
+      } else {
+        setTouchDragGlobalHour(null);
+      }
+
+      // Auto-scroll near edges
+      const SCROLL_ZONE = 80;
+      const SCROLL_SPEED = 8;
+      const scrollEl = mainScrollRef.current;
+      if (scrollEl) {
+        if (touch.clientY < SCROLL_ZONE) {
+          scrollEl.scrollBy(0, -SCROLL_SPEED);
+        } else if (touch.clientY > window.innerHeight - SCROLL_ZONE) {
+          scrollEl.scrollBy(0, SCROLL_SPEED);
+        }
+      }
+    };
+
+    const handleTouchEnd = () => {
+      if (touchDragGlobalHourRef.current !== null && touchDragEntry) {
+        handleDropOnTimeline(touchDragEntry.id, touchDragGlobalHourRef.current);
+      }
+      cleanupTouchDrag();
+    };
+
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd);
+    document.addEventListener('touchcancel', handleTouchEnd);
+
+    return () => {
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
+      document.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [touchDragEntry, cleanupTouchDrag]);
+
+
 
   const handleApplyRecommendation = async (rec: Recommendation) => {
     for (const change of rec.changes) {
@@ -2198,72 +2264,29 @@ const Timeline = () => {
         </>
       )}
 
-      {/* Touch drag overlay (mobile planner → timeline) */}
-      {touchDragEntry && (
-        <div
-          className="fixed inset-0 z-[100]"
-          onTouchMove={(e) => {
-            e.preventDefault();
-            const touch = e.touches[0];
-            setTouchDragPosition({ x: touch.clientX, y: touch.clientY });
-
-            // Reset cancel timeout on movement
-            if (touchDragTimeoutRef.current) {
-              clearTimeout(touchDragTimeoutRef.current);
-              touchDragTimeoutRef.current = null;
-            }
-
-            // Calculate which global hour the finger is over
-            const timelineEl = mainScrollRef.current?.querySelector('[data-timeline-area]');
-            if (timelineEl) {
-              const rect = timelineEl.getBoundingClientRect();
-              const scrollTop = mainScrollRef.current?.scrollTop ?? 0;
-              const relativeY = touch.clientY - rect.top + scrollTop;
-              const globalHour = relativeY / PIXELS_PER_HOUR;
-              const snapped = Math.round(globalHour * 4) / 4;
-              setTouchDragGlobalHour(snapped >= 0 ? snapped : null);
-            } else {
-              setTouchDragGlobalHour(null);
-            }
-
-            // Auto-scroll near edges
-            const SCROLL_ZONE = 80;
-            const SCROLL_SPEED = 8;
-            if (touch.clientY < SCROLL_ZONE) {
-              mainScrollRef.current?.scrollBy(0, -SCROLL_SPEED);
-            } else if (touch.clientY > window.innerHeight - SCROLL_ZONE) {
-              mainScrollRef.current?.scrollBy(0, SCROLL_SPEED);
-            }
-          }}
-          onTouchEnd={() => {
-            if (touchDragGlobalHour !== null && touchDragEntry) {
-              handleDropOnTimeline(touchDragEntry.id, touchDragGlobalHour);
-            }
-            cleanupTouchDrag();
-          }}
-        >
+      {/* Touch drag ghost overlay (mobile planner → timeline) — purely visual, pointer-events-none */}
+      {touchDragEntry && touchDragPosition && (
+        <div className="fixed inset-0 z-[100] pointer-events-none">
           {/* Floating ghost card */}
-          {touchDragPosition && (
-            <div
-              className="pointer-events-none absolute z-[101]"
-              style={{
-                left: touchDragPosition.x - 80,
-                top: touchDragPosition.y - 30,
-                width: 160,
-                opacity: 0.85,
-              }}
-            >
-              <div className="rounded-xl border border-primary bg-background/95 backdrop-blur-sm shadow-lg px-3 py-2">
-                <p className="text-xs font-semibold truncate">{touchDragEntry.options[0]?.name}</p>
-                {touchDragGlobalHour !== null && (
-                  <p className="text-[10px] text-primary font-bold mt-0.5">
-                    {String(Math.floor((touchDragGlobalHour % 24))).padStart(2, '0')}:
-                    {String(Math.round(((touchDragGlobalHour % 1) * 60))).padStart(2, '0')}
-                  </p>
-                )}
-              </div>
+          <div
+            className="absolute z-[101]"
+            style={{
+              left: touchDragPosition.x - 80,
+              top: touchDragPosition.y - 30,
+              width: 160,
+              opacity: 0.85,
+            }}
+          >
+            <div className="rounded-xl border border-primary bg-background/95 backdrop-blur-sm shadow-lg px-3 py-2">
+              <p className="text-xs font-semibold truncate">{touchDragEntry.options[0]?.name}</p>
+              {touchDragGlobalHour !== null && (
+                <p className="text-[10px] text-primary font-bold mt-0.5">
+                  {String(Math.floor((touchDragGlobalHour % 24))).padStart(2, '0')}:
+                  {String(Math.round(((touchDragGlobalHour % 1) * 60))).padStart(2, '0')}
+                </p>
+              )}
             </div>
-          )}
+          </div>
         </div>
       )}
 
