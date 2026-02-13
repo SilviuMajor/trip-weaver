@@ -1,20 +1,35 @@
 
+# Fix Magnet Snap Case A: Close Gaps by Moving Transport + Next Event
 
-# Three Small Magnet Icon Fixes
+## Problem
+When transport already exists between two cards, tapping magnet only moves the next event to the transport's end -- but the transport itself stays put, leaving a gap between the current card and the transport.
 
-## Fix 1 -- Hide magnet when no next entry
-Already working correctly. Line 999 returns `null` when `hasNextEntry` is false, so no magnet renders. No code change needed.
+## Change
 
-## Fix 2 -- Increase z-index
-**File: `src/components/timeline/ContinuousTimeline.tsx`, line 1021**
+**File: `src/pages/Timeline.tsx`, lines 482-501**
 
-Change `z-30` to `z-[45]` so the magnet renders above transport connectors.
+Replace the current Case A block with logic that:
+1. Preserves the transport's duration
+2. Moves the transport to start at the current entry's end time
+3. Moves the next event to start at the transport's new end time
+4. Updates undo/redo to restore both the transport and the next event to their original positions
 
-## Fix 3 -- Rotate icon 135 degrees
-**File: `src/components/timeline/ContinuousTimeline.tsx`, line 1032**
+```text
+Before:
+  - Only updates nextEvent start/end to transport's existing end
+  - Transport stays in place -> gap remains
 
-Change `rotate-180` to `rotate-[135deg]`.
+After:
+  - Save transport's original start/end for undo
+  - Compute new transport start = entry.end_time
+  - Compute new transport end = entry.end_time + original transport duration
+  - Compute new next event start = new transport end
+  - Compute new next event end = new transport end + next event duration
+  - Update both entries in DB
+  - Undo restores both to original positions
+```
 
-## Summary
-Two single-line edits in `ContinuousTimeline.tsx`. Nothing else changes.
-
+## What Does NOT Change
+- Case B/C logic (no transport exists)
+- Magnet icon rendering
+- Any other timeline functionality
