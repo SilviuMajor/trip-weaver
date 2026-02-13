@@ -1,36 +1,26 @@
 
 
-# Soften Mode Shadow + Full Opacity Function Buttons
+# Remove TransportOverviewSheet, Use EntrySheet for Transport Info
 
-## Changes in `src/components/timeline/TransportConnector.tsx`
+## Summary
 
-### 1. Reduce selected mode shadow intensity
+Wire the transport card's info button to open the same EntrySheet used by all other entry types, then delete the now-unused TransportOverviewSheet component.
 
-On the selected mode button (line 182), soften the box-shadow values:
+## Changes
 
-**Before:**
-```
-boxShadow: isDark
-  ? '0 0 0 1.5px rgba(255,255,255,0.3), 0 1px 3px rgba(0,0,0,0.3)'
-  : '0 0 0 1.5px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.15)'
-```
+### 1. `src/components/timeline/ContinuousTimeline.tsx`
 
-**After:**
-```
-boxShadow: isDark
-  ? '0 0 0 1px rgba(255,255,255,0.15), 0 1px 2px rgba(0,0,0,0.15)'
-  : '0 0 0 1px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08)'
-```
+- **Change `onInfoTap` handler** (around line 850): Replace `() => setTransportSheetEntry(entry)` with `() => onCardTap(entry, primaryOption)` so tapping (i) opens EntrySheet in view mode.
+- **Remove state variable** (line 316): Delete `const [transportSheetEntry, setTransportSheetEntry] = useState<EntryWithOptions | null>(null);`
+- **Remove JSX block** (lines 1201-1253): Delete the entire `{transportSheetEntry && ...}` block that renders `<TransportOverviewSheet>`.
+- **Remove import** (line 14): Delete `import TransportOverviewSheet from './TransportOverviewSheet';`
 
-### 2. Full opacity on function buttons (info, refresh, trash)
+### 2. Delete `src/components/timeline/TransportOverviewSheet.tsx`
 
-The info button (line 157), refresh button (line 196), and delete button (line 206) all use `opacity-50`. Change these to full opacity by removing `opacity-50` and keeping only hover styles.
+This file is no longer referenced anywhere and can be removed entirely.
 
-- Info button: remove `opacity-50`, keep `hover:opacity-80`
-- Refresh button: remove `opacity-50`, keep `hover:opacity-80`
-- Delete button (non-confirming state): remove `opacity-50`, keep `hover:opacity-80`
+## What does NOT change
 
-### What does not change
-
-- Colours, two-layer structure, mode switching, pointer-events logic, z-index stacking
-
+- EntrySheet.tsx (already handles transport/transfer entries)
+- Transport card visuals (colours, pill layout, overlay behaviour)
+- Mode switching, refresh, delete interactions on the card itself
