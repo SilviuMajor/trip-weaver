@@ -1018,7 +1018,7 @@ const ContinuousTimeline = ({
                               onMagnetSnap(entry.id).finally(() => setMagnetLoadingId(null));
                             }}
                             className={cn(
-                              "absolute -bottom-3 -right-3 z-30 flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
+                              "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
                               nextEntryIsLocked
                                 ? "bg-muted cursor-not-allowed"
                                 : "bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
@@ -1029,7 +1029,7 @@ const ContinuousTimeline = ({
                               <Loader2 className="h-3.5 w-3.5 animate-spin text-green-600" />
                             ) : (
                               <Magnet className={cn(
-                                "h-3.5 w-3.5 rotate-180",
+                                "h-3.5 w-3.5 rotate-[135deg]",
                                 nextEntryIsLocked ? "text-muted-foreground/40" : "text-green-600 dark:text-green-400"
                               )} />
                             )}
