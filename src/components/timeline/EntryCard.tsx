@@ -522,6 +522,11 @@ const EntryCard = ({
   // Detect hotel utility blocks for aesthetic labels
   const isCheckIn = option.name?.startsWith('Check in ·');
   const isCheckOut = option.name?.startsWith('Check out ·') || linkedType === 'checkout';
+  const displayName = isCheckIn
+    ? option.name?.replace(/^Check in · /, '') ?? option.name
+    : isCheckOut && option.name?.startsWith('Check out · ')
+      ? option.name?.replace(/^Check out · /, '')
+      : option.name;
 
   if (isCondensed) {
     return (
@@ -574,7 +579,7 @@ const EntryCard = ({
               )}
             </div>
             <h3 className="truncate text-sm font-bold leading-tight">
-              {option.name}
+              {displayName}
             </h3>
             {(option as any).rating != null && (
               <p className={cn(
@@ -616,9 +621,6 @@ const EntryCard = ({
               )}>
                 {formatTime(startTime)} — {formatTime(endTime)}
               </span>
-              {isCheckOut && (
-                <span className={cn('text-[8px] uppercase tracking-wider font-semibold', firstImage ? 'text-white/60' : 'text-muted-foreground')}>CHECKOUT</span>
-              )}
             </div>
             <span className={cn(
               'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
@@ -628,6 +630,12 @@ const EntryCard = ({
             </span>
           </div>
         </div>
+        {isCheckOut && (
+          <span className={cn(
+            'absolute bottom-1 left-2.5 z-10 text-[10px] font-semibold uppercase tracking-wider',
+            firstImage ? 'text-white/60' : 'text-muted-foreground/70'
+          )}>checkout</span>
+        )}
         {overlapFraction > 0 && (
           <div
             className="absolute inset-x-0 z-[1] pointer-events-none rounded-xl"
@@ -720,7 +728,7 @@ const EntryCard = ({
           )}
         >
           {!option.category && <span className="text-xl">{catEmoji}</span>}
-          {option.name}
+          {displayName}
         </h3>
 
         {/* Rating */}
@@ -836,9 +844,6 @@ const EntryCard = ({
                   <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
                 </div>
               )}
-              {isCheckOut && (
-                <span className={cn('text-[8px] uppercase tracking-wider font-semibold', firstImage ? 'text-white/60' : 'text-muted-foreground')}>CHECKOUT</span>
-              )}
             </div>
 
             <div className="flex items-center gap-2">
@@ -863,6 +868,13 @@ const EntryCard = ({
         )}
 
       </div>
+
+      {isCheckOut && (
+        <span className={cn(
+          'absolute bottom-1 left-3 z-10 text-[10px] font-semibold uppercase tracking-wider',
+          firstImage ? 'text-white/60' : 'text-muted-foreground/70'
+        )}>checkout</span>
+      )}
 
       {/* Overlap red tint overlay */}
       {overlapFraction > 0 && (
