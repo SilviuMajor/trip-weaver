@@ -1222,12 +1222,15 @@ const EntrySheet = ({
           {/* Lock toggle in top-right */}
           {isEditor && option?.category !== 'flight' && option?.category !== 'transfer' && (
             <button
-              className="absolute top-3 right-[6.5rem] z-50 flex items-center justify-center h-11 w-11 rounded-sm hover:bg-muted/50 transition-colors"
+              className={cn(
+                "absolute top-3 right-[6.5rem] z-50 flex items-center justify-center h-11 w-11 rounded-sm transition-colors",
+                isLocked ? "bg-primary hover:bg-primary/90" : "hover:bg-muted/50"
+              )}
               onClick={handleToggleLock}
               disabled={toggling}
             >
               {isLocked
-                ? <Lock className="h-5 w-5 text-primary fill-primary" />
+                ? <Lock className="h-5 w-5 text-primary-foreground" />
                 : <LockOpen className="h-5 w-5 text-muted-foreground" />
               }
             </button>
@@ -1352,7 +1355,7 @@ const EntrySheet = ({
                 </div>
                 {isLocked && (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Lock className="h-3 w-3" /> Locked
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary"><Lock className="h-2.5 w-2.5 text-primary-foreground" /></span> Locked
                   </div>
                 )}
                 {/* Airport Processing - editable durations */}
@@ -1482,7 +1485,7 @@ const EntrySheet = ({
 
                       {isLocked && (
                         <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Lock className="h-3 w-3" /> Locked
+                          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary"><Lock className="h-2.5 w-2.5 text-primary-foreground" /></span> Locked
                         </div>
                       )}
 
@@ -1591,7 +1594,7 @@ const EntrySheet = ({
                         return h > 0 ? `${h}h${m ? ` ${m}m` : ''}` : `${m}m`;
                       })()}
                     </span>
-                    {isLocked && <Lock className="h-3.5 w-3.5 text-muted-foreground/60" />}
+                    {isLocked && <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary"><Lock className="h-2.5 w-2.5 text-primary-foreground" /></span>}
                   </div>
                 </div>
               </>

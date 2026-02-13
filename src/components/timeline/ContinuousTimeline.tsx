@@ -970,10 +970,13 @@ const ContinuousTimeline = ({
                             e.stopPropagation();
                             onToggleLock(entry.id, !!isLocked);
                           }}
-                          className="absolute top-1/2 -translate-y-1/2 -right-3 z-30 flex h-7 w-7 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+                          className={cn(
+                            "absolute top-1/2 -translate-y-1/2 -right-3 z-30 flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
+                            isLocked ? "bg-primary" : "bg-background"
+                          )}
                         >
                           {isLocked ? (
-                            <Lock className="h-4 w-4 text-primary fill-primary" />
+                            <Lock className="h-4 w-4 text-primary-foreground" />
                           ) : (
                             <LockOpen className="h-4 w-4 text-muted-foreground/40" />
                           )}
