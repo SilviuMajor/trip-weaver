@@ -75,6 +75,14 @@ export interface EntryOption {
   arrival_terminal: string | null;
   airport_checkin_hours: number | null;
   airport_checkout_min: number | null;
+  phone: string | null;
+  address: string | null;
+  rating: number | null;
+  user_rating_count: number | null;
+  opening_hours: string[] | null;
+  google_maps_uri: string | null;
+  google_place_id: string | null;
+  price_level: string | null;
   created_at: string;
   updated_at: string;
   vote_count?: number;

@@ -31,7 +31,6 @@ serve(async (req) => {
         });
       }
 
-      // Use Places API (New) - Autocomplete endpoint
       const requestBody: any = {
         input: query,
       };
@@ -86,12 +85,11 @@ serve(async (req) => {
         });
       }
 
-      // Use Places API (New) - Place Details
       const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'displayName,formattedAddress,websiteUri,location,photos',
+          'X-Goog-FieldMask': 'displayName,formattedAddress,websiteUri,location,photos,nationalPhoneNumber,internationalPhoneNumber,rating,userRatingCount,regularOpeningHours,googleMapsUri,priceLevel,types',
         },
       });
       const result = await res.json();
@@ -115,7 +113,6 @@ serve(async (req) => {
 
         for (const photo of photoRefs) {
           try {
-            // New API photo URL format: https://places.googleapis.com/v1/{photo.name}/media
             const photoUrl = `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=800&key=${apiKey}`;
             const photoRes = await fetch(photoUrl);
             if (!photoRes.ok) {
@@ -154,8 +151,15 @@ serve(async (req) => {
         name: result.displayName?.text ?? '',
         address: result.formattedAddress ?? '',
         website: result.websiteUri ?? null,
+        phone: result.internationalPhoneNumber ?? result.nationalPhoneNumber ?? null,
         lat: result.location?.latitude ?? null,
         lng: result.location?.longitude ?? null,
+        rating: result.rating ?? null,
+        userRatingCount: result.userRatingCount ?? null,
+        openingHours: result.regularOpeningHours?.weekdayDescriptions ?? null,
+        googleMapsUri: result.googleMapsUri ?? null,
+        priceLevel: result.priceLevel ?? null,
+        placeTypes: result.types ?? null,
         photos: photoUrls,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

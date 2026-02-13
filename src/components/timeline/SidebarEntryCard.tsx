@@ -127,6 +127,14 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
                 📍 {option.location_name}
               </p>
             )}
+            {(option as any).rating != null && (
+              <p className={cn(
+                'text-[10px] leading-tight mt-0.5',
+                firstImage ? 'text-white/70' : 'text-muted-foreground'
+              )}>
+                ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
+              </p>
+            )}
           </div>
         </div>
 

@@ -567,6 +567,14 @@ const EntryCard = ({
             <h3 className="truncate text-sm font-bold leading-tight">
               {option.name}
             </h3>
+            {(option as any).rating != null && (
+              <p className={cn(
+                'text-[10px]',
+                firstImage ? 'text-white/70' : 'text-muted-foreground'
+              )}>
+                ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
+              </p>
+            )}
             {option.location_name && option.latitude != null && option.longitude != null && (
               <a
                 href={`https://www.google.com/maps/search/?api=1&query=${option.latitude},${option.longitude}`}
@@ -696,7 +704,15 @@ const EntryCard = ({
           {option.name}
         </h3>
 
-        {/* Tappable location link */}
+        {/* Rating */}
+        {!isTransfer && !isProcessing && (option as any).rating != null && (
+          <p className={cn(
+            'mb-1 text-[10px]',
+            firstImage ? 'text-white/70' : 'text-muted-foreground'
+          )}>
+            ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
+          </p>
+        )}
         {!isTransfer && !isProcessing && option.location_name && option.latitude != null && option.longitude != null && (
           <a
             href={`https://www.google.com/maps/search/?api=1&query=${option.latitude},${option.longitude}`}
