@@ -11,17 +11,17 @@ const MODE_CONFIG: { mode: string; emoji: string; label: string; apiMode: string
 ];
 
 const MODE_COLORS_LIGHT: Record<string, string> = {
-  walk: 'hsla(140, 50%, 50%, 0.2)',
-  drive: 'hsla(0, 50%, 50%, 0.2)',
-  transit: 'hsla(45, 60%, 50%, 0.2)',
-  bicycle: 'hsla(210, 50%, 50%, 0.2)',
+  walk: 'hsla(140, 50%, 50%, 0.8)',
+  drive: 'hsla(0, 50%, 50%, 0.8)',
+  transit: 'hsla(45, 60%, 50%, 0.8)',
+  bicycle: 'hsla(210, 50%, 50%, 0.8)',
 };
 
 const MODE_COLORS_DARK: Record<string, string> = {
-  walk: 'hsla(140, 50%, 50%, 0.12)',
-  drive: 'hsla(0, 50%, 50%, 0.12)',
-  transit: 'hsla(45, 60%, 50%, 0.12)',
-  bicycle: 'hsla(210, 50%, 50%, 0.12)',
+  walk: 'hsla(140, 50%, 50%, 0.5)',
+  drive: 'hsla(0, 50%, 50%, 0.5)',
+  transit: 'hsla(45, 60%, 50%, 0.5)',
+  bicycle: 'hsla(210, 50%, 50%, 0.5)',
 };
 
 const MODE_HIGHLIGHT_LIGHT: Record<string, string> = {
