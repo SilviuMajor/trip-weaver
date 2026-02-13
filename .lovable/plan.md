@@ -1,65 +1,60 @@
 
 
-# Fix Magnet Snap: All Transport Modes + Icon Positioning
+# Move Magnet Icon from EntryCard to ContinuousTimeline Overlay
 
-## Issue 1: Only walking mode is generated
+## Problem
+The magnet icon is currently rendered inside `EntryCard.tsx` as an internal element. The lock icon, by contrast, is rendered as a sibling overlay in `ContinuousTimeline.tsx` at the card wrapper level. The magnet should follow the same pattern for consistent positioning and behavior.
 
-Currently `handleMagnetSnap` in Timeline.tsx (line 534) calls `google-directions` with `mode: 'walk'` (single-mode). This only returns one result. The edge function already supports multi-mode via `modes: ['walk', 'transit', 'drive', 'bicycle']`, which returns all modes at once.
+## Changes
 
-Additionally, the trip needs a `default_transport_mode` setting so the magnet knows which mode to use for the transport block duration/name.
+### File 1: `src/components/timeline/EntryCard.tsx`
 
-### Changes
+Remove all magnet-related code:
+- Remove `Magnet` from the lucide-react import (line 3)
+- Remove the 4 magnet props from the interface (lines 58-61): `onMagnetSnap`, `nextEntryLocked`, `hasNextEntry`, `magnetLoading`
+- Remove the 4 magnet prop destructurings (lines 130-133)
+- Remove the `showMagnet` variable and `magnetButton` JSX block (lines 143-172)
+- Remove the 4 `{magnetButton}` render calls at lines 522, 562, 696, 938
 
-**Database**: Add `default_transport_mode` column to `trips` table (text, default `'transit'`).
+### File 2: `src/components/timeline/ContinuousTimeline.tsx`
 
-**File: `src/pages/TripSettings.tsx`**: Add a "Default transport mode" dropdown (Walk, Transit, Drive, Cycle) that reads/writes `default_transport_mode` on the trip.
+**Remove magnet props from EntryCard** (lines 969-991): Remove the `onMagnetSnap`, `hasNextEntry`, `nextEntryLocked`, and `magnetLoading` props currently passed to `<EntryCard>`.
 
-**File: `src/pages/Timeline.tsx`** (lines 531-566): Change the `google-directions` call from single-mode to multi-mode:
+**Add magnet overlay below the lock icon** (after line 1011): Add a new `<button>` element as a sibling to the lock icon, positioned at `-bottom-3 -right-3` on the card wrapper div:
 
 ```
-Before:
-  body: { fromAddress, toAddress, mode: 'walk', departureTime: ... }
-
-After:
-  body: { fromAddress, toAddress, modes: ['walk', 'transit', 'drive', 'bicycle'], departureTime: ... }
+{/* Magnet snap icon outside card -- bottom right */}
+{!isTransport && !isFlightCard && hasNextEntry && (
+  <button
+    onClick={...}
+    className="absolute -bottom-3 -right-3 z-30 flex h-7 w-7 ..."
+  >
+    <Magnet className="h-3.5 w-3.5 rotate-180" /> or <Loader2 ... />
+  </button>
+)}
 ```
 
-Then use the trip's `default_transport_mode` (or fall back to `'transit'`) to pick the primary mode for the transport block's duration and name. Store all mode results in `transport_modes` on the entry option so the connector pill shows all modes immediately (no need to open the overview to generate them).
+The `hasNextEntry` and `nextEntryIsLocked` values are computed inline (same logic that was previously passed as props -- reuse those IIFEs but move them into local variables before the JSX).
 
-The relevant code block becomes:
+**Keep `magnetLoadingId` state** -- it already exists in ContinuousTimeline. The `handleMagnet` wrapper also stays, just called from the overlay button instead of passed to EntryCard.
 
-```text
-1. Call google-directions with modes: ['walk', 'transit', 'drive', 'bicycle']
-2. Find the default mode result from dirData.results
-3. Use its duration for the transport block size
-4. Store all results in transport_modes JSON on the entry_option
-5. Name the entry based on default mode (e.g. "Transit to X" or "Walk to X")
-```
+**Add `Magnet` to the lucide-react imports** in ContinuousTimeline if not already there.
 
-## Issue 2: Magnet icon positioning and rotation
+### Positioning Summary
 
-**File: `src/components/timeline/EntryCard.tsx`** (lines 158-159): 
+| Icon | Position | Purpose |
+|------|----------|---------|
+| Lock | `top-1/2 -translate-y-1/2 -right-3` | Vertically centered, right edge |
+| Magnet | `-bottom-3 -right-3` | Bottom-right corner |
 
-Currently the magnet button uses `absolute bottom-1.5 right-1.5` which places it slightly inset from the corner. Change to `absolute -bottom-1 -right-1` (same technique as the lock icon -- overlapping the card edge to sit ON the corner).
+Both use `h-7 w-7 rounded-full border border-border shadow-sm z-30`.
 
-Also change the `Magnet` icon to include `style={{ transform: 'rotate(0deg)' }}` to keep it pointing straight down. By default, the lucide Magnet icon is angled/rotated -- adding `className="h-3 w-3 rotate-180"` or similar will orient the horseshoe magnet to point downward.
-
-The icon size stays at `h-6 w-6` for the container and `h-3 w-3` for the icon itself.
-
----
-
-## Files Modified
-
-| File | Change |
-|------|--------|
-| Database migration | Add `default_transport_mode text default 'transit'` to `trips` |
-| `src/pages/TripSettings.tsx` | Add "Default transport mode" selector |
-| `src/pages/Timeline.tsx` | Change magnet snap to multi-mode directions call; use default mode for block sizing |
-| `src/components/timeline/EntryCard.tsx` | Reposition magnet to card corner; fix icon rotation to point straight down |
+### Icon Rotation
+The `Magnet` icon gets `rotate-180` to point the horseshoe straight down.
 
 ## What Does NOT Change
-- The `google-directions` edge function (already supports multi-mode)
-- Transport connector rendering (already reads `transport_modes`)
-- EntrySheet transport overview
-- Lock icon styling
-- Drag/resize behavior
+- Lock icon positioning or behavior
+- `handleMagnetSnap` logic in Timeline.tsx
+- Transport connector rendering
+- The `onMagnetSnap` prop on ContinuousTimeline (it stays, just no longer forwarded to EntryCard)
+
