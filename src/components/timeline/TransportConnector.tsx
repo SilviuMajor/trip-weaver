@@ -130,7 +130,7 @@ const TransportConnector = ({
 
   return (
     <div
-      className="relative w-full"
+      className="relative w-full pointer-events-none"
       style={{ height, overflow: 'visible' }}
     >
       {/* Layer 1: Background strip — fills the gap exactly, never overflows */}
@@ -143,11 +143,11 @@ const TransportConnector = ({
       <div
         className={cn(
           'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',
-          'z-20 min-h-[40px] w-fit px-3 py-1',
-          'bg-white/95 dark:bg-stone-900/95',
+          'z-20 min-h-[40px] w-fit px-3 py-1 pointer-events-auto',
           'rounded-full shadow-md border border-stone-200/60 dark:border-stone-700/60',
           'flex items-center gap-1.5'
         )}
+        style={{ backgroundColor: stripColor }}
       >
         {/* Info icon */}
         {onInfoTap ? (
