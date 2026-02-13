@@ -22,7 +22,7 @@ interface CategorySidebarProps {
   onInsert?: (entry: EntryWithOptions) => void;
   onTouchDragStart?: (entry: EntryWithOptions, initialPosition: { x: number; y: number }) => void;
   compact?: boolean;
-  
+  hiddenForDrag?: boolean;
 }
 
 interface DeduplicatedEntry {
@@ -45,6 +45,7 @@ const CategorySidebar = ({
   onInsert,
   onTouchDragStart,
   compact = false,
+  hiddenForDrag,
 }: CategorySidebarProps) => {
   const isMobile = useIsMobile();
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
@@ -308,7 +309,7 @@ const CategorySidebar = ({
   if (isMobile) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="w-[60vw] min-w-[280px] overflow-y-auto p-0">
+        <SheetContent side="right" className="w-[60vw] min-w-[280px] overflow-y-auto p-0" forceHide={hiddenForDrag}>
           <SheetHeader className="sr-only">
             <SheetTitle>Planner</SheetTitle>
           </SheetHeader>
