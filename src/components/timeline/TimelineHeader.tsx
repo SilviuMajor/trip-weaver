@@ -1,6 +1,6 @@
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Button } from '@/components/ui/button';
-import { LogOut, Settings, RefreshCw } from 'lucide-react';
+import { LogOut, Settings, RefreshCw, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { Trip } from '@/types/trip';
 
@@ -65,6 +65,9 @@ const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderP
               <Settings className="h-4 w-4 text-muted-foreground" />
             </Button>
           )}
+          <Button variant="ghost" size="icon" onClick={() => navigate('/settings')} className="h-8 w-8" title="Account settings">
+            <User className="h-4 w-4 text-muted-foreground" />
+          </Button>
           <Button variant="ghost" size="icon" onClick={handleLogout} className="h-8 w-8">
             <LogOut className="h-4 w-4" />
           </Button>
