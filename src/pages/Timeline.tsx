@@ -115,7 +115,7 @@ const Timeline = () => {
   const [touchDragEntry, setTouchDragEntry] = useState<EntryWithOptions | null>(null);
   const [touchDragPosition, setTouchDragPosition] = useState<{ x: number; y: number } | null>(null);
   const [touchDragGlobalHour, setTouchDragGlobalHour] = useState<number | null>(null);
-  const [touchDragHidePlanner, setTouchDragHidePlanner] = useState(false);
+  
   const touchDragTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Travel calculation
@@ -1406,10 +1406,8 @@ const Timeline = () => {
 
   const handleTouchDragStart = useCallback((entry: EntryWithOptions, initialPosition: { x: number; y: number }) => {
     setTouchDragEntry(entry);
-    setTouchDragPosition(initialPosition); // Ghost visible immediately
-    // Hide planner visually but keep it mounted (preserves touch context on iOS)
-    setTouchDragHidePlanner(true);
-    document.body.classList.add('touch-drag-active');
+    setTouchDragPosition(initialPosition);
+    setSidebarOpen(false);
     // 5-second cancel timeout
     if (touchDragTimeoutRef.current) clearTimeout(touchDragTimeoutRef.current);
     touchDragTimeoutRef.current = setTimeout(() => {
@@ -1421,8 +1419,6 @@ const Timeline = () => {
     setTouchDragEntry(null);
     setTouchDragPosition(null);
     setTouchDragGlobalHour(null);
-    setTouchDragHidePlanner(false);
-    document.body.classList.remove('touch-drag-active');
     if (touchDragTimeoutRef.current) {
       clearTimeout(touchDragTimeoutRef.current);
       touchDragTimeoutRef.current = null;
@@ -2138,7 +2134,7 @@ const Timeline = () => {
               onDuplicate={handleDuplicate}
               onInsert={handleInsert}
               onTouchDragStart={handleTouchDragStart}
-              hiddenForDrag={touchDragHidePlanner}
+              
             />
           )}
           <EntrySheet
