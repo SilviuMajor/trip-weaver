@@ -1577,7 +1577,7 @@ const Timeline = () => {
       el.removeEventListener('touchmove', handleTouchMove);
       el.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [zoomEnabled]);
+  }, [zoomEnabled, isMobile, mobileView]);
 
   // Desktop zoom (Ctrl+scroll / trackpad pinch)
   useEffect(() => {
@@ -1607,7 +1607,7 @@ const Timeline = () => {
 
     el.addEventListener('wheel', handleWheel, { passive: false });
     return () => el.removeEventListener('wheel', handleWheel);
-  }, [zoomEnabled]);
+  }, [zoomEnabled, isMobile, mobileView]);
 
 
   const handleApplyRecommendation = async (rec: Recommendation) => {
@@ -2154,7 +2154,7 @@ const Timeline = () => {
 
             {/* Timeline main content */}
             {(!isMobile || mobileView === 'timeline') && (
-              <main ref={mainScrollRef} className="flex-1 overflow-y-auto pb-20">
+              <main ref={mainScrollRef} className="flex-1 overflow-y-auto pb-20" style={zoomEnabled ? { touchAction: 'pan-y' } : undefined}>
                 <ContinuousTimeline
                   days={days}
                   entries={scheduledEntries}
