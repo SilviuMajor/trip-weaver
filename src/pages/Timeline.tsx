@@ -1620,7 +1620,9 @@ const Timeline = () => {
         <>
           {/* Day pill - position:fixed, pinned below tab bar */}
           {days.length > 0 && (() => {
-            const dayDate = days[currentDayIndex];
+            const clampedIdx = Math.min(currentDayIndex, days.length - 1);
+            const dayDate = days[clampedIdx];
+            if (!dayDate) return null;
             const dayStr = format(dayDate, 'yyyy-MM-dd');
             const tzInfo = dayTimezoneMap.get(dayStr);
             let tzAbbrev = '';
