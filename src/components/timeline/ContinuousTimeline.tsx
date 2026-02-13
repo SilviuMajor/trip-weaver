@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { format, isToday, isPast, addMinutes } from 'date-fns';
 import { calculateSunTimes } from '@/lib/sunCalc';
-import type { EntryWithOptions, EntryOption, TravelSegment, WeatherData, TransportMode } from '@/types/trip';
+import type { EntryWithOptions, EntryOption, WeatherData, TransportMode } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
 import { localToUTC, getHourInTimezone, resolveEntryTz, getDateInTimezone, getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
@@ -9,7 +9,7 @@ import { Plus, Bus, Lock, LockOpen, AlertTriangle } from 'lucide-react';
 import { useDragResize, type DragType } from '@/hooks/useDragResize';
 import EntryCard from './EntryCard';
 import FlightGroupCard from './FlightGroupCard';
-import TravelSegmentCard from './TravelSegmentCard';
+
 import TransportConnector from './TransportConnector';
 
 import WeatherBadge from './WeatherBadge';
@@ -39,7 +39,7 @@ interface ContinuousTimelineProps {
   userVotes: string[];
   onVoteChange: () => void;
   onCardTap: (entry: EntryWithOptions, option: EntryOption) => void;
-  travelSegments: TravelSegment[];
+  
   weatherData: WeatherData[];
   onClickSlot?: (isoTime: string) => void;
   onDragSlot?: (startIso: string, endIso: string) => void;
@@ -72,7 +72,7 @@ const ContinuousTimeline = ({
   userVotes,
   onVoteChange,
   onCardTap,
-  travelSegments,
+  
   weatherData,
   onClickSlot,
   onDragSlot,
