@@ -519,61 +519,11 @@ const EntryCard = ({
   }
 
   // Condensed layout for 1-2 hour events (80-160px)
-  const isHotelUtilityBlock = option.name?.startsWith('Check in ·') || option.name?.startsWith('Check out ·');
+  // Detect hotel utility blocks for aesthetic labels
+  const isCheckIn = option.name?.startsWith('Check in ·');
+  const isCheckOut = option.name?.startsWith('Check out ·') || linkedType === 'checkout';
 
   if (isCondensed) {
-    // Compact variant for hotel check-in/checkout blocks
-    if (isHotelUtilityBlock) {
-      return (
-        <motion.div
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-          onClick={onClick}
-          onMouseDown={onDragStart}
-          onTouchStart={onTouchDragStart}
-          onTouchMove={onTouchDragMove}
-          onTouchEnd={onTouchDragEnd}
-          className={cn(
-            'group relative overflow-hidden rounded-xl border shadow-sm transition-all hover:shadow-md',
-            isEntryPast && 'opacity-50 grayscale-[30%]',
-            isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-            isLocked && 'border-2 border-muted-foreground/20',
-            isShaking && 'animate-shake',
-            cardSizeClass
-          )}
-          style={{
-            borderColor: isLocked ? undefined : catColor,
-            borderLeftWidth: isLocked ? undefined : 3,
-            background: tintBg,
-          }}
-        >
-          <div className="relative z-10 flex h-full flex-col justify-between px-2 py-1">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs shrink-0">{catEmoji}</span>
-              <h3 className="truncate text-xs font-semibold leading-tight flex-1 min-w-0">
-                {option.name}
-              </h3>
-            </div>
-            <span className="text-[9px] text-muted-foreground">
-              {formatTime(startTime)} — {formatTime(endTime)}
-            </span>
-          </div>
-          {overlapFraction > 0 && (
-            <div
-              className="absolute inset-x-0 z-[1] pointer-events-none rounded-xl"
-              style={{
-                background: 'linear-gradient(to right, hsla(0, 70%, 50%, 0.25), hsla(0, 70%, 50%, 0.1))',
-                ...(overlapPosition === 'top'
-                  ? { top: 0, height: `${overlapFraction * 100}%` }
-                  : { bottom: 0, height: `${overlapFraction * 100}%` }),
-              }}
-            />
-          )}
-        </motion.div>
-      );
-    }
-
     return (
       <motion.div
         initial={{ opacity: 0, y: 4 }}
@@ -609,15 +559,20 @@ const EntryCard = ({
           firstImage ? 'text-white' : 'text-foreground'
         )}>
           <div>
-            {option.category && (
-              <span
-                className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-semibold mb-1"
-                style={{ backgroundColor: catColor, color: '#fff' }}
-              >
-                <span className="text-[10px]">{catEmoji}</span>
-                {catName}
-              </span>
-            )}
+            <div className="flex items-center gap-1.5">
+              {option.category && (
+                <span
+                  className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-semibold mb-1"
+                  style={{ backgroundColor: catColor, color: '#fff' }}
+                >
+                  <span className="text-[10px]">{catEmoji}</span>
+                  {catName}
+                </span>
+              )}
+              {isCheckIn && (
+                <span className={cn('text-[8px] uppercase tracking-wider font-semibold mb-1', firstImage ? 'text-white/60' : 'text-muted-foreground')}>CHECK-IN</span>
+              )}
+            </div>
             <h3 className="truncate text-sm font-bold leading-tight">
               {option.name}
             </h3>
@@ -654,12 +609,17 @@ const EntryCard = ({
             )}
           </div>
           <div className="flex items-center justify-between">
-            <span className={cn(
-              'text-[10px]',
-              firstImage ? 'text-white/70' : 'text-muted-foreground'
-            )}>
-              {formatTime(startTime)} — {formatTime(endTime)}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className={cn(
+                'text-[10px]',
+                firstImage ? 'text-white/70' : 'text-muted-foreground'
+              )}>
+                {formatTime(startTime)} — {formatTime(endTime)}
+              </span>
+              {isCheckOut && (
+                <span className={cn('text-[8px] uppercase tracking-wider font-semibold', firstImage ? 'text-white/60' : 'text-muted-foreground')}>CHECKOUT</span>
+              )}
+            </div>
             <span className={cn(
               'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
               firstImage ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
@@ -725,18 +685,23 @@ const EntryCard = ({
       )}>
         {/* Top row: Category + Options indicator */}
         <div className="mb-3 flex items-start justify-between">
-          {option.category && (
-            <span
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-              style={{ backgroundColor: catColor, color: '#fff' }}
-            >
-              <span className="text-xs">{catEmoji}</span>
-              {isProcessing
-                ? (linkedType === 'checkin' ? 'Check-in' : 'Checkout')
-                : catName
-              }
-            </span>
-          )}
+          <div className="flex items-center gap-1.5">
+            {option.category && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                style={{ backgroundColor: catColor, color: '#fff' }}
+              >
+                <span className="text-xs">{catEmoji}</span>
+                {isProcessing
+                  ? (linkedType === 'checkin' ? 'Check-in' : 'Checkout')
+                  : catName
+                }
+              </span>
+            )}
+            {isCheckIn && (
+              <span className={cn('text-[8px] uppercase tracking-wider font-semibold', firstImage ? 'text-white/60' : 'text-muted-foreground')}>CHECK-IN</span>
+            )}
+          </div>
           {totalOptions > 1 && (
             <span className={cn(
               'text-[10px] font-medium',
@@ -870,6 +835,9 @@ const EntryCard = ({
                   <MapPin className="h-3 w-3" />
                   <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
                 </div>
+              )}
+              {isCheckOut && (
+                <span className={cn('text-[8px] uppercase tracking-wider font-semibold', firstImage ? 'text-white/60' : 'text-muted-foreground')}>CHECKOUT</span>
               )}
             </div>
 

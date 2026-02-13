@@ -115,19 +115,31 @@ const CategorySidebar = ({
       }
       if (seen.has(key)) continue;
       seen.add(key);
-      // Find the original from dedup map
-      const dedup = [...deduplicatedMap.values()].find(d => {
-        const dOpt = d.original.options[0];
-        if (!dOpt) return false;
-        let dKey: string;
-        if (dOpt.category === 'hotel' && dOpt.hotel_id) {
-          dKey = `hotel::${dOpt.hotel_id}`;
-        } else {
-          dKey = `${dOpt.name}::${dOpt.category ?? ''}`;
-        }
-        return dKey === key;
-      });
-      if (dedup) results.push(dedup);
+
+      // For hotel groups, prefer an overnight block as representative
+      if (opt.category === 'hotel' && opt.hotel_id) {
+        const hotelEntries = catEntries.filter(e => e.options[0]?.hotel_id === opt.hotel_id);
+        const overnight = hotelEntries.find(e => {
+          const name = e.options[0]?.name ?? '';
+          return !name.startsWith('Check in ·') && !name.startsWith('Check out ·');
+        });
+        const representative = overnight ?? hotelEntries[0];
+        const isFlight = false;
+        results.push({
+          original: representative,
+          usageCount: hotelEntries.length,
+          isFlight,
+        });
+      } else {
+        // Find the original from dedup map
+        const dedup = [...deduplicatedMap.values()].find(d => {
+          const dOpt = d.original.options[0];
+          if (!dOpt) return false;
+          const dKey = `${dOpt.name}::${dOpt.category ?? ''}`;
+          return dKey === key;
+        });
+        if (dedup) results.push(dedup);
+      }
     }
     return results;
   };

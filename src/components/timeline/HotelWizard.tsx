@@ -728,6 +728,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
                 </Label>
                 <Input
                   type="date"
+                  className="h-8"
                   value={checkInDate}
                   onChange={(e) => setCheckInDate(e.target.value)}
                 />
@@ -738,6 +739,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
                 </Label>
                 <Input
                   type="time"
+                  className="h-8"
                   value={checkInTime}
                   onChange={(e) => setCheckInTime(e.target.value)}
                 />
@@ -750,6 +752,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
                 </Label>
                 <Input
                   type="date"
+                  className="h-8"
                   value={checkoutDate}
                   onChange={(e) => setCheckoutDate(e.target.value)}
                 />
@@ -760,6 +763,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
                 </Label>
                 <Input
                   type="time"
+                  className="h-8"
                   value={checkoutTime}
                   onChange={(e) => setCheckoutTime(e.target.value)}
                 />
