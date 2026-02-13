@@ -455,6 +455,45 @@ const Timeline = () => {
     );
     const entryIdx = sorted.findIndex(e => e.id === entryId);
 
+    // ── Transport-source path: source IS the transport ──
+    if (opt.category === 'transfer') {
+      let nextEvent: EntryWithOptions | null = null;
+      for (let i = entryIdx + 1; i < sorted.length; i++) {
+        const c = sorted[i];
+        const co = c.options[0];
+        if (co?.category !== 'transfer' && co?.category !== 'airport_processing' && !c.linked_flight_id) {
+          nextEvent = c;
+          break;
+        }
+      }
+      if (!nextEvent || nextEvent.is_locked) {
+        if (nextEvent?.is_locked) sonnerToast.error('Next event is locked');
+        return;
+      }
+
+      const transportEndMs = new Date(entry.end_time).getTime();
+      const nextOldStart = nextEvent.start_time;
+      const nextOldEnd = nextEvent.end_time;
+      const nextDuration = new Date(nextOldEnd).getTime() - new Date(nextOldStart).getTime();
+      const newStart = new Date(transportEndMs).toISOString();
+      const newEnd = new Date(transportEndMs + nextDuration).toISOString();
+
+      pushAction({
+        description: `Snap ${nextEvent.options[0]?.name || 'event'}`,
+        undo: async () => {
+          await supabase.from('entries').update({ start_time: nextOldStart, end_time: nextOldEnd }).eq('id', nextEvent!.id);
+        },
+        redo: async () => {
+          await supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', nextEvent!.id);
+        },
+      });
+
+      await supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', nextEvent.id);
+      sonnerToast.success('Snapped into place');
+      await fetchData();
+      return;
+    }
+
     // Look for transport and next non-transport event
     let transportEntry: EntryWithOptions | null = null;
     let nextEvent: EntryWithOptions | null = null;

@@ -746,6 +746,46 @@ const ContinuousTimeline = ({
               : null;
 
           const isTransport = isTransportEntry(entry);
+
+          // Compute magnet state: gap-aware, transport-aware
+          const magnetState = (() => {
+            const cat = primaryOption.category;
+            if (cat === 'flight' || cat === 'airport_processing' || entry.linked_flight_id) {
+              return { showMagnet: false, nextLocked: false };
+            }
+
+            const isTransferEntry = cat === 'transfer';
+
+            let transportAfter: EntryWithOptions | null = null;
+            let nextEvent: EntryWithOptions | null = null;
+            for (let i = index + 1; i < sortedEntries.length; i++) {
+              const c = sortedEntries[i];
+              const co = c.options[0];
+              if (co?.category === 'transfer' && !transportAfter && !isTransferEntry) {
+                transportAfter = c;
+              } else if (co?.category !== 'transfer' && co?.category !== 'airport_processing' && !c.linked_flight_id) {
+                nextEvent = c;
+                break;
+              }
+            }
+
+            if (!nextEvent) return { showMagnet: false, nextLocked: false };
+
+            const GAP_TOLERANCE_MS = 2 * 60 * 1000;
+
+            if (isTransferEntry) {
+              const gapMs = new Date(nextEvent.start_time).getTime() - new Date(entry.end_time).getTime();
+              return { showMagnet: gapMs > GAP_TOLERANCE_MS, nextLocked: !!nextEvent.is_locked };
+            }
+
+            if (transportAfter) {
+              const gapToTransport = new Date(transportAfter.start_time).getTime() - new Date(entry.end_time).getTime();
+              return { showMagnet: gapToTransport > GAP_TOLERANCE_MS, nextLocked: !!nextEvent.is_locked };
+            } else {
+              const gapToNext = new Date(nextEvent.start_time).getTime() - new Date(entry.end_time).getTime();
+              return { showMagnet: gapToNext > GAP_TOLERANCE_MS, nextLocked: !!nextEvent.is_locked };
+            }
+          })();
           const isFlightCard = !!flightGroup;
           const canDrag = onEntryTimeChange && !isLocked && !isTransport && !isFlightCard;
 
@@ -919,6 +959,37 @@ const ContinuousTimeline = ({
                         }}
                         onDelete={onDeleteTransport ? () => onDeleteTransport(entry.id) : undefined}
                       />
+                      {/* Magnet snap icon on transport connector */}
+                      {magnetState.showMagnet && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (magnetState.nextLocked) {
+                              toast('Next event is locked', { description: 'Unlock it before snapping' });
+                              return;
+                            }
+                            if (!onMagnetSnap) return;
+                            setMagnetLoadingId(entry.id);
+                            onMagnetSnap(entry.id).finally(() => setMagnetLoadingId(null));
+                          }}
+                          className={cn(
+                            "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
+                            magnetState.nextLocked
+                              ? "bg-muted cursor-not-allowed"
+                              : "bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
+                            magnetLoadingId === entry.id && "animate-pulse"
+                          )}
+                        >
+                          {magnetLoadingId === entry.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-green-600" />
+                          ) : (
+                            <Magnet className={cn(
+                              "h-3 w-3",
+                              magnetState.nextLocked ? "text-muted-foreground/40" : "text-green-600 dark:text-green-400"
+                            )} style={{ transform: 'rotate(180deg)' }} />
+                          )}
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="relative h-full">
@@ -987,55 +1058,36 @@ const ContinuousTimeline = ({
                         </button>
                       )}
                       {/* Magnet snap icon outside card — bottom right */}
-                      {(() => {
-                        const hasNextEntry = (() => {
-                          for (let i = index + 1; i < sortedEntries.length; i++) {
-                            const c = sortedEntries[i];
-                            const co = c.options[0];
-                            if (co?.category !== 'transfer' && co?.category !== 'airport_processing' && !c.linked_flight_id) return true;
-                          }
-                          return false;
-                        })();
-                        if (!hasNextEntry) return null;
-                        const nextEntryIsLocked = (() => {
-                          for (let i = index + 1; i < sortedEntries.length; i++) {
-                            const c = sortedEntries[i];
-                            const co = c.options[0];
-                            if (co?.category !== 'transfer' && co?.category !== 'airport_processing' && !c.linked_flight_id) return c.is_locked;
-                          }
-                          return false;
-                        })();
-                        return (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (nextEntryIsLocked) {
-                                toast('Next event is locked', { description: 'Unlock it before snapping' });
-                                return;
-                              }
-                              if (!onMagnetSnap) return;
-                              setMagnetLoadingId(entry.id);
-                              onMagnetSnap(entry.id).finally(() => setMagnetLoadingId(null));
-                            }}
-                            className={cn(
-                              "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
-                              nextEntryIsLocked
-                                ? "bg-muted cursor-not-allowed"
-                                : "bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
-                              magnetLoadingId === entry.id && "animate-pulse"
-                            )}
-                          >
-                            {magnetLoadingId === entry.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin text-green-600" />
-                            ) : (
-                              <Magnet className={cn(
-                                "h-3.5 w-3.5 rotate-180",
-                                nextEntryIsLocked ? "text-muted-foreground/40" : "text-green-600 dark:text-green-400"
-                              )} />
-                            )}
-                          </button>
-                        );
-                      })()}
+                      {magnetState.showMagnet && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (magnetState.nextLocked) {
+                              toast('Next event is locked', { description: 'Unlock it before snapping' });
+                              return;
+                            }
+                            if (!onMagnetSnap) return;
+                            setMagnetLoadingId(entry.id);
+                            onMagnetSnap(entry.id).finally(() => setMagnetLoadingId(null));
+                          }}
+                          className={cn(
+                            "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
+                            magnetState.nextLocked
+                              ? "bg-muted cursor-not-allowed"
+                              : "bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
+                            magnetLoadingId === entry.id && "animate-pulse"
+                          )}
+                        >
+                          {magnetLoadingId === entry.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-green-600" />
+                          ) : (
+                            <Magnet className={cn(
+                              "h-3 w-3",
+                              magnetState.nextLocked ? "text-muted-foreground/40" : "text-green-600 dark:text-green-400"
+                            )} style={{ transform: 'rotate(180deg)' }} />
+                          )}
+                        </button>
+                      )}
                     </div>
                   )}
 
