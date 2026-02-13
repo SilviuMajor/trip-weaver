@@ -1,58 +1,107 @@
 
 
-# Fix Hotel Card Titles and CHECKOUT Badge Position
+# Auto-Extend Trip + Trip End Marker
 
-## Fix 1: Strip "Check in · " and "Check out · " prefixes from card titles
+## Feature 8: Auto-extend trip when entries go past final day
 
-In `EntryCard.tsx`, create a display name variable after the existing `isCheckIn`/`isCheckOut` detection (line 524):
+### New utility function in `src/pages/Timeline.tsx`
 
-```tsx
-const displayName = isCheckIn
-  ? option.name?.replace(/^Check in · /, '') ?? option.name
-  : isCheckOut && option.name?.startsWith('Check out · ')
-    ? option.name?.replace(/^Check out · /, '')
-    : option.name;
+Add a helper function `autoExtendTripIfNeeded` inside the Timeline component (or just before the component, importing supabase and toast):
+
+```typescript
+async function autoExtendTripIfNeeded(
+  tripId: string,
+  entryEndIso: string,
+  trip: Trip,
+  fetchData: () => Promise<void>
+) {
+  if (trip.start_date) {
+    // Dated trip: check against end_date
+    const entryDate = entryEndIso.slice(0, 10); // rough YYYY-MM-DD from ISO
+    // More accurate: use format(parseISO(entryEndIso), 'yyyy-MM-dd') but entry times are UTC
+    // Use getDateInTimezone to get correct local date
+    const entryDateStr = format(new Date(entryEndIso), 'yyyy-MM-dd');
+    if (!trip.end_date || entryDateStr > trip.end_date) {
+      await supabase.from('trips').update({ end_date: entryDateStr }).eq('id', tripId);
+      toast({ title: `Trip extended to ${format(parseISO(entryDateStr), 'EEE d MMM')}` });
+      await fetchData();
+    }
+  } else {
+    // Undated trip: check against duration_days
+    // Entry dates are relative to REFERENCE_DATE (2099-01-01)
+    const refDate = parseISO('2099-01-01');
+    const entryDate = new Date(entryEndIso);
+    const daysDiff = Math.ceil((entryDate.getTime() - refDate.getTime()) / 86400000) + 1;
+    if (daysDiff > (trip.duration_days ?? 3)) {
+      await supabase.from('trips').update({ duration_days: daysDiff }).eq('id', tripId);
+      toast({ title: `Trip extended to Day ${daysDiff}` });
+      await fetchData();
+    }
+  }
+}
 ```
 
-Then replace all `{option.name}` references in the card rendering with `{displayName}`:
-- Line 577 (condensed layout title)
-- Line 723 (full-size layout title)
+### Call sites
 
-The `option.name` used in the `alt` attribute for images (line 553) can stay as-is.
+**a) `handleDropOnTimeline` (line ~1007):** After `await fetchData()` and before the travel calculation, call:
+```typescript
+if (trip) await autoExtendTripIfNeeded(tripId!, endIso, trip, fetchData);
+```
 
-## Fix 2: CHECKOUT badge pinned to absolute bottom of card
+**b) `handleEntryTimeChange` (line ~743):** After `await fetchData()`, call:
+```typescript
+if (trip && tripId) await autoExtendTripIfNeeded(tripId, newEndIso, trip, fetchData);
+```
 
-Currently the CHECKOUT badge sits inline in the content flow (lines 619-621 in condensed, lines 839-841 in full-size). For tall checkout blocks, it needs to be at the very bottom edge.
+**c) EntrySheet save flow:** The EntrySheet calls back into Timeline to create/update entries. After the entry is saved (in whichever handler processes EntrySheet's onSave), add the same check. This likely happens in `handleDropOnTimeline` for new entries or `handleEntryTimeChange` for edits -- both already covered above. If EntrySheet creates entries directly (via its own supabase calls), we add the check after `fetchData` in the EntrySheet's save callback passed from Timeline.
 
-**Condensed layout (line 619-621):**
-- Remove the inline CHECKOUT span from inside the bottom flex row
-- Add an absolutely-positioned CHECKOUT span as a direct child of the card container (the `motion.div`), just before the overlap div:
+**d) Hotel wizard:** After hotel blocks are created, the HotelWizard calls `onComplete` which triggers `fetchData`. Add auto-extend check in the `onComplete` handler for HotelWizard in Timeline.tsx. The checkout date is the latest date -- pass it to `autoExtendTripIfNeeded`.
+
+### Implementation details
+
+- The function needs access to the trip's home timezone to correctly determine what calendar date an entry falls on. Use `getDateInTimezone(entryEndIso, homeTimezone)` instead of naive date slicing for accuracy.
+- For undated trips, compute the day number from the reference date.
+- The function updates the trip in the DB, shows a toast, and calls fetchData to refresh the trip object (which regenerates the days array, adding new days to the timeline).
+
+---
+
+## Feature 9: Trip End marker in ContinuousTimeline
+
+### Changes to `src/components/timeline/ContinuousTimeline.tsx`
+
+In the midnight day markers section (lines 552-557), add a condition for the last day after the existing "Trip Begins" block:
+
 ```tsx
-{isCheckOut && (
-  <span className={cn(
-    'absolute bottom-1 left-2.5 z-10 text-[10px] font-semibold uppercase tracking-wider',
-    firstImage ? 'text-white/60' : 'text-muted-foreground/70'
-  )}>checkout</span>
+{dayIndex === 0 && (
+  <>
+    <span className="text-muted-foreground/50">.</span>
+    <span className="text-muted-foreground/70">Trip Begins</span>
+  </>
+)}
+{dayIndex === days.length - 1 && (
+  <>
+    <span className="text-muted-foreground/50">.</span>
+    <span className="text-muted-foreground/70">Trip Ends</span>
+  </>
 )}
 ```
 
-**Full-size layout (line 839-841):**
-- Same approach: remove the inline CHECKOUT span from the bottom row
-- Add an absolutely-positioned span as a child of the outer card container
+For a 1-day trip (days.length === 1), both conditions trigger on dayIndex === 0, showing both markers.
 
-The card containers already use `relative` positioning (via the `motion.div` with `overflow-hidden`), so absolute positioning will work.
-
-CHECK-IN badges stay where they are (top of card, inline with content) -- no change needed.
+---
 
 ## Files Modified
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/EntryCard.tsx` | Add `displayName` variable; replace `option.name` with `displayName` in titles; move CHECKOUT badges to absolute bottom positioning |
+| `src/pages/Timeline.tsx` | Add `autoExtendTripIfNeeded` helper; call it from `handleDropOnTimeline`, `handleEntryTimeChange`, and hotel wizard `onComplete` |
+| `src/components/timeline/ContinuousTimeline.tsx` | Add "Trip Ends" marker on last day pill |
 
 ## What Does NOT Change
-- Database values (names stored as "Check in · Hotel Name")
-- EntrySheet / overview display
-- MapPreview, HotelWizard, transport, flights
-- CHECK-IN badge positioning (stays at top, inline)
+
+- EntrySheet form fields
+- Hotel wizard internals
+- Transport system
+- Day pill styling (existing design preserved)
+- ContinuousTimeline rendering (other than the end marker)
 
