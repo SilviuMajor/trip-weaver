@@ -88,6 +88,7 @@ export interface EntryOption {
   vote_count?: number;
   images?: OptionImage[];
   transport_modes?: TransportMode[] | null;
+  hotel_id?: string | null;
 }
 
 export interface TransportMode {
@@ -137,6 +138,29 @@ export interface WeatherData {
   wind_speed: number | null;
   latitude: number | null;
   longitude: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Hotel {
+  id: string;
+  trip_id: string;
+  name: string;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  website: string | null;
+  phone: string | null;
+  rating: number | null;
+  user_rating_count: number | null;
+  google_place_id: string | null;
+  google_maps_uri: string | null;
+  check_in_date: string | null;
+  check_in_time: string | null;
+  checkout_date: string | null;
+  checkout_time: string | null;
+  evening_return: string | null;
+  morning_leave: string | null;
   created_at: string;
   updated_at: string;
 }
