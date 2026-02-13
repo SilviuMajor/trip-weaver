@@ -23,7 +23,7 @@ import ConflictResolver from '@/components/timeline/ConflictResolver';
 import DayPickerDialog from '@/components/timeline/DayPickerDialog';
 import HotelWizard from '@/components/timeline/HotelWizard';
 import UndoRedoButtons from '@/components/timeline/UndoRedoButtons';
-import type { Trip, Entry, EntryOption, EntryWithOptions, TravelSegment, WeatherData } from '@/types/trip';
+import type { Trip, Entry, EntryOption, EntryWithOptions, WeatherData } from '@/types/trip';
 import type { ConflictInfo, Recommendation } from '@/lib/conflictEngine';
 
 const Timeline = () => {
@@ -35,7 +35,7 @@ const Timeline = () => {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [entries, setEntries] = useState<EntryWithOptions[]>([]);
   const [userVotes, setUserVotes] = useState<string[]>([]);
-  const [travelSegments, setTravelSegments] = useState<TravelSegment[]>([]);
+  
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   const [loading, setLoading] = useState(true);
   const [globalRefreshing, setGlobalRefreshing] = useState(false);
@@ -118,13 +118,11 @@ const Timeline = () => {
 
     setTrip(tripData as unknown as Trip);
 
-    const [entriesRes, segmentsRes, weatherRes] = await Promise.all([
+    const [entriesRes, weatherRes] = await Promise.all([
       supabase.from('entries').select('*').eq('trip_id', tripId).order('start_time'),
-      supabase.from('travel_segments').select('*').eq('trip_id', tripId),
       supabase.from('weather_cache').select('*').eq('trip_id', tripId),
     ]);
 
-    setTravelSegments((segmentsRes.data ?? []) as TravelSegment[]);
     setWeatherData((weatherRes.data ?? []) as WeatherData[]);
 
     const entriesData = entriesRes.data;
@@ -1592,7 +1590,7 @@ const Timeline = () => {
                   entries={scheduledEntries}
                   allEntries={entries}
                   weatherData={weatherData}
-                  travelSegments={travelSegments}
+                  
                   dayTimezoneMap={dayTimezoneMap}
                   dayLocationMap={dayLocationMap}
                   homeTimezone={homeTimezone}
