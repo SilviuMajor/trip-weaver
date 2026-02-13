@@ -1,22 +1,37 @@
 
 
-# Transport Card: Full Opacity, No Border, Unified Colour
+# Lighten Transport Card Colours + Shadow on Selected Mode
 
 ## Changes
 
 ### `src/components/timeline/TransportConnector.tsx`
 
-1. **Opacity to 100%**: Update all `STRIP_COLORS_LIGHT` and `STRIP_COLORS_DARK` values from `0.8` to `1.0` alpha.
+1. **Use highlight colours for strip and pill**: Replace `STRIP_COLORS_LIGHT` and `STRIP_COLORS_DARK` values with the corresponding `MODE_HIGHLIGHT_LIGHT` and `MODE_HIGHLIGHT_DARK` values. This makes the background strip and pill light pastel tones instead of saturated mid-tones.
 
-2. **Remove pill border**: On the content pill div (around line 142), remove `border border-stone-200/60 dark:border-stone-700/60` classes.
+| Mode | Light (before) | Light (after) |
+|------|---------------|--------------|
+| Walk | `hsl(140, 50%, 50%)` | `hsl(140, 45%, 75%)` |
+| Drive | `hsl(0, 50%, 50%)` | `hsl(0, 45%, 80%)` |
+| Transit | `hsl(45, 60%, 50%)` | `hsl(45, 55%, 75%)` |
+| Bicycle | `hsl(210, 50%, 50%)` | `hsl(210, 45%, 78%)` |
 
-3. **Colours already match**: Both the background strip and the content pill already use the same `stripColor` variable, so no colour change is needed -- they will both become 100% opacity together.
+Same approach for dark mode using the `MODE_HIGHLIGHT_DARK` values.
+
+2. **Selected mode button gets a shadow border**: On the selected mode button (line 182), replace the `backgroundColor: highlightColor` with a `box-shadow` ring instead, since the button background now matches the pill background. This makes the selected mode stand out via a subtle inset/outline shadow rather than a colour fill.
+
+Style for selected mode button:
+```
+boxShadow: '0 0 0 1.5px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.15)'
+```
+(Dark mode uses `rgba(255,255,255,0.3)` for the ring.)
+
+Remove `backgroundColor: highlightColor` from the selected button since it now matches the pill.
 
 ### Files Modified
 
 | File | Change |
 |------|--------|
-| `TransportConnector.tsx` | Alpha `0.8` to `1.0` in all 8 colour constants; remove border classes from pill |
+| `TransportConnector.tsx` | Strip/pill colours use highlight (pastel) values; selected mode gets shadow ring instead of colour fill |
 
 ### What Does NOT Change
 
