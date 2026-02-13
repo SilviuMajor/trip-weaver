@@ -1,107 +1,105 @@
 
 
-# Fix: Stale Lock State in EntrySheet
+# Magnet Snap Feature
 
-## Problem
+## Overview
 
-When toggling lock from the EntrySheet, `handleToggleLock` updates the database and calls `onSaved()`, which triggers `fetchData()` in Timeline.tsx. This refreshes the main entries arrays, but `sheetEntry` is a separate `useState` variable that was set when the sheet opened. It never gets updated with fresh data, so `entry.is_locked` (and therefore `isLocked` and the "Send to Planner" disabled state) remains stale until the sheet is closed and reopened.
+Replace the existing SNAP pill (shown below transport cards in gaps) with a magnet icon on every non-transport, non-flight entry card. Tapping the magnet calculates transport to the next event and snaps it into place. Also add a post-drop toast prompt when events are placed near each other.
 
-## Solution
+## Part 1: Remove old SNAP pill from ContinuousTimeline.tsx
 
-In Timeline.tsx's `onSaved` callback, after `fetchData()` completes, refresh `sheetEntry` from the newly fetched data so the sheet reflects the latest state.
+**Lines 1043-1153**: The "Tiered SNAP system below transport cards" block. Remove the SNAP button and `handleSnapNext` function. Keep only the "+ Add something" button.
 
-### File: `src/pages/Timeline.tsx`
+The block currently renders two buttons (SNAP + Add something) with positioning logic. After the change, only the "+ Add something" button remains, with simplified positioning (centered in the gap).
 
-In the `onSaved` callback (line 1786), after `await fetchData()`, add logic to update `sheetEntry` if it's currently set:
+## Part 2: Magnet icon on EntryCard.tsx
 
-```typescript
-onSaved={async () => {
-  await fetchData();
+**New props** added to `EntryCardProps`:
+- `onMagnetSnap?: (entryId: string) => Promise<void>`
+- `nextEntryLocked?: boolean`
+- `hasNextEntry?: boolean`
+- `magnetLoading?: boolean`
 
-  // Refresh sheetEntry with latest data so lock state updates in the open sheet
-  if (sheetEntry) {
-    const freshEntries = /* reference to the latest scheduledEntries + ideaEntries */;
-    const fresh = freshEntries.find(e => e.id === sheetEntry.id);
-    if (fresh) {
-      setSheetEntry(fresh);
-      // Also refresh option if present
-      if (sheetOption && fresh.options) {
-        const freshOpt = fresh.options.find(o => o.id === sheetOption.id);
-        if (freshOpt) setSheetOption(freshOpt);
-      }
-    }
-  }
+**Icon**: Use `Magnet` from `lucide-react` (confirmed available).
 
-  // existing auto-extend logic...
-}}
+**Rendering**: Add an absolutely positioned magnet button at `bottom-1.5 right-1.5` on all card layouts. Only shown when:
+- `hasNextEntry` is true
+- category is not `transfer`, `flight`, or `airport_processing`
+
+Styling:
+- Green background when clickable (`bg-green-100 text-green-600`)
+- Muted when next entry is locked (`bg-muted text-muted-foreground/40 cursor-not-allowed`)
+- Loading spinner (`Loader2 animate-spin`) when `magnetLoading` is true
+- `e.stopPropagation()` + `e.preventDefault()` on click and touch to prevent card drag interference
+
+When tapped on a locked-next-entry, shows a toast: "Next event is locked / Unlock it before snapping".
+
+## Part 3: Magnet logic in Timeline.tsx
+
+New `handleMagnetSnap` function implementing three cases:
+
+1. **Transport exists in gap**: Snap next event's start to transport's end (preserve duration)
+2. **No transport, addresses available**: Call `google-directions` edge function with `mode: 'walk'`, create a transport entry + option, then snap the next event
+3. **No transport, no addresses**: Snap next event directly to current entry's end
+
+All cases:
+- Check next event isn't locked
+- Push undo action before modifying
+- Call `fetchData()` after completion
+- Show success/error toast
+
+**Undo support**: Before snapping, capture old start/end times of the next event (and transport if created) for the undo stack.
+
+**Passing down**: `Timeline.tsx` passes `handleMagnetSnap` to `ContinuousTimeline` via new `onMagnetSnap` prop. `ContinuousTimeline` passes it to each `EntryCard` along with computed `hasNextEntry`, `nextEntryLocked`, and `magnetLoading` (tracked via `magnetLoadingId` state in ContinuousTimeline).
+
+## Part 4: Drag-near-event toast prompt
+
+In `handleDropOnTimeline` (Timeline.tsx, after line 1086 `await fetchData()`), check proximity to neighboring events:
+
+```text
+After drop completes and fetchData returns:
+- Find prev/next non-transport entries relative to the dropped entry
+- If gap to prev or next is 0-20 minutes, show a toast:
+  "Generate transport & snap?" with a "Yes" action button
+  that calls handleMagnetSnap(droppedEntryId)
+  Duration: 5000ms
 ```
 
-Because `fetchData` updates state asynchronously and we can't read the new state immediately, we have two approaches:
-
-**Approach A (recommended)**: Make `fetchData` return the fetched data so `onSaved` can use it directly.
-
-Currently `fetchData` sets state internally but doesn't return anything. We modify it to return the entries so the caller can use them:
-
-1. In `fetchData`, add `return { scheduledEntries, ideaEntries }` at the end (returning the data before it's set into state).
-2. In `onSaved`, capture the return value and use it to update `sheetEntry`.
-
-```typescript
-onSaved={async () => {
-  const result = await fetchData();
-  
-  if (sheetEntry && result) {
-    const allEntries = [...(result.scheduledEntries || []), ...(result.ideaEntries || [])];
-    const fresh = allEntries.find(e => e.id === sheetEntry.id);
-    if (fresh) {
-      setSheetEntry(fresh);
-      if (sheetOption && fresh.options) {
-        const freshOpt = fresh.options.find(o => o.id === sheetOption.id);
-        if (freshOpt) setSheetOption(freshOpt);
-      }
-    }
-  }
-
-  // existing auto-extend logic stays as-is
-}}
-```
-
-**Approach B (simpler)**: Re-fetch just the single entry inside `onSaved` after the main `fetchData`:
-
-```typescript
-onSaved={async () => {
-  await fetchData();
-  
-  if (sheetEntry) {
-    const { data: freshEntry } = await supabase
-      .from('entries')
-      .select('*, entry_options(*)')
-      .eq('id', sheetEntry.id)
-      .single();
-    if (freshEntry) {
-      const mapped = mapEntryWithOptions(freshEntry);
-      setSheetEntry(mapped);
-      if (sheetOption && mapped.options) {
-        const freshOpt = mapped.options.find(o => o.id === sheetOption.id);
-        if (freshOpt) setSheetOption(freshOpt);
-      }
-    }
-  }
-
-  // existing auto-extend logic stays as-is
-}}
-```
-
-I'll use whichever approach fits cleanest with the existing `fetchData` structure. The key outcome: after any save/toggle, the open sheet immediately reflects the latest DB state.
+Also applies to `handleEntryTimeChange` (drag-move commit) -- after the entry is repositioned, do the same proximity check.
 
 ## Files Modified
 
-| File | Change |
-|------|--------|
-| `src/pages/Timeline.tsx` | Update `onSaved` to refresh `sheetEntry` and `sheetOption` after `fetchData`; potentially modify `fetchData` to return data |
+| File | Changes |
+|------|---------|
+| `src/components/timeline/ContinuousTimeline.tsx` | Remove SNAP pill + handleSnapNext; add `onMagnetSnap` prop; pass magnet props to EntryCard; add `magnetLoadingId` state |
+| `src/components/timeline/EntryCard.tsx` | Add 4 new props; render magnet icon on all card layouts |
+| `src/pages/Timeline.tsx` | Add `handleMagnetSnap` function; pass to ContinuousTimeline; add proximity toast in drop/drag handlers |
 
 ## What Does NOT Change
-- EntrySheet.tsx (no changes needed -- it correctly reads from props)
-- Lock toggle DB logic
-- Timeline rendering
-- Auto-extend logic (preserved as-is after the new refresh code)
 
+- "+ Add something" buttons in gaps
+- Transport connector rendering
+- Flight cards, hotel wizard, Planner sidebar
+- Entry card drag/resize behavior
+- Weather system
+
+## Technical Details
+
+```text
+ContinuousTimeline state:
+  magnetLoadingId: string | null
+
+Per EntryCard, computed from sortedEntries:
+  hasNextEntry = next non-transport entry exists after this one
+  nextEntryLocked = that next entry's is_locked flag
+
+handleMagnetSnap flow:
+  1. Find entry by ID
+  2. Find next non-transport/non-airport-processing entry (skip transport entries)
+  3. Check locked status
+  4. Look for existing transport between them
+  5a. If transport: snap next to transport.end_time
+  5b. If no transport + addresses: invoke google-directions, create transport entry+option, snap
+  5c. If no transport + no addresses: snap next to entry.end_time
+  6. Push undo, update DB, fetchData, toast
+```
