@@ -1,39 +1,52 @@
 
-
-# Fix Mobile Pinch-to-Zoom
+# Fix Mobile Pinch-to-Zoom Registration and Add Account Settings Access
 
 ## Problem
-Pinch-to-zoom works on desktop (Ctrl+scroll / trackpad) but not on mobile because:
-1. iOS Safari intercepts two-finger pinch gestures at the browser level before JavaScript event handlers fire. `e.preventDefault()` in `touchstart`/`touchmove` is not sufficient on iOS -- the browser needs a CSS `touch-action` hint to relinquish control of the pinch gesture.
-2. The `useEffect` that registers pinch listeners depends only on `[zoomEnabled]`. When the `<main>` element unmounts (e.g., switching to live view) and remounts, `mainScrollRef.current` changes but the effect doesn't re-run, so listeners are never re-attached.
+1. The pinch-to-zoom `useEffect` runs before the `<main>` element renders (it's behind a loading gate), so `mainScrollRef.current` is null and listeners never attach. The deps don't change when the DOM becomes ready.
+2. iOS Safari's native page zoom competes with the custom pinch handler.
+3. No way to reach Account Settings (where the zoom toggle lives) from the timeline header.
 
 ## Changes
 
-### 1. `src/pages/Timeline.tsx` -- Add `touch-action` style and fix dependencies
+### 1. `index.html` -- Disable native browser zoom
+Update the viewport meta tag (line 5) to prevent iOS Safari from intercepting pinch gestures:
+```html
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+```
 
-**Add `touch-action: pan-y` to the `<main>` element** (line ~2157):
-- When `zoomEnabled` is true, set `style={{ touchAction: 'pan-y' }}` on the `<main ref={mainScrollRef}>`. This tells the browser to only handle vertical scrolling natively and let JavaScript handle all other gestures (including pinch).
-- When `zoomEnabled` is false, omit the style (default browser behavior).
+### 2. `src/pages/Timeline.tsx` -- Callback ref for scroll container
 
-**Fix pinch `useEffect` dependencies** (line 1580):
-- Change `[zoomEnabled]` to `[zoomEnabled, isMobile, mobileView]` so that when the mobile view switches from live back to timeline, the effect re-runs and re-attaches listeners to the freshly mounted `<main>` element.
+Add a `scrollContainerReady` state:
+```typescript
+const [scrollContainerReady, setScrollContainerReady] = useState(false);
+```
 
-**Fix wheel `useEffect` dependencies** (line 1610):
-- Same change: `[zoomEnabled]` to `[zoomEnabled, isMobile, mobileView]`.
+Replace the `ref={mainScrollRef}` on `<main>` with a callback ref that sets both the ref and the ready flag:
+```tsx
+<main
+  ref={(el) => {
+    (mainScrollRef as React.MutableRefObject<HTMLElement | null>).current = el;
+    if (el && !scrollContainerReady) setScrollContainerReady(true);
+  }}
+  ...
+>
+```
 
-### Files changed
-1. `src/pages/Timeline.tsx` -- add `touch-action` style to scroll container, fix effect dependencies
+Update both zoom `useEffect` dependency arrays to `[zoomEnabled, scrollContainerReady]` (removing `isMobile` and `mobileView` since they're no longer needed -- the callback ref handles re-mount).
 
-### What does NOT change
-- Pinch gesture logic (distance calculation, anchor math, zoom clamping)
-- Desktop Ctrl+scroll behavior
-- Sub-hour grid lines
-- Zoom indicator
-- Settings toggle
-- Any other touch interactions (drag-to-move, long-press)
+### 3. `src/components/timeline/TimelineHeader.tsx` -- Add Account Settings button
+- Import `User` from lucide-react
+- Add a `User` icon button before the logout button that navigates to `/settings`
+- Visible to all users (not gated by `isOrganizer`)
 
-### Technical notes
-- `touch-action: pan-y` allows vertical scrolling but prevents the browser from handling pinch-zoom, two-finger pan, etc. This is exactly what we want: the timeline scrolls vertically as normal, but pinch is handled by our JS.
-- Adding `mobileView` to the dependency array ensures the cleanup/re-register cycle runs whenever the `<main>` element is unmounted and remounted.
-- `isMobile` is included for completeness in case the viewport changes mid-session (e.g., rotating a tablet).
+## Files changed
+1. `index.html` -- viewport meta tag
+2. `src/pages/Timeline.tsx` -- callback ref + scrollContainerReady state + effect deps
+3. `src/components/timeline/TimelineHeader.tsx` -- Account Settings button
 
+## What does NOT change
+- Zoom gesture logic (pinch calculation, scroll anchoring)
+- Desktop Ctrl+scroll logic
+- Sub-hour grid lines, zoom indicator
+- Trip Settings page or its access
+- Any drag/resize mechanics
