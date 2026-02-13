@@ -98,6 +98,32 @@ const Timeline = () => {
   // Live panel state
   const [liveOpen, setLiveOpen] = useState(false);
   const [mobileView, setMobileView] = useState<'timeline' | 'live'>('timeline');
+
+  // Zoom state
+  const zoomEnabled = localStorage.getItem('timeline-zoom-enabled') !== 'false';
+  const [zoomLevel, setZoomLevel] = useState(() => {
+    if (!zoomEnabled) return 1.0;
+    const saved = sessionStorage.getItem('timeline-zoom');
+    return saved ? parseFloat(saved) : 1.0;
+  });
+  const pixelsPerHour = 80 * zoomLevel;
+  const zoomLevelRef = useRef(zoomLevel);
+  useEffect(() => { zoomLevelRef.current = zoomLevel; }, [zoomLevel]);
+
+  // Persist zoom to sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem('timeline-zoom', String(zoomLevel));
+  }, [zoomLevel]);
+
+  // Zoom indicator
+  const [showZoomIndicator, setShowZoomIndicator] = useState(false);
+  const zoomIndicatorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (zoomLevel === 1.0) return;
+    setShowZoomIndicator(true);
+    if (zoomIndicatorTimeoutRef.current) clearTimeout(zoomIndicatorTimeoutRef.current);
+    zoomIndicatorTimeoutRef.current = setTimeout(() => setShowZoomIndicator(false), 1200);
+  }, [zoomLevel]);
   // Conflict resolution state
   const [conflictOpen, setConflictOpen] = useState(false);
   const [currentConflict, setCurrentConflict] = useState<ConflictInfo | null>(null);
@@ -1427,7 +1453,6 @@ const Timeline = () => {
       touchDragTimeoutRef.current = null;
     }
   }, []);
-  const PIXELS_PER_HOUR = 80;
   // Document-level touch listeners for drag (survives sidebar unmount)
   useEffect(() => {
     if (!touchDragEntry) return;
@@ -1448,7 +1473,7 @@ const Timeline = () => {
       if (timelineEl) {
         const rect = timelineEl.getBoundingClientRect();
         const relativeY = touch.clientY - rect.top;
-        const rawGlobalHour = relativeY / PIXELS_PER_HOUR;
+        const rawGlobalHour = relativeY / pixelsPerHour;
         const entryDurationHours = touchDragEntryRef.current
           ? (new Date(touchDragEntryRef.current.end_time).getTime() -
              new Date(touchDragEntryRef.current.start_time).getTime()) / 3600000
@@ -1492,6 +1517,97 @@ const Timeline = () => {
     };
   }, [touchDragEntry, cleanupTouchDrag]);
 
+  // Pinch-to-zoom gesture (mobile)
+  const lastPinchDistRef = useRef<number | null>(null);
+  const pinchAnchorScrollRef = useRef<number>(0);
+  const pinchAnchorZoomRef = useRef<number>(1);
+  const pinchAnchorYRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (!zoomEnabled) return;
+    const el = mainScrollRef.current;
+    if (!el) return;
+
+    const getDistance = (t1: Touch, t2: Touch) =>
+      Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        lastPinchDistRef.current = getDistance(e.touches[0], e.touches[1]);
+        pinchAnchorZoomRef.current = zoomLevelRef.current;
+        pinchAnchorScrollRef.current = el.scrollTop;
+        pinchAnchorYRef.current = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && lastPinchDistRef.current !== null) {
+        e.preventDefault();
+        const newDist = getDistance(e.touches[0], e.touches[1]);
+        const scale = newDist / lastPinchDistRef.current;
+        const newZoom = Math.min(2.0, Math.max(0.5, pinchAnchorZoomRef.current * scale));
+
+        const anchorY = pinchAnchorYRef.current;
+        const rect = el.getBoundingClientRect();
+        const anchorRelative = anchorY - rect.top + pinchAnchorScrollRef.current;
+        const anchorHour = anchorRelative / (80 * pinchAnchorZoomRef.current);
+        const newAnchorPixel = anchorHour * (80 * newZoom);
+        const newScrollTop = newAnchorPixel - (anchorY - rect.top);
+
+        setZoomLevel(newZoom);
+        requestAnimationFrame(() => {
+          el.scrollTop = newScrollTop;
+        });
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        lastPinchDistRef.current = null;
+      }
+    };
+
+    el.addEventListener('touchstart', handleTouchStart, { passive: false });
+    el.addEventListener('touchmove', handleTouchMove, { passive: false });
+    el.addEventListener('touchend', handleTouchEnd);
+
+    return () => {
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchmove', handleTouchMove);
+      el.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [zoomEnabled]);
+
+  // Desktop zoom (Ctrl+scroll / trackpad pinch)
+  useEffect(() => {
+    if (!zoomEnabled) return;
+    const el = mainScrollRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+
+      const delta = -e.deltaY * 0.005;
+      const currentZoom = zoomLevelRef.current;
+      const newZoom = Math.min(2.0, Math.max(0.5, currentZoom + delta));
+
+      const rect = el.getBoundingClientRect();
+      const anchorRelative = e.clientY - rect.top + el.scrollTop;
+      const anchorHour = anchorRelative / (80 * currentZoom);
+      const newAnchorPixel = anchorHour * (80 * newZoom);
+      const newScrollTop = newAnchorPixel - (e.clientY - rect.top);
+
+      setZoomLevel(newZoom);
+      requestAnimationFrame(() => {
+        el.scrollTop = newScrollTop;
+      });
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [zoomEnabled]);
 
 
   const handleApplyRecommendation = async (rec: Recommendation) => {
@@ -2072,6 +2188,8 @@ const Timeline = () => {
                   onCurrentDayChange={setCurrentDayIndex}
                   onTrimDay={handleTrimDay}
                   onMagnetSnap={handleMagnetSnap}
+                  pixelsPerHour={pixelsPerHour}
+                  onResetZoom={() => setZoomLevel(1.0)}
                 />
               </main>
             )}
@@ -2302,6 +2420,15 @@ const Timeline = () => {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Zoom level indicator */}
+      {zoomEnabled && showZoomIndicator && zoomLevel !== 1.0 && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 rounded-full bg-foreground/80 px-3 py-1 shadow-lg transition-opacity duration-300">
+          <span className="text-xs font-bold text-background">
+            {Math.round(zoomLevel * 100)}%
+          </span>
         </div>
       )}
 

@@ -16,8 +16,6 @@ import WeatherBadge from './WeatherBadge';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 
-const PIXELS_PER_HOUR = 80;
-
 interface FlightTzInfo {
   originTz: string;
   destinationTz: string;
@@ -59,6 +57,8 @@ interface ContinuousTimelineProps {
   onCurrentDayChange?: (dayIndex: number) => void;
   onTrimDay?: (side: 'start' | 'end') => void;
   onMagnetSnap?: (entryId: string) => Promise<void>;
+  pixelsPerHour: number;
+  onResetZoom?: () => void;
 }
 
 const ContinuousTimeline = ({
@@ -94,13 +94,18 @@ const ContinuousTimeline = ({
   onCurrentDayChange,
   onTrimDay,
   onMagnetSnap,
+  pixelsPerHour,
+  onResetZoom,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
-  const containerHeight = totalHours * PIXELS_PER_HOUR + 30;
+  const containerHeight = totalHours * pixelsPerHour + 30;
   const gridRef = useRef<HTMLDivElement>(null);
   const [gridTopPx, setGridTopPx] = useState(0);
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
+
+  // Double-tap to reset zoom
+  const lastTapRef = useRef<number>(0);
 
   // Single scroll listener that measures grid position inline (no stale gridTopPx dependency)
   useEffect(() => {
@@ -115,7 +120,7 @@ const ContinuousTimeline = ({
       setGridTopPx(gridTop);
       const centreScroll = container.scrollTop + container.clientHeight / 2;
       const adjustedScroll = centreScroll - gridTop;
-      const dayIdx = Math.floor(adjustedScroll / (24 * PIXELS_PER_HOUR));
+      const dayIdx = Math.floor(adjustedScroll / (24 * pixelsPerHour));
       const clamped = Math.max(0, Math.min(days.length - 1, dayIdx));
       setCurrentDayIndex(clamped);
       onCurrentDayChange?.(clamped);
@@ -127,7 +132,7 @@ const ContinuousTimeline = ({
       container.removeEventListener('scroll', handleScroll);
       clearTimeout(timer);
     };
-  }, [scrollContainerRef?.current, days.length, onCurrentDayChange]);
+  }, [scrollContainerRef?.current, days.length, onCurrentDayChange, pixelsPerHour]);
 
   // Helper to get TZ abbreviation at midnight for a day (before any flight departs)
   const getMidnightTzAbbrev = useCallback((dayDate: Date): string => {
@@ -306,7 +311,7 @@ const ContinuousTimeline = ({
   }, [onEntryTimeChange, sortedEntries, days, dayTimezoneMap, homeTimezone, allEntries]);
 
   const { dragState, wasDraggedRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
-    pixelsPerHour: PIXELS_PER_HOUR,
+    pixelsPerHour,
     startHour: 0,
     totalHours,
     gridTopPx,
@@ -419,7 +424,7 @@ const ContinuousTimeline = ({
     if (!onClickSlot && !onDragSlot) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const y = e.clientY - rect.top;
-    const minutes = Math.round(y / PIXELS_PER_HOUR * 60 / 15) * 15;
+    const minutes = Math.round(y / pixelsPerHour * 60 / 15) * 15;
     setSlotDragStart(minutes);
     setSlotDragEnd(minutes);
     slotDraggingRef.current = false;
@@ -429,7 +434,7 @@ const ContinuousTimeline = ({
     if (slotDragStart === null) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const y = e.clientY - rect.top;
-    const minutes = Math.round(y / PIXELS_PER_HOUR * 60 / 15) * 15;
+    const minutes = Math.round(y / pixelsPerHour * 60 / 15) * 15;
     if (Math.abs(minutes - slotDragStart) > 5) slotDraggingRef.current = true;
     setSlotDragEnd(minutes);
   };
@@ -476,6 +481,18 @@ const ContinuousTimeline = ({
     return localHour >= lastFlight.flightEndHour ? lastFlight.destinationTz : lastFlight.originTz;
   }, [days, dayTimezoneMap, homeTimezone]);
 
+  // Double-tap handler for slot area
+  const handleSlotTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length > 0) return;
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      onResetZoom?.();
+      lastTapRef.current = 0;
+    } else {
+      lastTapRef.current = now;
+    }
+  }, [onResetZoom]);
+
   return (
     <div className="mx-auto max-w-2xl px-4 pb-2 pt-[50px]">
       <div
@@ -494,6 +511,7 @@ const ContinuousTimeline = ({
             slotDraggingRef.current = false;
           }
         }}
+        onTouchEnd={handleSlotTouchEnd}
         onDragOver={(e) => {
           if (onDropFromPanel) {
             e.preventDefault();
@@ -507,7 +525,7 @@ const ContinuousTimeline = ({
           if (!entryId) return;
           const rect = e.currentTarget.getBoundingClientRect();
           const y = e.clientY - rect.top;
-          const globalHour = y / PIXELS_PER_HOUR;
+          const globalHour = y / pixelsPerHour;
           const snapped = Math.round(globalHour * 4) / 4;
           onDropFromPanel(entryId, snapped);
         }}
@@ -520,7 +538,7 @@ const ContinuousTimeline = ({
             <div
               key={globalHour}
               className="absolute left-0 right-0 border-t border-border/30"
-              style={{ top: globalHour * PIXELS_PER_HOUR }}
+              style={{ top: globalHour * pixelsPerHour }}
             >
               <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -46, width: 30 }}>
                 {displayHour}
@@ -528,6 +546,48 @@ const ContinuousTimeline = ({
             </div>
           );
         })}
+
+        {/* 30-minute lines — show when zoomed >120% */}
+        {pixelsPerHour > 96 && Array.from({ length: totalHours }, (_, i) => i).map(globalHour => {
+          const top = (globalHour + 0.5) * pixelsPerHour;
+          return (
+            <div
+              key={`half-${globalHour}`}
+              className="absolute left-0 right-0 border-t border-border/15"
+              style={{ top }}
+            />
+          );
+        })}
+
+        {/* 30-minute gutter labels — show when zoomed >120% */}
+        {pixelsPerHour > 96 && Array.from({ length: totalHours }, (_, i) => i).map(globalHour => {
+          const localHour = globalHour % 24;
+          return (
+            <div
+              key={`half-label-${globalHour}`}
+              className="absolute"
+              style={{ top: (globalHour + 0.5) * pixelsPerHour }}
+            >
+              <span className="absolute -top-2 select-none text-[9px] text-muted-foreground/30" style={{ left: -46, width: 30, textAlign: 'center' }}>
+                {String(localHour).padStart(2, '0')}:30
+              </span>
+            </div>
+          );
+        })}
+
+        {/* 15-minute lines — show when zoomed >175% */}
+        {pixelsPerHour > 140 && Array.from({ length: totalHours }, (_, i) => i).flatMap(globalHour =>
+          [0.25, 0.75].map(frac => {
+            const top = (globalHour + frac) * pixelsPerHour;
+            return (
+              <div
+                key={`quarter-${globalHour}-${frac}`}
+                className="absolute left-0 right-0 border-t border-border/10"
+                style={{ top }}
+              />
+            );
+          })
+        )}
 
         {/* Midnight day markers — inline pills */}
         {days.map((day, dayIndex) => {
@@ -541,7 +601,7 @@ const ContinuousTimeline = ({
               {/* Inline pill beside 00:00 label */}
               <div
                 className="absolute z-[16] flex items-center gap-1"
-                style={{ top: globalHour * PIXELS_PER_HOUR - 8, left: -12 }}
+                style={{ top: globalHour * pixelsPerHour - 8, left: -12 }}
                 id={today ? 'today' : undefined}
               >
                 <div className={cn(
@@ -582,7 +642,7 @@ const ContinuousTimeline = ({
               {dayIndex > 0 && (
                 <div
                   className="absolute left-0 right-0 border-t border-dashed border-primary/20 z-[5]"
-                  style={{ top: globalHour * PIXELS_PER_HOUR }}
+                  style={{ top: globalHour * pixelsPerHour }}
                 />
               )}
             </div>
@@ -593,7 +653,7 @@ const ContinuousTimeline = ({
         {days.length > 0 && (
           <div
             className="absolute z-[16] flex items-center gap-1"
-            style={{ top: days.length * 24 * PIXELS_PER_HOUR - 8, left: -12 }}
+            style={{ top: days.length * 24 * pixelsPerHour - 8, left: -12 }}
           >
             <div className="inline-flex items-center gap-1 rounded-full bg-secondary border border-border/40 px-3 py-1 text-xs font-semibold text-secondary-foreground shadow-sm">
               <span>🏁 Trip Ends</span>
@@ -618,8 +678,8 @@ const ContinuousTimeline = ({
           const s = Math.min(slotDragStart, slotDragEnd);
           const e = Math.max(slotDragStart, slotDragEnd);
           if (e - s < 15) return null;
-          const top = (s / 60) * PIXELS_PER_HOUR;
-          const height = ((e - s) / 60) * PIXELS_PER_HOUR;
+          const top = (s / 60) * pixelsPerHour;
+          const height = ((e - s) / 60) * pixelsPerHour;
           const sH = Math.floor(s / 60) % 24;
           const sM = s % 60;
           const eH = Math.floor(e / 60) % 24;
@@ -659,11 +719,11 @@ const ContinuousTimeline = ({
           if (gapMin <= 5) return null;
           if (hasTransferBetween(entry, nextEntry)) return null;
 
-          const gapTopPx = aEndGH * PIXELS_PER_HOUR;
-          const gapBottomPx = bStartGH * PIXELS_PER_HOUR;
+          const gapTopPx = aEndGH * pixelsPerHour;
+          const gapBottomPx = bStartGH * pixelsPerHour;
           const gapHeight = gapBottomPx - gapTopPx;
           const midGH = (aEndGH + bStartGH) / 2;
-          const btnTop = midGH * PIXELS_PER_HOUR - 12;
+          const btnTop = midGH * pixelsPerHour - 12;
           const isTransportGap = gapMin < 120;
 
           return (
@@ -734,8 +794,8 @@ const ContinuousTimeline = ({
             }
           }
 
-          const top = Math.max(0, groupStartGH * PIXELS_PER_HOUR);
-          const height = (groupEndGH - groupStartGH) * PIXELS_PER_HOUR;
+          const top = Math.max(0, groupStartGH * pixelsPerHour);
+          const height = (groupEndGH - groupStartGH) * pixelsPerHour;
           const isCompact = height < 40 && !flightGroup;
           const isMedium = height >= 40 && height < 80 && !flightGroup;
           const isCondensed = height >= 80 && height < 160 && !flightGroup;
@@ -788,13 +848,13 @@ const ContinuousTimeline = ({
             }
           })();
           const isFlightCard = !!flightGroup;
-          const canDrag = onEntryTimeChange && !isLocked && !isTransport && !isFlightCard;
+          const canDrag = isEditor && onEntryTimeChange && !isLocked && !isFlightCard;
 
           // Drag hours for init (global coordinates)
           const origGH = getEntryGlobalHours(entry);
           const origStartGH = origGH.startGH;
           const origEndGH = origGH.endGH;
-          const dragTz = primaryOption.category === 'flight' ? (primaryOption.departure_tz || resolvedTz) : resolvedTz;
+          const dragTz = resolvedTz;
 
           // Per-entry formatTime using resolved TZ
           const entryFormatTime = (iso: string) => {
@@ -1171,7 +1231,7 @@ const ContinuousTimeline = ({
 
                     const transportEndGH = getEntryGlobalHours(entry).endGH;
                     const nextStartGH = getEntryGlobalHours(nextVisible).startGH;
-                    const gapPixelHeight = (nextStartGH - transportEndGH) * PIXELS_PER_HOUR;
+                    const gapPixelHeight = (nextStartGH - transportEndGH) * pixelsPerHour;
                     const BUTTON_HEIGHT = 22;
                     const addBtnTopOffset = height + Math.max(0, (gapPixelHeight - BUTTON_HEIGHT) / 2);
 
@@ -1222,8 +1282,8 @@ const ContinuousTimeline = ({
               style={{
                 left: -6,
                 width: 5,
-                top: dayIndex * 24 * PIXELS_PER_HOUR,
-                height: 24 * PIXELS_PER_HOUR,
+                top: dayIndex * 24 * pixelsPerHour,
+                height: 24 * pixelsPerHour,
                 background: gradient,
               }}
             />
@@ -1239,7 +1299,7 @@ const ContinuousTimeline = ({
           const offset = getUtcOffsetHoursDiff(f.originTz, f.destinationTz);
           if (offset === 0) return null;
           const globalFlightMidHour = dayIndex * 24 + (f.flightStartHour + f.flightEndHour) / 2;
-          const badgeTop = globalFlightMidHour * PIXELS_PER_HOUR - 8;
+          const badgeTop = globalFlightMidHour * pixelsPerHour - 8;
           return (
             <div key={`tz-${dayIndex}`} className="absolute z-[6]" style={{ top: badgeTop, left: -100, width: 46 }}>
               <span className="rounded-full bg-primary/20 border border-primary/30 px-2 py-0.5 text-[10px] font-bold text-primary whitespace-nowrap">
@@ -1257,9 +1317,9 @@ const ContinuousTimeline = ({
               const w = weatherData.find(wd => wd.date === dayStr && wd.hour === hour);
               if (!w) return null;
               const globalHour = dayIndex * 24 + hour;
-              const top = globalHour * PIXELS_PER_HOUR;
+              const top = globalHour * pixelsPerHour;
               return (
-                <div key={`weather-${dayIndex}-${hour}`} className="absolute left-0" style={{ top: top + (PIXELS_PER_HOUR / 2) - 6 }}>
+                <div key={`weather-${dayIndex}-${hour}`} className="absolute left-0" style={{ top: top + (pixelsPerHour / 2) - 6 }}>
                   <WeatherBadge temp={w.temp_c} condition={w.condition} hour={hour} date={day} />
                 </div>
               );
