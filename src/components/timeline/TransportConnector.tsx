@@ -12,17 +12,17 @@ const MODE_CONFIG: { mode: string; emoji: string; label: string; apiMode: string
 
 /* Layer 1: Background strip — low opacity, fills the gap */
 const STRIP_COLORS_LIGHT: Record<string, string> = {
-  walk: 'hsl(140, 45%, 75%)',
-  drive: 'hsl(0, 45%, 80%)',
-  transit: 'hsl(45, 55%, 75%)',
-  bicycle: 'hsl(210, 45%, 78%)',
+  walk: 'hsl(140, 25%, 85%)',
+  drive: 'hsl(0, 25%, 88%)',
+  transit: 'hsl(45, 30%, 85%)',
+  bicycle: 'hsl(210, 25%, 87%)',
 };
 
 const STRIP_COLORS_DARK: Record<string, string> = {
-  walk: 'hsl(140, 40%, 30%)',
-  drive: 'hsl(0, 40%, 30%)',
-  transit: 'hsl(45, 50%, 30%)',
-  bicycle: 'hsl(210, 40%, 30%)',
+  walk: 'hsl(140, 20%, 22%)',
+  drive: 'hsl(0, 20%, 22%)',
+  transit: 'hsl(45, 25%, 22%)',
+  bicycle: 'hsl(210, 20%, 22%)',
 };
 
 /* Layer 2: Content pill — selected mode highlight */
