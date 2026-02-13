@@ -270,6 +270,7 @@ const EntrySheet = ({
   const [viewRefreshing, setViewRefreshing] = useState(false);
   const [viewResults, setViewResults] = useState<TransportResult[]>([]);
   const [viewSelectedMode, setViewSelectedMode] = useState<string | null>(null);
+  const [viewModesPreloaded, setViewModesPreloaded] = useState(false);
   const [viewApplying, setViewApplying] = useState(false);
   const [notesValue, setNotesValue] = useState('');
   const [notesDirty, setNotesDirty] = useState(false);
@@ -280,6 +281,26 @@ const EntrySheet = ({
       setNotesDirty(false);
     }
   }, [mode, entry]);
+
+  // Part 2: Preload transport modes from stored data on open
+  useEffect(() => {
+    if (mode === 'view' && option?.category === 'transfer' && !viewModesPreloaded) {
+      const transportModes = (option as any).transport_modes;
+      if (transportModes && Array.isArray(transportModes) && transportModes.length > 0) {
+        setViewResults(transportModes as TransportResult[]);
+        const lower = option.name.toLowerCase();
+        let cm = 'transit';
+        if (lower.startsWith('walk')) cm = 'walk';
+        else if (lower.startsWith('drive')) cm = 'drive';
+        else if (lower.startsWith('cycle')) cm = 'bicycle';
+        setViewSelectedMode(cm);
+      }
+      setViewModesPreloaded(true);
+    }
+    if (mode !== 'view') {
+      setViewModesPreloaded(false);
+    }
+  }, [mode, option, viewModesPreloaded]);
 
   const handleNotesSave = async () => {
     if (!notesDirty || !entry) return;
@@ -1154,6 +1175,16 @@ const EntrySheet = ({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md [&>button:last-child]:h-11 [&>button:last-child]:w-11 [&>button:last-child]:top-3 [&>button:last-child]:right-3 [&>button:last-child]:[&_svg]:h-6 [&>button:last-child]:[&_svg]:w-6">
           {/* Lock toggle in top-right, beside close button */}
+          {/* Delete button in header */}
+          {isEditor && (
+            <button
+              className="absolute top-3 right-[6.5rem] z-50 flex items-center justify-center h-11 w-11 rounded-sm hover:bg-destructive/10 transition-colors"
+              onClick={() => setDeleting(true)}
+            >
+              <Trash2 className="h-5 w-5 text-destructive" />
+            </button>
+          )}
+          {/* Lock toggle in top-right, beside close button */}
           {isEditor && option?.category !== 'flight' && option?.category !== 'transfer' && (
             <button
               className="absolute top-3 right-14 z-50 flex items-center justify-center h-11 w-11 rounded-sm hover:bg-muted/50 transition-colors"
@@ -1347,15 +1378,6 @@ const EntrySheet = ({
 
                   return (
                     <div className="space-y-4">
-                      {/* Mode header */}
-                      <div className="flex items-center gap-3">
-                        <span className="text-3xl">{modeEmoji}</span>
-                        <div>
-                          <p className="text-lg font-bold text-foreground">{modeLabel}</p>
-                          <p className="text-sm text-muted-foreground">{option.name}</p>
-                        </div>
-                      </div>
-
                       {/* From / To */}
                       {(option.departure_location || option.arrival_location) && (
                         <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
@@ -1395,6 +1417,9 @@ const EntrySheet = ({
                           toAddress={option.arrival_location || ''}
                           travelMode={modeLabel.toLowerCase()}
                           size="full"
+                          destLat={option.latitude}
+                          destLng={option.longitude}
+                          destName={(option.arrival_location || '').split(',')[0].trim()}
                         />
                       )}
 
@@ -1609,24 +1634,16 @@ const EntrySheet = ({
               </div>
             )}
 
-            {isEditor && (
+            {isEditor && option.category !== 'transfer' && (
               <ImageUploader optionId={option.id} currentCount={images.length} onUploaded={onSaved} />
             )}
 
             {/* Editor actions */}
-            {isEditor && (
+            {isEditor && onMoveToIdeas && option?.category !== 'transfer' && option?.category !== 'flight' && (
               <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
-                {onMoveToIdeas && option?.category !== 'transfer' && option?.category !== 'flight' && (
-                  <Button variant="outline" size="sm" onClick={() => onMoveToIdeas(entry.id)}>
-                    <ClipboardList className="mr-1.5 h-3.5 w-3.5" /> Send to Planner
-                  </Button>
-                )}
-
-                <AlertDialog>
-                  <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(true)}>
-                    <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
-                  </Button>
-                </AlertDialog>
+                <Button variant="outline" size="sm" onClick={() => onMoveToIdeas(entry.id)}>
+                  <ClipboardList className="mr-1.5 h-3.5 w-3.5" /> Send to Planner
+                </Button>
               </div>
             )}
 
