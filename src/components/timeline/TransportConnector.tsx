@@ -11,17 +11,31 @@ const MODE_CONFIG: { mode: string; emoji: string; label: string; apiMode: string
 ];
 
 const MODE_COLORS_LIGHT: Record<string, string> = {
-  walk: 'hsl(140, 40%, 85%)',
-  drive: 'hsl(0, 40%, 85%)',
-  transit: 'hsl(45, 50%, 85%)',
-  bicycle: 'hsl(210, 40%, 85%)',
+  walk: 'hsla(140, 50%, 50%, 0.2)',
+  drive: 'hsla(0, 50%, 50%, 0.2)',
+  transit: 'hsla(45, 60%, 50%, 0.2)',
+  bicycle: 'hsla(210, 50%, 50%, 0.2)',
 };
 
 const MODE_COLORS_DARK: Record<string, string> = {
-  walk: 'hsla(140, 40%, 30%, 0.3)',
-  drive: 'hsla(0, 40%, 30%, 0.3)',
-  transit: 'hsla(45, 50%, 30%, 0.3)',
-  bicycle: 'hsla(210, 40%, 30%, 0.3)',
+  walk: 'hsla(140, 50%, 50%, 0.12)',
+  drive: 'hsla(0, 50%, 50%, 0.12)',
+  transit: 'hsla(45, 60%, 50%, 0.12)',
+  bicycle: 'hsla(210, 50%, 50%, 0.12)',
+};
+
+const MODE_HIGHLIGHT_LIGHT: Record<string, string> = {
+  walk: 'hsl(140, 45%, 75%)',
+  drive: 'hsl(0, 45%, 80%)',
+  transit: 'hsl(45, 55%, 75%)',
+  bicycle: 'hsl(210, 45%, 78%)',
+};
+
+const MODE_HIGHLIGHT_DARK: Record<string, string> = {
+  walk: 'hsl(140, 40%, 30%)',
+  drive: 'hsl(0, 40%, 30%)',
+  transit: 'hsl(45, 50%, 30%)',
+  bicycle: 'hsl(210, 40%, 30%)',
 };
 
 const fmtDur = (min: number): string => {
@@ -101,49 +115,36 @@ const TransportConnector = ({
   const MIN_HEIGHT = 40;
   const renderedHeight = Math.max(height, MIN_HEIGHT);
   const isOverlay = height < MIN_HEIGHT;
-  const isCompact = renderedHeight < 80;
-  const showLabels = renderedHeight >= 160;
+  const showExtended = renderedHeight >= 100;
 
   const selectedData = transportModes.find(m => m.mode === currentMode);
   const selectedDistance = selectedData ? fmtDist(selectedData.distance_km) : '';
 
-  // Detect dark mode
   const isDark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
   const backgroundColor = isDark
     ? (MODE_COLORS_DARK[currentMode] || MODE_COLORS_DARK.transit)
     : (MODE_COLORS_LIGHT[currentMode] || MODE_COLORS_LIGHT.transit);
 
-  return (
-    <div
-      className={cn(
-        'relative flex flex-col items-center justify-center rounded-lg',
-        'cursor-default select-none overflow-hidden transition-colors duration-300',
-        isOverlay
-          ? 'border border-solid border-stone-400/60 dark:border-stone-600/50 shadow-sm'
-          : 'border border-dashed border-stone-300/50 dark:border-stone-700/30'
-      )}
-      style={{ height: renderedHeight, backgroundColor }}
-    >
-      {/* From → To labels */}
-      {showLabels && fromLabel && toLabel && (
-        <div className="text-[9px] text-muted-foreground/60 truncate max-w-[90%] mb-0.5">
-          {fromLabel} → {toLabel}
-        </div>
-      )}
+  const highlightColor = isDark
+    ? (MODE_HIGHLIGHT_DARK[currentMode] || MODE_HIGHLIGHT_DARK.transit)
+    : (MODE_HIGHLIGHT_LIGHT[currentMode] || MODE_HIGHLIGHT_LIGHT.transit);
 
-      {/* Mode icons row + info + refresh + delete */}
-      <div className={cn('flex items-center', isCompact ? 'gap-0.5' : 'gap-1.5')}>
-        {/* Info button */}
-        {onInfoTap && (
+  const mainRow = (
+    <div className="flex items-center justify-between w-full px-2">
+      {/* Left: info icon */}
+      <div className="flex items-center shrink-0">
+        {onInfoTap ? (
           <button
             onClick={(e) => { e.stopPropagation(); onInfoTap(); }}
-            className="flex flex-col items-center rounded-md px-1 py-0.5 opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
-            style={{ minWidth: 32, minHeight: 32 }}
+            className="flex items-center justify-center rounded-md p-1 opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
           >
             <Info className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
-        )}
+        ) : <div className="w-6" />}
+      </div>
 
+      {/* Centre: mode buttons */}
+      <div className="flex items-center gap-1">
         {MODE_CONFIG.map(({ mode, emoji, apiMode }) => {
           const modeData = transportModes.find(m => m.mode === apiMode);
           const isSelected = currentMode === apiMode;
@@ -160,29 +161,30 @@ const TransportConnector = ({
               }}
               className={cn(
                 'flex flex-col items-center rounded-md px-1.5 py-0.5 transition-all',
-                isSelected
-                  ? 'bg-orange-100 dark:bg-orange-900/30 scale-105'
-                  : 'opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30',
+                !isSelected && 'opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30',
                 !modeData && 'opacity-20 pointer-events-none'
               )}
+              style={isSelected ? { backgroundColor: highlightColor, transform: 'scale(1.05)' } : undefined}
             >
               <span className={cn('leading-none', isSelected ? 'text-base' : 'text-sm')}>
                 {emoji}
               </span>
               <span className={cn(
                 'text-[9px] leading-tight',
-                isSelected ? 'font-bold text-orange-700 dark:text-orange-300' : 'text-muted-foreground'
+                isSelected ? 'font-bold text-foreground' : 'text-muted-foreground'
               )}>
                 {durLabel}
               </span>
             </button>
           );
         })}
+      </div>
 
-        {/* Refresh button */}
+      {/* Right: refresh + delete */}
+      <div className="flex items-center gap-0.5 shrink-0">
         <button
           onClick={(e) => { e.stopPropagation(); onRefresh(); }}
-          className="flex flex-col items-center rounded-md px-1.5 py-0.5 opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
+          className="flex items-center justify-center rounded-md p-1 opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
         >
           {isRefreshing ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -191,12 +193,11 @@ const TransportConnector = ({
           )}
         </button>
 
-        {/* Delete button — two-tap confirm */}
         {onDelete && (
           <button
             onClick={handleDeleteTap}
             className={cn(
-              'flex flex-col items-center rounded-md px-1.5 py-0.5 transition-all',
+              'flex items-center justify-center rounded-md p-1 transition-all',
               confirmingDelete
                 ? 'bg-red-500 text-white scale-105'
                 : 'opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30'
@@ -206,9 +207,31 @@ const TransportConnector = ({
           </button>
         )}
       </div>
+    </div>
+  );
 
-      {/* Distance for selected mode */}
-      {selectedDistance && height >= 40 && (
+  return (
+    <div
+      className={cn(
+        'relative flex flex-col items-center justify-center rounded-lg',
+        'cursor-default select-none overflow-hidden transition-colors duration-300',
+        isOverlay
+          ? 'border border-solid border-stone-400/60 dark:border-stone-600/50 shadow-sm'
+          : 'border border-dashed border-stone-300/50 dark:border-stone-700/30'
+      )}
+      style={{ height: renderedHeight, backgroundColor }}
+    >
+      {/* Extended: from→to labels above */}
+      {showExtended && fromLabel && toLabel && (
+        <div className="text-[9px] text-muted-foreground/60 truncate max-w-[90%] mb-0.5">
+          {fromLabel} → {toLabel}
+        </div>
+      )}
+
+      {mainRow}
+
+      {/* Extended: distance below */}
+      {showExtended && selectedDistance && (
         <span className="text-[9px] text-muted-foreground/50 mt-0.5">{selectedDistance}</span>
       )}
     </div>
