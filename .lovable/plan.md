@@ -1,65 +1,94 @@
 
 
-# Fix Transport Connector: Full-Width, Colours, Layout
+# Transport Card: Two-Layer Structure (Background Strip + Content Pill)
+
+## Concept
+
+The transport card becomes two distinct visual layers:
+
+1. **Background strip** -- full-width, constrained exactly to the gap height, never overflows
+2. **Content pill** -- auto-width, centred, has min-height, overflows into adjacent cards when gap is small
 
 ## Changes
 
-### 1. `TransportConnector.tsx` -- Colour and Layout Overhaul
+### 1. `ContinuousTimeline.tsx` -- Revert overlay positioning
 
-**Background colours at 20% opacity:**
+Remove the min-height centering logic. The transport card container should always be positioned at the exact gap location with the exact gap height. The overflow is handled inside the component, not at the positioning level.
 
-Replace the current `MODE_COLORS_LIGHT` and `MODE_COLORS_DARK` with lower-opacity versions:
+```
+// BEFORE (current):
+top: isTransport && height < 40 ? top + (height / 2) - 20 : top,
+height: isTransport && height < 40 ? 40 : height,
+zIndex: isDragged ? 30 : isTransport && height < 40 ? 20 : ...
 
-```text
-Light mode: hsla(hue, sat%, lightness%, 0.2) over transparent
-Dark mode:  hsla(hue, sat%, lightness%, 0.12)
+// AFTER:
+top: top,
+height: height,
+zIndex: isDragged ? 30 : hasConflict ? 10 + index : 10,
 ```
 
-| Mode | Light background | Dark background |
-|------|-----------------|-----------------|
-| Walk | `hsla(140, 50%, 50%, 0.2)` | `hsla(140, 50%, 50%, 0.12)` |
-| Drive | `hsla(0, 50%, 50%, 0.2)` | `hsla(0, 50%, 50%, 0.12)` |
-| Transit | `hsla(45, 60%, 50%, 0.2)` | `hsla(45, 60%, 50%, 0.12)` |
-| Bicycle | `hsla(210, 50%, 50%, 0.2)` | `hsla(210, 50%, 50%, 0.12)` |
+Add `overflow-visible` to the transport card's container div (it already has `overflow-visible` on the outer div but the style height constraint clips content -- we need the inner content to be able to spill out).
 
-**Selected mode highlight -- solid colour:**
+### 2. `TransportConnector.tsx` -- Two-layer render
 
-Add a new `MODE_HIGHLIGHT` map with solid (opaque) mode colours. Replace the current `bg-orange-100` selected class with a dynamic `style={{ backgroundColor: MODE_HIGHLIGHT[currentMode] }}`.
+Completely rework the render structure:
 
-| Mode | Highlight colour |
-|------|-----------------|
-| Walk | `hsl(140, 45%, 75%)` / dark: `hsl(140, 40%, 30%)` |
-| Drive | `hsl(0, 45%, 80%)` / dark: `hsl(0, 40%, 30%)` |
-| Transit | `hsl(45, 55%, 75%)` / dark: `hsl(45, 50%, 30%)` |
-| Bicycle | `hsl(210, 45%, 78%)` / dark: `hsl(210, 40%, 30%)` |
+**Colour constants:** Replace `MODE_COLORS_LIGHT/DARK` with ~15% opacity versions for the background strip. Keep the existing `MODE_HIGHLIGHT` maps for selected mode highlights.
 
-**Layout -- single horizontal row with flex spread:**
+| Mode | Strip bg (light) | Strip bg (dark) |
+|------|------------------|-----------------|
+| Walk | `hsla(140, 50%, 50%, 0.15)` | `hsla(140, 50%, 50%, 0.1)` |
+| Drive | `hsla(0, 50%, 50%, 0.15)` | `hsla(0, 50%, 50%, 0.1)` |
+| Transit | `hsla(45, 60%, 50%, 0.15)` | `hsla(45, 60%, 50%, 0.1)` |
+| Bicycle | `hsla(210, 50%, 50%, 0.15)` | `hsla(210, 50%, 50%, 0.1)` |
 
-Change the outer container from `flex-col items-center justify-center` to `flex items-center justify-between px-2`. This creates one row:
+**Render structure:**
 
-- Left: `(i)` info icon
-- Centre: 4 mode buttons (each showing emoji + duration vertically stacked)
-- Right: refresh + trash icons
+```text
+<div className="relative w-full" style={{ height }} (overflow: visible)>
+  
+  <!-- Layer 1: Background strip -->
+  <div className="absolute inset-0 rounded-sm" (overflow: hidden)
+       style={{ backgroundColor: stripColor }} />
+  
+  <!-- Layer 2: Content pill -->
+  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 
+                   z-20 min-h-[40px] w-fit px-3 py-1 
+                   bg-white/95 dark:bg-stone-900/95 
+                   rounded-full shadow-md border border-stone-200/60 dark:border-stone-700/60
+                   flex items-center gap-1.5">
+    (i) | mode icons with durations | refresh | trash
+  </div>
+  
+</div>
+```
 
-Remove `flex-col` from the info, refresh, and trash button classes so they are inline `flex items-center justify-center` with consistent sizing. All icons use the same `h-3.5 w-3.5` size and are vertically centred via `items-center` on the parent row.
+- The outer div has `overflow: visible` -- the content pill can spill out
+- Layer 1 (background strip) has `overflow: hidden` and `inset-0` -- exactly fills the gap, never overflows
+- Layer 2 (content pill) is absolutely positioned at 50%/50% with translate centering -- sits at the midpoint of the gap, overflows equally into adjacent cards when gap is small
+- Content pill has `z-20` so it renders above event cards
+- Content pill has white/cream background with shadow so it's readable over any event card content
 
-Remove the separate "From/To labels" and "Distance" lines for compact mode -- only show them when `renderedHeight >= 100` (wrapped above/below the main row in a `flex-col` wrapper).
+**Content pill layout** (single horizontal row):
+- Info (i) icon
+- 4 mode buttons (emoji + duration stacked vertically in each), selected one gets highlight background
+- Refresh icon
+- Trash icon (with existing two-tap confirm)
 
-### 2. No changes to `ContinuousTimeline.tsx`
+**Extended content:** When `height >= 100`, show from/to labels and distance as additional text lines above/below the content pill (or inside it).
 
-The positioning logic (full width, overlay centering at z-20) is already correct. The card is already `width: 100%` and `left: 0%`. The issue was purely within TransportConnector's internal styling.
-
-## Files Modified
+### Files Modified
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/TransportConnector.tsx` | 20% opacity backgrounds, solid mode highlights, single-row layout with flex justify-between |
+| `src/components/timeline/TransportConnector.tsx` | Two-layer structure: background strip + content pill with overflow |
+| `src/components/timeline/ContinuousTimeline.tsx` | Revert overlay positioning -- use exact gap top/height, remove min-height centering |
 
-## What Does NOT Change
+### What Does NOT Change
 
 - Transport overview sheet
 - Mode switching behaviour
-- Min-height / overlay logic in ContinuousTimeline
-- SNAP, drag chain, continuous timeline
-- Event card positioning
+- SNAP system, drag chain, continuous timeline
+- Event card rendering or positioning
+- Mode highlight colours
 
