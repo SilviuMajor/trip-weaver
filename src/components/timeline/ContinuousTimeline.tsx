@@ -537,7 +537,7 @@ const ContinuousTimeline = ({
                 id={today ? 'today' : undefined}
               >
                 <div className={cn(
-                  'inline-flex items-center gap-1 rounded-full bg-secondary/80 px-2 py-0.5 text-[9px] font-semibold text-secondary-foreground',
+                  'inline-flex items-center gap-1 rounded-full bg-secondary border border-border/40 px-3 py-1 text-xs font-semibold text-secondary-foreground shadow-sm',
                   today && 'ring-1 ring-primary/40'
                 )}>
                   <span>{dayLabel}</span>
@@ -555,7 +555,7 @@ const ContinuousTimeline = ({
                   )}
                 </div>
                 {today && (
-                  <span className="rounded-full bg-primary px-1.5 py-0 text-[8px] font-semibold text-primary-foreground">TODAY</span>
+                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">TODAY</span>
                 )}
               </div>
               {/* Midnight line (subtle) */}
