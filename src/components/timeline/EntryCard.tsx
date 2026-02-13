@@ -519,7 +519,61 @@ const EntryCard = ({
   }
 
   // Condensed layout for 1-2 hour events (80-160px)
+  const isHotelUtilityBlock = option.name?.startsWith('Check in ·') || option.name?.startsWith('Check out ·');
+
   if (isCondensed) {
+    // Compact variant for hotel check-in/checkout blocks
+    if (isHotelUtilityBlock) {
+      return (
+        <motion.div
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          onClick={onClick}
+          onMouseDown={onDragStart}
+          onTouchStart={onTouchDragStart}
+          onTouchMove={onTouchDragMove}
+          onTouchEnd={onTouchDragEnd}
+          className={cn(
+            'group relative overflow-hidden rounded-xl border shadow-sm transition-all hover:shadow-md',
+            isEntryPast && 'opacity-50 grayscale-[30%]',
+            isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            isLocked && 'border-2 border-muted-foreground/20',
+            isShaking && 'animate-shake',
+            cardSizeClass
+          )}
+          style={{
+            borderColor: isLocked ? undefined : catColor,
+            borderLeftWidth: isLocked ? undefined : 3,
+            background: tintBg,
+          }}
+        >
+          <div className="relative z-10 flex h-full flex-col justify-between px-2 py-1">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs shrink-0">{catEmoji}</span>
+              <h3 className="truncate text-xs font-semibold leading-tight flex-1 min-w-0">
+                {option.name}
+              </h3>
+            </div>
+            <span className="text-[9px] text-muted-foreground">
+              {formatTime(startTime)} — {formatTime(endTime)}
+            </span>
+          </div>
+          {overlapFraction > 0 && (
+            <div
+              className="absolute inset-x-0 z-[1] pointer-events-none rounded-xl"
+              style={{
+                background: 'linear-gradient(to right, hsla(0, 70%, 50%, 0.25), hsla(0, 70%, 50%, 0.1))',
+                ...(overlapPosition === 'top'
+                  ? { top: 0, height: `${overlapFraction * 100}%` }
+                  : { bottom: 0, height: `${overlapFraction * 100}%` }),
+              }}
+            />
+          )}
+        </motion.div>
+      );
+    }
+
     return (
       <motion.div
         initial={{ opacity: 0, y: 4 }}

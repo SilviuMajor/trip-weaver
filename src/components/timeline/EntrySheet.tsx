@@ -17,7 +17,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import AIRPORTS from '@/lib/airports';
-import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, AlertTriangle, RefreshCw, Phone, ChevronDown, MapPin as MapPinIcon, Car } from 'lucide-react';
+import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, AlertTriangle, RefreshCw, Phone, ChevronDown } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import PhotoStripPicker from './PhotoStripPicker';
@@ -1649,33 +1649,8 @@ const EntrySheet = ({
             {/* Map + Google Maps link */}
             {option.latitude != null && option.longitude != null && (
               <div className="space-y-2">
-                <MapPreview latitude={option.latitude} longitude={option.longitude} locationName={option.location_name} />
-                {(option as any).google_maps_uri && (
-                  <a
-                    href={(option as any).google_maps_uri}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <MapPinIcon className="h-3 w-3" /> Open in Google Maps
-                  </a>
-                )}
+              <MapPreview latitude={option.latitude} longitude={option.longitude} locationName={option.location_name} />
               </div>
-            )}
-
-            {/* Uber button for regular events */}
-            {option.category !== 'transfer' && option.category !== 'flight' && option.latitude != null && option.longitude != null && (
-              <Button variant="outline" size="sm" className="w-full text-xs bg-black text-white hover:bg-black/90 border-black" asChild>
-                <a
-                  href={`https://m.uber.com/ul/?action=setPickup&pickup[latitude]=my_location&pickup[longitude]=my_location&pickup[nickname]=My%20Location&dropoff[latitude]=${option.latitude}&dropoff[longitude]=${option.longitude}&dropoff[nickname]=${encodeURIComponent((option.location_name || option.name || 'Destination').split(',')[0].trim())}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Car className="mr-1 h-3 w-3" /> Uber <ExternalLink className="ml-1 h-3 w-3" />
-                </a>
-              </Button>
             )}
 
             {/* Vote (hidden for transport & flights) */}
