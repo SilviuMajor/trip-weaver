@@ -29,6 +29,8 @@ interface DeduplicatedEntry {
   isFlight: boolean;
 }
 
+const alwaysShowCategories = ['hotel'];
+
 const CategorySidebar = ({
   open,
   onOpenChange,
@@ -43,6 +45,9 @@ const CategorySidebar = ({
 }: CategorySidebarProps) => {
   const isMobile = useIsMobile();
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
+
+  // Debug: log entries reaching sidebar
+  console.log('[CategorySidebar] entries:', entries.map(e => ({ id: e.id, cat: e.options[0]?.category, name: e.options[0]?.name })));
 
   // Build full category list
   const allCategories = useMemo(() => {
@@ -101,13 +106,26 @@ const CategorySidebar = ({
     for (const entry of catEntries) {
       const opt = entry.options[0];
       if (!opt) continue;
-      const key = `${opt.name}::${opt.category ?? ''}`;
+      // Hotel entries: dedup by hotel_id when available, else by name
+      let key: string;
+      if (opt.category === 'hotel' && opt.hotel_id) {
+        key = `hotel::${opt.hotel_id}`;
+      } else {
+        key = `${opt.name}::${opt.category ?? ''}`;
+      }
       if (seen.has(key)) continue;
       seen.add(key);
       // Find the original from dedup map
       const dedup = [...deduplicatedMap.values()].find(d => {
         const dOpt = d.original.options[0];
-        return dOpt && `${dOpt.name}::${dOpt.category ?? ''}` === key;
+        if (!dOpt) return false;
+        let dKey: string;
+        if (dOpt.category === 'hotel' && dOpt.hotel_id) {
+          dKey = `hotel::${dOpt.hotel_id}`;
+        } else {
+          dKey = `${dOpt.name}::${dOpt.category ?? ''}`;
+        }
+        return dKey === key;
       });
       if (dedup) results.push(dedup);
     }
@@ -186,7 +204,7 @@ const CategorySidebar = ({
         {allCategories.map(cat => {
           const catEntries = grouped.get(cat.id) ?? [];
           const dedupedEntries = getFilteredOriginals(catEntries);
-          if (dedupedEntries.length === 0) return null;
+          if (dedupedEntries.length === 0 && !alwaysShowCategories.includes(cat.id)) return null;
 
           return (
             <div key={cat.id}>
@@ -211,20 +229,24 @@ const CategorySidebar = ({
                   </Button>
                 )}
               </div>
-              <div className="space-y-1.5">
-                {dedupedEntries.map(({ original, usageCount, isFlight }) => (
-                  <SidebarEntryCard
-                    key={original.id}
-                    entry={original}
-                    onDragStart={onDragStart}
-                    onClick={() => onCardTap?.(original)}
-                    onDuplicate={isFlight ? undefined : onDuplicate}
-                    onInsert={isFlight ? undefined : onInsert}
-                    usageCount={usageCount}
-                    isFlight={isFlight}
-                  />
-                ))}
-              </div>
+              {dedupedEntries.length === 0 ? (
+                <p className="text-xs text-muted-foreground/60 italic pl-6">No hotel added yet</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {dedupedEntries.map(({ original, usageCount, isFlight }) => (
+                    <SidebarEntryCard
+                      key={original.id}
+                      entry={original}
+                      onDragStart={onDragStart}
+                      onClick={() => onCardTap?.(original)}
+                      onDuplicate={isFlight ? undefined : onDuplicate}
+                      onInsert={isFlight ? undefined : onInsert}
+                      usageCount={usageCount}
+                      isFlight={isFlight}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}
