@@ -26,6 +26,34 @@ import UndoRedoButtons from '@/components/timeline/UndoRedoButtons';
 import type { Trip, Entry, EntryOption, EntryWithOptions, WeatherData } from '@/types/trip';
 import type { ConflictInfo, Recommendation } from '@/lib/conflictEngine';
 
+async function autoExtendTripIfNeeded(
+  tripId: string,
+  entryEndIso: string,
+  trip: Trip,
+  fetchData: () => Promise<void>
+) {
+  const REFERENCE_DATE_STR = '2099-01-01';
+  if (trip.start_date) {
+    // Dated trip: check against end_date
+    const entryDateStr = format(new Date(entryEndIso), 'yyyy-MM-dd');
+    if (!trip.end_date || entryDateStr > trip.end_date) {
+      await supabase.from('trips').update({ end_date: entryDateStr }).eq('id', tripId);
+      toast({ title: `Trip extended to ${format(parseISO(entryDateStr), 'EEE d MMM')}` });
+      await fetchData();
+    }
+  } else {
+    // Undated trip: check against duration_days
+    const refDate = parseISO(REFERENCE_DATE_STR);
+    const entryDate = new Date(entryEndIso);
+    const daysDiff = Math.ceil((entryDate.getTime() - refDate.getTime()) / 86400000) + 1;
+    if (daysDiff > (trip.duration_days ?? 3)) {
+      await supabase.from('trips').update({ duration_days: daysDiff }).eq('id', tripId);
+      toast({ title: `Trip extended to Day ${daysDiff}` });
+      await fetchData();
+    }
+  }
+}
+
 const Timeline = () => {
   const { tripId } = useParams<{ tripId: string }>();
   const { currentUser, isEditor } = useCurrentUser();
@@ -741,6 +769,9 @@ const Timeline = () => {
     }
 
     await fetchData();
+
+    // Auto-extend trip if entry goes past final day
+    if (trip && tripId) await autoExtendTripIfNeeded(tripId, newEndIso, trip, fetchData);
   };
 
   // Handle mode switch confirm from TransportConnector
@@ -1005,6 +1036,9 @@ const Timeline = () => {
     }
 
     await fetchData();
+
+    // Auto-extend trip if entry goes past final day
+    if (trip) await autoExtendTripIfNeeded(tripId!, endIso, trip, fetchData);
 
     // Live travel calculation
     const updatedEntry = { ...entry, start_time: startIso, end_time: endIso, is_scheduled: true };
@@ -1699,7 +1733,20 @@ const Timeline = () => {
               }
             }}
             tripId={trip.id}
-            onSaved={fetchData}
+            onSaved={async () => {
+              await fetchData();
+              // Auto-extend: check latest entry times after save
+              if (trip && tripId) {
+                const { data: latest } = await supabase
+                  .from('entries')
+                  .select('end_time')
+                  .eq('trip_id', tripId)
+                  .order('end_time', { ascending: false })
+                  .limit(1)
+                  .single();
+                if (latest) await autoExtendTripIfNeeded(tripId, latest.end_time, trip, fetchData);
+              }
+            }}
             trip={trip}
             resolvedTz={sheetResolvedTz}
             entry={sheetEntry}
@@ -1773,7 +1820,20 @@ const Timeline = () => {
             onOpenChange={setHotelWizardOpen}
             tripId={trip.id}
             trip={trip}
-            onCreated={fetchData}
+            onCreated={async () => {
+              await fetchData();
+              // Auto-extend: check if hotel checkout goes past trip end
+              if (trip && tripId) {
+                const { data: latest } = await supabase
+                  .from('entries')
+                  .select('end_time')
+                  .eq('trip_id', tripId)
+                  .order('end_time', { ascending: false })
+                  .limit(1)
+                  .single();
+                if (latest) await autoExtendTripIfNeeded(tripId, latest.end_time, trip, fetchData);
+              }
+            }}
             dayTimezoneMap={dayTimezoneMap}
           />
         </>

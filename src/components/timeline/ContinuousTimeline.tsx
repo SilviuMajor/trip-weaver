@@ -555,6 +555,12 @@ const ContinuousTimeline = ({
                       <span className="text-muted-foreground/70">🚩 Trip Begins</span>
                     </>
                   )}
+                  {dayIndex === days.length - 1 && (
+                    <>
+                      <span className="text-muted-foreground/50">·</span>
+                      <span className="text-muted-foreground/70">🏁 Trip Ends</span>
+                    </>
+                  )}
                 </div>
                 {today && (
                   <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">TODAY</span>
