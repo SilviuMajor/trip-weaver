@@ -58,6 +58,7 @@ interface ContinuousTimelineProps {
   isUndated?: boolean;
   onCurrentDayChange?: (dayIndex: number) => void;
   onTrimDay?: (side: 'start' | 'end') => void;
+  onMagnetSnap?: (entryId: string) => Promise<void>;
 }
 
 const ContinuousTimeline = ({
@@ -92,6 +93,7 @@ const ContinuousTimeline = ({
   isUndated,
   onCurrentDayChange,
   onTrimDay,
+  onMagnetSnap,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
@@ -315,6 +317,7 @@ const ContinuousTimeline = ({
   // Locked-entry drag feedback
   const [shakeEntryId, setShakeEntryId] = useState<string | null>(null);
   const [refreshingTransportId, setRefreshingTransportId] = useState<string | null>(null);
+  const [magnetLoadingId, setMagnetLoadingId] = useState<string | null>(null);
   
   const handleLockedAttempt = useCallback((entryId: string) => {
     toast.error('Cannot drag a locked event');
@@ -962,6 +965,30 @@ const ContinuousTimeline = ({
                         onTouchDragMove={onTouchMove}
                         onTouchDragEnd={onTouchEnd}
                         isShaking={shakeEntryId === entry.id}
+                        entryId={entry.id}
+                        onMagnetSnap={onMagnetSnap ? async (id) => {
+                          setMagnetLoadingId(id);
+                          try { await onMagnetSnap(id); } finally { setMagnetLoadingId(null); }
+                        } : undefined}
+                        hasNextEntry={(() => {
+                          const idx = sortedEntries.findIndex(e => e.id === entry.id);
+                          for (let i = idx + 1; i < sortedEntries.length; i++) {
+                            const c = sortedEntries[i];
+                            const co = c.options[0];
+                            if (co?.category !== 'transfer' && co?.category !== 'airport_processing' && !c.linked_flight_id) return true;
+                          }
+                          return false;
+                        })()}
+                        nextEntryLocked={(() => {
+                          const idx = sortedEntries.findIndex(e => e.id === entry.id);
+                          for (let i = idx + 1; i < sortedEntries.length; i++) {
+                            const c = sortedEntries[i];
+                            const co = c.options[0];
+                            if (co?.category !== 'transfer' && co?.category !== 'airport_processing' && !c.linked_flight_id) return c.is_locked;
+                          }
+                          return false;
+                        })()}
+                        magnetLoading={magnetLoadingId === entry.id}
                       />
                       {/* Lock icon outside card — right side */}
                       {isEditor && onToggleLock && (
@@ -1040,7 +1067,7 @@ const ContinuousTimeline = ({
                     );
                   })()}
 
-                  {/* Tiered SNAP system below transport cards */}
+                  {/* "+ Add something" below transport cards */}
                   {isTransport && (() => {
                     let nextVisible = entry.to_entry_id
                       ? sortedEntries.find(e => e.id === entry.to_entry_id)
@@ -1061,96 +1088,23 @@ const ContinuousTimeline = ({
                     const nextStart = new Date(nextVisible.start_time).getTime();
                     const gapMs = nextStart - transportEnd;
                     if (gapMs <= 0) return null;
-                    const gapMin = gapMs / 60000;
-
-                    if (gapMin < 30 && !nextVisible.is_locked) return null;
-
-                    const handleSnapNext = async () => {
-                      if (nextVisible!.is_locked) {
-                        toast.error('This event is locked and cannot be moved');
-                        return;
-                      }
-
-                      const transportEndMs = new Date(entry.end_time).getTime();
-                      const duration = new Date(nextVisible!.end_time).getTime() - new Date(nextVisible!.start_time).getTime();
-                      const fromAddr = primaryOption.departure_location;
-                      const toAddr = primaryOption.arrival_location;
-                      let finalTransportEndMs = transportEndMs;
-
-                      if (fromAddr && toAddr) {
-                        try {
-                          const nameLower = primaryOption.name.toLowerCase();
-                          let currentMode = 'transit';
-                          if (nameLower.startsWith('walk')) currentMode = 'walk';
-                          else if (nameLower.startsWith('drive')) currentMode = 'drive';
-                          else if (nameLower.startsWith('cycle') || nameLower.startsWith('bicycl')) currentMode = 'bicycle';
-
-                          const { data: dirData, error: dirError } = await supabase.functions.invoke('google-directions', {
-                            body: { fromAddress: fromAddr, toAddress: toAddr, mode: currentMode, departureTime: entry.start_time },
-                          });
-
-                          if (!dirError && dirData?.duration_min != null) {
-                            const blockDur = Math.ceil(dirData.duration_min / 5) * 5;
-                            const newTransportEnd = new Date(new Date(entry.start_time).getTime() + blockDur * 60000).toISOString();
-                            finalTransportEndMs = new Date(newTransportEnd).getTime();
-                            await supabase.from('entries').update({ end_time: newTransportEnd }).eq('id', entry.id);
-                            if (dirData.distance_km != null) {
-                              await supabase.from('entry_options').update({ distance_km: dirData.distance_km, route_polyline: dirData.polyline ?? null } as any).eq('id', primaryOption.id);
-                            }
-                          }
-                        } catch (err) {
-                          console.error('Transport recalculation failed:', err);
-                        }
-                      }
-
-                      const newStart = new Date(finalTransportEndMs).toISOString();
-                      const newEnd = new Date(finalTransportEndMs + duration).toISOString();
-                      await supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', nextVisible!.id);
-                      onVoteChange();
-                      toast.success('Snapped next event into place');
-                    };
 
                     const transportEndGH = getEntryGlobalHours(entry).endGH;
                     const nextStartGH = getEntryGlobalHours(nextVisible).startGH;
                     const gapPixelHeight = (nextStartGH - transportEndGH) * PIXELS_PER_HOUR;
                     const BUTTON_HEIGHT = 22;
-                    const BUTTONS_TOTAL = 44;
+                    const addBtnTopOffset = height + Math.max(0, (gapPixelHeight - BUTTON_HEIGHT) / 2);
 
-                    let snapTopOffset: number;
-                    let addBtnTopOffset: number;
-
-                    if (gapMin <= 90) {
-                      const gapMidOffset = height + Math.max(0, (gapPixelHeight - BUTTONS_TOTAL) / 2);
-                      snapTopOffset = gapMidOffset;
-                      addBtnTopOffset = gapMidOffset + BUTTON_HEIGHT;
-                    } else {
-                      snapTopOffset = height + (15 / 60) * PIXELS_PER_HOUR;
-                      const snapBottomPx = snapTopOffset + BUTTON_HEIGHT;
-                      const remainingGap = gapPixelHeight - (snapBottomPx - height);
-                      addBtnTopOffset = snapBottomPx + Math.max(0, (remainingGap - BUTTON_HEIGHT) / 2);
-                    }
-
-                    return (
-                      <>
-                        <button
-                          onClick={handleSnapNext}
-                          className="absolute z-20 left-1/2 -translate-x-1/2 rounded-full bg-green-100 dark:bg-green-900/30 px-3 py-0.5 text-[10px] font-bold text-green-600 dark:text-green-300 border border-green-200 dark:border-green-800/40 hover:bg-green-200 dark:hover:bg-green-800/40 transition-colors"
-                          style={{ top: snapTopOffset }}
-                        >
-                          SNAP
-                        </button>
-                        {onAddBetween && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); onAddBetween(entry.end_time); }}
-                            className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-0.5 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                            style={{ top: addBtnTopOffset }}
-                          >
-                            <Plus className="h-3 w-3" />
-                            <span>+ Add something</span>
-                          </button>
-                        )}
-                      </>
-                    );
+                    return onAddBetween ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onAddBetween(entry.end_time); }}
+                        className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-0.5 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                        style={{ top: addBtnTopOffset }}
+                      >
+                        <Plus className="h-3 w-3" />
+                        <span>+ Add something</span>
+                      </button>
+                    ) : null;
                   })()}
                 </div>
               </div>

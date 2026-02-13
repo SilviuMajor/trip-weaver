@@ -13,6 +13,7 @@ import { useTravelCalculation } from '@/hooks/useTravelCalculation';
 import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { analyzeConflict, generateRecommendations } from '@/lib/conflictEngine';
 import { toast } from '@/hooks/use-toast';
+import { toast as sonnerToast } from 'sonner';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
 import TripNavBar from '@/components/timeline/TripNavBar';
 import ContinuousTimeline from '@/components/timeline/ContinuousTimeline';
@@ -441,6 +442,206 @@ const Timeline = () => {
     return map;
   }, [trip, scheduledEntries, homeTimezone]);
 
+  // ─── Magnet Snap handler ───
+  const handleMagnetSnap = useCallback(async (entryId: string) => {
+    const entry = entries.find(e => e.id === entryId);
+    if (!entry || !tripId) return;
+    const opt = entry.options[0];
+    if (!opt) return;
+
+    // Find sorted scheduled entries
+    const sorted = [...scheduledEntries].sort(
+      (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+    );
+    const entryIdx = sorted.findIndex(e => e.id === entryId);
+
+    // Look for transport and next non-transport event
+    let transportEntry: EntryWithOptions | null = null;
+    let nextEvent: EntryWithOptions | null = null;
+    for (let i = entryIdx + 1; i < sorted.length; i++) {
+      const candidate = sorted[i];
+      const candOpt = candidate.options[0];
+      if (candOpt?.category === 'transfer') {
+        transportEntry = candidate;
+      } else if (candOpt?.category !== 'airport_processing' && !candidate.linked_flight_id) {
+        nextEvent = candidate;
+        break;
+      }
+    }
+
+    if (!nextEvent) return;
+    if (nextEvent.is_locked) {
+      sonnerToast.error('Next event is locked');
+      return;
+    }
+
+    const nextOldStart = nextEvent.start_time;
+    const nextOldEnd = nextEvent.end_time;
+    const nextDuration = new Date(nextOldEnd).getTime() - new Date(nextOldStart).getTime();
+
+    // Case A: Transport exists → snap next event to transport end
+    if (transportEntry) {
+      const transportEndMs = new Date(transportEntry.end_time).getTime();
+      const newStart = new Date(transportEndMs).toISOString();
+      const newEnd = new Date(transportEndMs + nextDuration).toISOString();
+
+      pushAction({
+        description: `Snap ${nextEvent.options[0]?.name || 'event'}`,
+        undo: async () => {
+          await supabase.from('entries').update({ start_time: nextOldStart, end_time: nextOldEnd }).eq('id', nextEvent!.id);
+        },
+        redo: async () => {
+          await supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', nextEvent!.id);
+        },
+      });
+
+      await supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', nextEvent.id);
+      sonnerToast.success('Snapped into place');
+      await fetchData();
+      return;
+    }
+
+    // Case B/C: No transport
+    const fromAddr = opt.address || opt.location_name || opt.arrival_location;
+    const nextOpt = nextEvent.options[0];
+    const toAddr = nextOpt?.address || nextOpt?.location_name || nextOpt?.departure_location;
+
+    if (!fromAddr || !toAddr) {
+      // Case C: No addresses → snap directly
+      const entryEndMs = new Date(entry.end_time).getTime();
+      const newStart = new Date(entryEndMs).toISOString();
+      const newEnd = new Date(entryEndMs + nextDuration).toISOString();
+
+      pushAction({
+        description: `Snap ${nextEvent.options[0]?.name || 'event'}`,
+        undo: async () => {
+          await supabase.from('entries').update({ start_time: nextOldStart, end_time: nextOldEnd }).eq('id', nextEvent!.id);
+        },
+        redo: async () => {
+          await supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', nextEvent!.id);
+        },
+      });
+
+      await supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', nextEvent.id);
+      sonnerToast.success('Snapped into place');
+      await fetchData();
+      return;
+    }
+
+    // Case B: Calculate transport via directions
+    try {
+      const { data: dirData, error: dirError } = await supabase.functions.invoke('google-directions', {
+        body: { fromAddress: fromAddr, toAddress: toAddr, mode: 'walk', departureTime: entry.end_time },
+      });
+
+      if (dirError) throw dirError;
+
+      const durationMin = dirData?.duration_min ?? 15;
+      const blockDur = Math.ceil(durationMin / 5) * 5;
+      const transportStartMs = new Date(entry.end_time).getTime();
+      const transportEndMs = transportStartMs + blockDur * 60000;
+
+      // Create transport entry
+      const { data: newTransport } = await supabase.from('entries').insert({
+        trip_id: entry.trip_id,
+        start_time: new Date(transportStartMs).toISOString(),
+        end_time: new Date(transportEndMs).toISOString(),
+        is_scheduled: true,
+        from_entry_id: entryId,
+        to_entry_id: nextEvent.id,
+      } as any).select().single();
+
+      if (newTransport) {
+        const toShort = toAddr.split(',')[0].trim();
+        await supabase.from('entry_options').insert({
+          entry_id: newTransport.id,
+          name: `Walk to ${toShort}`,
+          category: 'transfer',
+          departure_location: fromAddr,
+          arrival_location: toAddr,
+          distance_km: dirData?.distance_km ?? null,
+          route_polyline: dirData?.polyline ?? null,
+          transport_modes: dirData?.results ? dirData.results : [{ mode: 'walk', duration_min: durationMin, distance_km: dirData?.distance_km ?? 0, polyline: dirData?.polyline ?? null }],
+        } as any);
+      }
+
+      // Snap next event to transport end
+      const newStart = new Date(transportEndMs).toISOString();
+      const newEnd = new Date(transportEndMs + nextDuration).toISOString();
+      await supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', nextEvent.id);
+
+      pushAction({
+        description: `Snap ${nextEvent.options[0]?.name || 'event'} with transport`,
+        undo: async () => {
+          await supabase.from('entries').update({ start_time: nextOldStart, end_time: nextOldEnd }).eq('id', nextEvent!.id);
+          if (newTransport) {
+            await supabase.from('entry_options').delete().eq('entry_id', newTransport.id);
+            await supabase.from('entries').delete().eq('id', newTransport.id);
+          }
+        },
+        redo: async () => {
+          await fetchData();
+        },
+      });
+
+      sonnerToast.success('Transport calculated & snapped');
+      await fetchData();
+    } catch (err) {
+      console.error('Magnet snap failed:', err);
+      sonnerToast.error('Failed to calculate transport');
+    }
+  }, [entries, scheduledEntries, tripId, pushAction, fetchData]);
+
+  // ─── Proximity toast helper ───
+  const checkProximityAndPrompt = useCallback((droppedEntryId: string) => {
+    const sorted = [...scheduledEntries].sort(
+      (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+    );
+    const idx = sorted.findIndex(e => e.id === droppedEntryId);
+    if (idx < 0) return;
+    const dropped = sorted[idx];
+    const droppedOpt = dropped.options[0];
+    if (droppedOpt?.category === 'transfer' || droppedOpt?.category === 'airport_processing') return;
+
+    // Check next non-transport entry
+    for (let i = idx + 1; i < sorted.length; i++) {
+      const c = sorted[i];
+      const co = c.options[0];
+      if (co?.category === 'transfer' || co?.category === 'airport_processing' || c.linked_flight_id) continue;
+      const gapMin = (new Date(c.start_time).getTime() - new Date(dropped.end_time).getTime()) / 60000;
+      if (gapMin >= 0 && gapMin <= 20) {
+        sonnerToast('Generate transport & snap?', {
+          action: {
+            label: 'Yes',
+            onClick: () => handleMagnetSnap(droppedEntryId),
+          },
+          duration: 5000,
+        });
+        return;
+      }
+      break;
+    }
+
+    // Check prev non-transport entry
+    for (let i = idx - 1; i >= 0; i--) {
+      const c = sorted[i];
+      const co = c.options[0];
+      if (co?.category === 'transfer' || co?.category === 'airport_processing' || c.linked_flight_id) continue;
+      const gapMin = (new Date(dropped.start_time).getTime() - new Date(c.end_time).getTime()) / 60000;
+      if (gapMin >= 0 && gapMin <= 20) {
+        sonnerToast('Generate transport & snap?', {
+          action: {
+            label: 'Yes',
+            onClick: () => handleMagnetSnap(c.id),
+          },
+          duration: 5000,
+        });
+        return;
+      }
+      break;
+    }
+  }, [scheduledEntries, handleMagnetSnap]);
+
   // Global refresh: recalculate all transport + weather
   const handleGlobalRefresh = useCallback(async () => {
     if (!tripId || !trip) return;
@@ -820,6 +1021,9 @@ const Timeline = () => {
 
     // Auto-extend trip if entry goes past final day
     if (trip && tripId) await autoExtendTripIfNeeded(tripId, newEndIso, trip, fetchData);
+
+    // Proximity toast for magnet snap suggestion
+    checkProximityAndPrompt(entryId);
   };
 
   // Handle mode switch confirm from TransportConnector
@@ -1087,6 +1291,9 @@ const Timeline = () => {
 
     // Auto-extend trip if entry goes past final day
     if (trip) await autoExtendTripIfNeeded(tripId!, endIso, trip, fetchData);
+
+    // Proximity toast for magnet snap suggestion
+    checkProximityAndPrompt(placedEntryId);
 
     // Live travel calculation
     const updatedEntry = { ...entry, start_time: startIso, end_time: endIso, is_scheduled: true };
@@ -1701,6 +1908,7 @@ const Timeline = () => {
                   isUndated={isUndated}
                   onCurrentDayChange={setCurrentDayIndex}
                   onTrimDay={handleTrimDay}
+                  onMagnetSnap={handleMagnetSnap}
                 />
               </main>
             )}
