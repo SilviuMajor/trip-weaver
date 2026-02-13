@@ -1,4 +1,5 @@
-import { ExternalLink, Navigation } from 'lucide-react';
+import { useState } from 'react';
+import { ExternalLink, Navigation, Car } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -9,20 +10,29 @@ interface RouteMapPreviewProps {
   travelMode: string;
   size?: 'mini' | 'full';
   className?: string;
+  destLat?: number | null;
+  destLng?: number | null;
+  destName?: string | null;
 }
 
 const GOOGLE_MODE_MAP: Record<string, string> = {
   walk: 'walking',
+  walking: 'walking',
   transit: 'transit',
   drive: 'driving',
+  driving: 'driving',
   bicycle: 'bicycling',
+  cycling: 'bicycling',
 };
 
 const APPLE_MODE_MAP: Record<string, string> = {
   walk: 'w',
+  walking: 'w',
   transit: 'r',
   drive: 'd',
-  bicycle: 'w', // Apple Maps doesn't have a cycling mode flag
+  driving: 'd',
+  bicycle: 'w',
+  cycling: 'w',
 };
 
 const RouteMapPreview = ({
@@ -32,21 +42,23 @@ const RouteMapPreview = ({
   travelMode,
   size = 'full',
   className,
+  destLat,
+  destLng,
+  destName,
 }: RouteMapPreviewProps) => {
+  const [imgError, setImgError] = useState(false);
   const isMini = size === 'mini';
   const mapSize = isMini ? '200x80' : '600x200';
 
-  // Use OpenStreetMap static map with polyline - we can't easily draw polylines on OSM static maps,
-  // so we use a simple approach: show a map centered between the two endpoints
-  // For a proper polyline, we'd need to decode it and use a tile-based renderer
-  // Instead, we'll link to Google Maps directions which shows the actual route
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const staticMapUrl = `${supabaseUrl}/functions/v1/static-map?path=${encodeURIComponent(polyline)}&size=${mapSize}`;
+
   const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(fromAddress)}&destination=${encodeURIComponent(toAddress)}&travelmode=${GOOGLE_MODE_MAP[travelMode] ?? 'transit'}`;
   const appleMapsUrl = `https://maps.apple.com/?saddr=${encodeURIComponent(fromAddress)}&daddr=${encodeURIComponent(toAddress)}&dirflg=${APPLE_MODE_MAP[travelMode] ?? 'r'}`;
 
-  // Use a static map image showing the route via Google's directions embed approach
-  // Since we can't use API key client-side, we use the OSM static map as a background 
-  // and overlay a "View Route" CTA
-  const staticMapUrl = `https://staticmap.openstreetmap.de/staticmap.php?size=${mapSize}&maptype=mapnik&path=enc:${encodeURIComponent(polyline)}`;
+  const uberUrl = destLat != null && destLng != null
+    ? `https://m.uber.com/ul/?action=setPickup&pickup[latitude]=my_location&pickup[longitude]=my_location&pickup[nickname]=My%20Location&dropoff[latitude]=${destLat}&dropoff[longitude]=${destLng}&dropoff[nickname]=${encodeURIComponent(destName || 'Destination')}`
+    : null;
 
   if (isMini) {
     return (
@@ -59,35 +71,34 @@ const RouteMapPreview = ({
           className
         )}
       >
-        <img
-          src={staticMapUrl}
-          alt="Route preview"
-          className="h-[40px] w-full object-cover"
-          loading="lazy"
-          onError={(e) => {
-            // Hide if static map fails
-            (e.target as HTMLImageElement).style.display = 'none';
-          }}
-        />
+        {!imgError && (
+          <img
+            src={staticMapUrl}
+            alt="Route preview"
+            className="h-[40px] w-full object-cover"
+            loading="lazy"
+            onError={() => setImgError(true)}
+          />
+        )}
       </a>
     );
   }
 
   return (
     <div className={cn('space-y-2', className)}>
-      <div className="overflow-hidden rounded-lg border border-border">
-        <a href={googleMapsUrl} target="_blank" rel="noopener noreferrer">
-          <img
-            src={staticMapUrl}
-            alt="Route map"
-            className="h-[150px] w-full object-cover transition-opacity hover:opacity-90"
-            loading="lazy"
-            onError={(e) => {
-              (e.target as HTMLImageElement).parentElement!.style.display = 'none';
-            }}
-          />
-        </a>
-      </div>
+      {!imgError && (
+        <div className="overflow-hidden rounded-lg border border-border">
+          <a href={googleMapsUrl} target="_blank" rel="noopener noreferrer">
+            <img
+              src={staticMapUrl}
+              alt="Route map"
+              className="h-[150px] w-full object-cover transition-opacity hover:opacity-90"
+              loading="lazy"
+              onError={() => setImgError(true)}
+            />
+          </a>
+        </div>
+      )}
       <div className="flex gap-2">
         <Button variant="outline" size="sm" className="flex-1 text-xs" asChild>
           <a href={appleMapsUrl} target="_blank" rel="noopener noreferrer">
@@ -101,6 +112,14 @@ const RouteMapPreview = ({
             Google Maps
           </a>
         </Button>
+        {uberUrl && (
+          <Button variant="outline" size="sm" className="flex-1 text-xs" asChild>
+            <a href={uberUrl} target="_blank" rel="noopener noreferrer">
+              <Car className="mr-1 h-3 w-3" />
+              Uber
+            </a>
+          </Button>
+        )}
       </div>
     </div>
   );

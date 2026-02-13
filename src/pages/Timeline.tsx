@@ -750,6 +750,24 @@ const Timeline = () => {
     const entry = entries.find(e => e.id === entryId);
     if (!entry) return;
 
+    const opt = entry.options[0];
+
+    // Capture old state for undo
+    const oldEndTime = entry.end_time;
+    const oldOptName = opt?.name ?? '';
+    const oldDistanceKm = (opt as any)?.distance_km ?? null;
+    const oldPolyline = (opt as any)?.route_polyline ?? null;
+    let oldNextStart: string | null = null;
+    let oldNextEnd: string | null = null;
+
+    if (entry.to_entry_id) {
+      const nextE = entries.find(e => e.id === entry.to_entry_id);
+      if (nextE) {
+        oldNextStart = nextE.start_time;
+        oldNextEnd = nextE.end_time;
+      }
+    }
+
     const blockDur = Math.ceil(newDurationMin / 5) * 5;
     const newEndIso = new Date(new Date(entry.start_time).getTime() + blockDur * 60000).toISOString();
 
@@ -757,7 +775,6 @@ const Timeline = () => {
     await supabase.from('entries').update({ end_time: newEndIso }).eq('id', entryId);
 
     // Update option name, distance, polyline
-    const opt = entry.options[0];
     if (opt) {
       const modeLabels: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', bicycle: 'Cycle' };
       const toShort = (opt.arrival_location || '').split(',')[0].trim();
@@ -781,6 +798,30 @@ const Timeline = () => {
         }).eq('id', nextEntry.id);
       }
     }
+
+    // Push undo action for mode switch
+    pushAction({
+      description: `Switch transport mode to ${mode}`,
+      undo: async () => {
+        await supabase.from('entries').update({ end_time: oldEndTime }).eq('id', entryId);
+        if (opt) {
+          await supabase.from('entry_options').update({
+            name: oldOptName,
+            distance_km: oldDistanceKm,
+            route_polyline: oldPolyline,
+          } as any).eq('id', opt.id);
+        }
+        if (entry.to_entry_id && oldNextStart && oldNextEnd) {
+          await supabase.from('entries').update({
+            start_time: oldNextStart,
+            end_time: oldNextEnd,
+          }).eq('id', entry.to_entry_id);
+        }
+      },
+      redo: async () => {
+        await handleModeSwitchConfirm(entryId, mode, newDurationMin, distanceKm, polyline);
+      },
+    });
 
     await fetchData();
   };

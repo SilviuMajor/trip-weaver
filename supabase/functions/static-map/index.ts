@@ -9,13 +9,14 @@ Deno.serve(async (req) => {
   }
 
   const url = new URL(req.url);
+  const path = url.searchParams.get('path');
   const lat = url.searchParams.get('lat');
   const lng = url.searchParams.get('lng');
   const zoom = url.searchParams.get('zoom') || '15';
   const size = url.searchParams.get('size') || '600x200';
 
-  if (!lat || !lng) {
-    return new Response(JSON.stringify({ error: 'lat and lng are required' }), {
+  if (!path && (!lat || !lng)) {
+    return new Response(JSON.stringify({ error: 'lat and lng are required when path is not provided' }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -29,7 +30,12 @@ Deno.serve(async (req) => {
     });
   }
 
-  const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${zoom}&size=${size}&markers=color:red%7C${lat},${lng}&key=${apiKey}`;
+  let mapUrl: string;
+  if (path) {
+    mapUrl = `https://maps.googleapis.com/maps/api/staticmap?size=${size}&path=weight:4|color:0x4285F4ff|enc:${path}&key=${apiKey}`;
+  } else {
+    mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${zoom}&size=${size}&markers=color:red%7C${lat},${lng}&key=${apiKey}`;
+  }
 
   const mapRes = await fetch(mapUrl);
   if (!mapRes.ok) {
