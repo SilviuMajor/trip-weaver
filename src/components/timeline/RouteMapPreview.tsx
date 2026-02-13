@@ -112,15 +112,14 @@ const RouteMapPreview = ({
             Google Maps
           </a>
         </Button>
-        {uberUrl && (
-          <Button variant="outline" size="sm" className="flex-1 text-xs" asChild>
-            <a href={uberUrl} target="_blank" rel="noopener noreferrer">
-              <Car className="mr-1 h-3 w-3" />
-              Uber
-            </a>
-          </Button>
-        )}
       </div>
+      {uberUrl && (
+        <Button size="sm" className="w-full text-xs bg-black text-white hover:bg-black/90" asChild>
+          <a href={uberUrl} target="_blank" rel="noopener noreferrer">
+            <Car className="mr-1 h-3 w-3" /> Book with Uber
+          </a>
+        </Button>
+      )}
     </div>
   );
 };

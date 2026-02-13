@@ -17,7 +17,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import AIRPORTS from '@/lib/airports';
-import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, AlertTriangle, RefreshCw, Phone, ChevronDown, MapPin as MapPinIcon } from 'lucide-react';
+import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, AlertTriangle, RefreshCw, Phone, ChevronDown, MapPin as MapPinIcon, Car } from 'lucide-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import PhotoStripPicker from './PhotoStripPicker';
@@ -1371,10 +1371,12 @@ const EntrySheet = ({
                   const m = totalMin % 60;
                   const durationStr = h > 0 ? `${h}h ${m > 0 ? `${m}m` : ''}` : `${m}m`;
 
-                  // Contingency: block is rounded to 5min, real is < block
-                  const blockDur = totalMin;
-                  const realDur = Math.floor(blockDur / 5) * 5 === blockDur ? blockDur : blockDur;
-                  const contingency = blockDur % 5 === 0 && blockDur > 0 ? blockDur - (blockDur - (blockDur % 5 || 5)) : 0;
+                  // Contingency: block is rounded up to nearest 5min, difference is buffer
+                  const selectedModeData = viewResults.find(r => r.mode === viewSelectedMode)
+                    || ((option as any).transport_modes || []).find((m: any) => m.mode === viewSelectedMode);
+                  const rawDuration = selectedModeData?.duration_min ?? totalMin;
+                  const blockDur = Math.ceil(rawDuration / 5) * 5;
+                  const contingency = blockDur - rawDuration;
 
                   return (
                     <div className="space-y-4">
@@ -1405,7 +1407,7 @@ const EntrySheet = ({
                           </span>
                         )}
                         {contingency > 0 && (
-                          <span className="text-xs text-muted-foreground">+{contingency}m contingency</span>
+                          <span className="text-xs text-muted-foreground">⏱ {rawDuration}m + {contingency}m buffer = {blockDur}m</span>
                         )}
                       </div>
 
@@ -1611,6 +1613,20 @@ const EntrySheet = ({
                   </a>
                 )}
               </div>
+            )}
+
+            {/* Uber button for regular events */}
+            {option.category !== 'transfer' && option.category !== 'flight' && option.latitude != null && option.longitude != null && (
+              <Button size="sm" className="w-full text-xs bg-black text-white hover:bg-black/90" asChild>
+                <a
+                  href={`https://m.uber.com/ul/?action=setPickup&pickup[latitude]=my_location&pickup[longitude]=my_location&pickup[nickname]=My%20Location&dropoff[latitude]=${option.latitude}&dropoff[longitude]=${option.longitude}&dropoff[nickname]=${encodeURIComponent((option.location_name || option.name || 'Destination').split(',')[0].trim())}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Car className="mr-1 h-3 w-3" /> Book Uber to here
+                </a>
+              </Button>
             )}
 
             {/* Vote (hidden for transport & flights) */}
