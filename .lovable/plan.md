@@ -1,67 +1,72 @@
 
 
-# Fix Double Uber Buttons + Hotel Card Height
+# Fix Hotel Cards, Wizard Inputs, Timeline Labels, and Planner Drag
 
-## Bug B1: Remove duplicate map links in EntrySheet
+## Fix 1: Revert hotel card sizing changes in EntryCard.tsx
 
-### Changes to `src/components/timeline/EntrySheet.tsx`
+The previous change added a special compact variant for hotel utility blocks in the condensed layout (lines 522-575). This will be removed entirely so hotel check-in/checkout cards render identically to all other event cards.
 
-**a) Remove standalone "Open in Google Maps" link (lines 1653-1663)**
-
-Delete the `{(option as any).google_maps_uri && ...}` block that renders the `<a>` with MapPinIcon text link. MapPreview already has a Google Maps button.
-
-**b) Remove standalone Uber button (lines 1667-1679)**
-
-Delete the entire `{option.category !== 'transfer' && ...}` block that renders the black Uber `<Button>`. MapPreview already provides an Uber button.
-
-### Changes to `src/components/timeline/MapPreview.tsx`
-
-**c) Style the Uber button with black/white branding**
-
-Change the Uber button from `variant="outline"` to include `bg-black text-white hover:bg-black/90 border-black` classes.
-
-**d) Change button layout to two rows**
-
-Wrap Apple Maps and Google Maps in a `flex gap-2` row (side by side, half width each), then put Uber on its own full-width row below:
-
-```
-<div className="space-y-2">
-  <div className="flex gap-2">
-    <!-- Apple Maps (flex-1) -->
-    <!-- Google Maps (flex-1) -->
-  </div>
-  <!-- Uber (full width, black bg) -->
-</div>
-```
-
-**e) RouteMapPreview verification**
-
-RouteMapPreview is only used inside EntryCard for transport entries and inside EntrySheet for transport overviews. MapPreview is used for non-transport entries. These don't overlap -- no changes needed to RouteMapPreview.
+**What changes:**
+- Remove the `isHotelUtilityBlock` variable declaration (line 522)
+- Remove the entire `if (isHotelUtilityBlock)` block inside `if (isCondensed)` (lines 526-575)
+- Hotel cards will now use the same condensed layout as every other event card
 
 ---
 
-## Bug B2: Hotel check-in/checkout cards too tall
+## Fix 2: Compact inputs in HotelWizard Step 2
 
-### Root cause
+The date and time inputs on Step 2 (lines 722-778) use the default `Input` component which has `h-10` height. Add a className to reduce their height.
 
-`PIXELS_PER_HOUR = 80` means a 1-hour check-in = 80px, which triggers the "condensed" layout (80-160px range). This layout includes category badge, title, time range, duration, distance, rating, and vote button -- quite a lot of content for a simple hotel check-in.
+**What changes:**
+- Add `className="h-8"` to all four `<Input>` fields in Step 2 (check-in date, check-in time, checkout date, checkout time)
+- This matches compact input styling used elsewhere without changing the 2-column grid layout
 
-### Changes to `src/components/timeline/EntryCard.tsx`
+---
 
-In the condensed layout section (starting around line 522), add a check: if the option name starts with "Check in ·" or "Check out ·", render a simplified/compact variant:
+## Fix 3: CHECK-IN and CHECKOUT aesthetic labels on timeline cards
 
-- Skip the category badge row
-- Use smaller font for the name (text-xs instead of text-sm)
-- Skip rating/distance/vote displays
-- Reduce vertical padding (py-1 instead of py-1.5)
-- This makes these specific hotel utility blocks visually lighter while still being proportional to their duration
+Add small uppercase text badges to hotel utility blocks. These are purely decorative, not interactive.
 
-The check:
-```tsx
-const isHotelUtilityBlock = option.name?.startsWith('Check in ·') || option.name?.startsWith('Check out ·');
+**What changes in EntryCard.tsx:**
+
+Detect hotel utility blocks using the existing name-based check:
+- Check-in: `option.name?.startsWith('Check in ·')`
+- Checkout: `option.name?.startsWith('Check out ·')` or `linkedType === 'checkout'`
+
+For the **condensed layout** (the one that now renders identically to other cards after Fix 1): add a small "CHECK-IN" or "CHECKOUT" text label next to the category badge row.
+
+For the **full-size layout**: same approach -- add the label in the top badge area.
+
+Badge styling: `text-[8px] uppercase tracking-wider font-semibold text-muted-foreground` (or `text-white/60` over images). Not a colored badge, just small muted text.
+
+- CHECK-IN label appears at the **top** of the card, next to the category badge
+- CHECKOUT label appears at the **bottom** of the card, near the time/duration row
+
+This applies to all card size variants (condensed and full), but NOT compact or medium (too small for labels).
+
+---
+
+## Fix 4: Planner sidebar representative selection for hotels
+
+Currently, `CategorySidebar.tsx` groups hotel entries by `hotel_id` and uses `deduplicatedMap` which picks the earliest-created entry as the representative. Since check-in blocks are created first in HotelWizard, the check-in block becomes the representative.
+
+**What changes in CategorySidebar.tsx:**
+
+In `getFilteredOriginals`, when building hotel groups, prefer an overnight block (one whose name does NOT start with "Check in" or "Check out") as the representative. If no overnight block exists, fall back to whatever is available.
+
+Implementation: Instead of relying on `deduplicatedMap` for hotel entries, find the best representative from the raw entries:
+
+```
+// For hotel groups, prefer an overnight block as representative
+const hotelEntries = catEntries.filter(e => e.options[0]?.hotel_id === hotelId);
+const overnight = hotelEntries.find(e => {
+  const name = e.options[0]?.name ?? '';
+  return !name.startsWith('Check in ·') && !name.startsWith('Check out ·');
+});
+const representative = overnight ?? hotelEntries[0];
 ```
 
-If `isCondensed && isHotelUtilityBlock`, render a minimal card with just the emoji + name + time range, similar to the `isMedium` layout but fitting the condensed height.
+This ensures the sidebar card shows the hotel name (not "Check in - Hotel Name"), the hotel image, and when dragged creates a normal hotel block.
 
 ---
 
@@ -69,14 +74,13 @@ If `isCondensed && isHotelUtilityBlock`, render a minimal card with just the emo
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/EntrySheet.tsx` | Remove standalone Google Maps link and Uber button (lines 1653-1679) |
-| `src/components/timeline/MapPreview.tsx` | Uber button black styling, two-row layout |
-| `src/components/timeline/EntryCard.tsx` | Compact rendering for hotel check-in/checkout blocks in condensed layout |
+| `src/components/timeline/EntryCard.tsx` | Revert hotel utility block sizing; add CHECK-IN/CHECKOUT aesthetic labels |
+| `src/components/timeline/HotelWizard.tsx` | Add `className="h-8"` to Step 2 date/time inputs |
+| `src/components/timeline/CategorySidebar.tsx` | Prefer overnight block as hotel representative in sidebar |
 
 ## What Does NOT Change
 
-- RouteMapPreview.tsx (transport maps -- already correct)
-- HotelWizard, flight systems, transport connectors
-- Timeline rendering logic (PIXELS_PER_HOUR, height calculations)
-- ContinuousTimeline.tsx
-
+- MapPreview / Uber button fixes from previous prompt
+- Hotel wizard steps other than Step 2 field sizing
+- Transport, flight, timeline rendering systems
+- RouteMapPreview
