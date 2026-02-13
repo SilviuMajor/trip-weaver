@@ -113,7 +113,7 @@ const RouteMapPreview = ({
           </a>
         </Button>
         {uberUrl && (
-          <Button variant="outline" size="sm" className="flex-1 text-xs" asChild>
+          <Button variant="outline" size="sm" className="flex-1 text-xs bg-black text-white hover:bg-black/90 border-black" asChild>
             <a href={uberUrl} target="_blank" rel="noopener noreferrer">
               <Car className="mr-1 h-3 w-3" />
               Uber

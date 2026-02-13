@@ -1643,7 +1643,7 @@ const EntrySheet = ({
 
             {/* Uber button for regular events */}
             {option.category !== 'transfer' && option.category !== 'flight' && option.latitude != null && option.longitude != null && (
-              <Button variant="outline" size="sm" className="w-full text-xs" asChild>
+              <Button variant="outline" size="sm" className="w-full text-xs bg-black text-white hover:bg-black/90 border-black" asChild>
                 <a
                   href={`https://m.uber.com/ul/?action=setPickup&pickup[latitude]=my_location&pickup[longitude]=my_location&pickup[nickname]=My%20Location&dropoff[latitude]=${option.latitude}&dropoff[longitude]=${option.longitude}&dropoff[nickname]=${encodeURIComponent((option.location_name || option.name || 'Destination').split(',')[0].trim())}`}
                   target="_blank"
