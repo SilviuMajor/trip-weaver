@@ -176,10 +176,10 @@ const TransportConnector = ({
               }}
               className={cn(
                 'flex flex-col items-center rounded-md px-1.5 py-0.5 transition-all',
-                !isSelected && 'opacity-50 hover:opacity-80',
+                !isSelected && 'opacity-50 active:opacity-80',
                 !modeData && 'opacity-20 pointer-events-none'
               )}
-              style={isSelected ? { boxShadow: isDark ? '0 0 0 1px rgba(255,255,255,0.15), 0 1px 2px rgba(0,0,0,0.15)' : '0 0 0 1px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08)', transform: 'scale(1.05)' } : undefined}
+              style={{ touchAction: 'manipulation', ...(isSelected ? { boxShadow: isDark ? '0 0 0 1px rgba(255,255,255,0.15), 0 1px 2px rgba(0,0,0,0.15)' : '0 0 0 1px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08)', transform: 'scale(1.05)' } : undefined) }}
             >
               <span className={cn('leading-none', isSelected ? 'text-base' : 'text-sm')}>
                 {emoji}
