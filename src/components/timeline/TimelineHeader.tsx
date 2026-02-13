@@ -21,7 +21,7 @@ const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderP
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-lg">
+    <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-lg will-change-transform">
       <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
         {/* Left: Trip info */}
         <div className="flex items-center gap-2 min-w-0 flex-1">
