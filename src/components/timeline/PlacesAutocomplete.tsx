@@ -7,8 +7,16 @@ export interface PlaceDetails {
   name: string;
   address: string;
   website: string | null;
+  phone: string | null;
   lat: number | null;
   lng: number | null;
+  rating: number | null;
+  userRatingCount: number | null;
+  openingHours: string[] | null;
+  googleMapsUri: string | null;
+  placeId: string | null;
+  priceLevel: string | null;
+  placeTypes: string[] | null;
   photos: string[];
 }
 
@@ -80,8 +88,16 @@ const PlacesAutocomplete = ({ value, onChange, onPlaceSelect, placeholder, tripL
           name: data.name,
           address: data.address,
           website: data.website,
+          phone: data.phone ?? null,
           lat: data.lat,
           lng: data.lng,
+          rating: data.rating ?? null,
+          userRatingCount: data.userRatingCount ?? null,
+          openingHours: data.openingHours ?? null,
+          googleMapsUri: data.googleMapsUri ?? null,
+          placeId: prediction.place_id,
+          priceLevel: data.priceLevel ?? null,
+          placeTypes: data.placeTypes ?? null,
           photos: data.photos ?? [],
         });
       }

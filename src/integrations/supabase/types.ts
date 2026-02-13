@@ -106,6 +106,7 @@ export type Database = {
       }
       entry_options: {
         Row: {
+          address: string | null
           airport_checkin_hours: number | null
           airport_checkout_min: number | null
           arrival_location: string | null
@@ -119,17 +120,25 @@ export type Database = {
           departure_tz: string | null
           distance_km: number | null
           entry_id: string
+          google_maps_uri: string | null
+          google_place_id: string | null
           id: string
           latitude: number | null
           location_name: string | null
           longitude: number | null
           name: string
+          opening_hours: Json | null
+          phone: string | null
+          price_level: string | null
+          rating: number | null
           route_polyline: string | null
           transport_modes: Json | null
           updated_at: string
+          user_rating_count: number | null
           website: string | null
         }
         Insert: {
+          address?: string | null
           airport_checkin_hours?: number | null
           airport_checkout_min?: number | null
           arrival_location?: string | null
@@ -143,17 +152,25 @@ export type Database = {
           departure_tz?: string | null
           distance_km?: number | null
           entry_id: string
+          google_maps_uri?: string | null
+          google_place_id?: string | null
           id?: string
           latitude?: number | null
           location_name?: string | null
           longitude?: number | null
           name: string
+          opening_hours?: Json | null
+          phone?: string | null
+          price_level?: string | null
+          rating?: number | null
           route_polyline?: string | null
           transport_modes?: Json | null
           updated_at?: string
+          user_rating_count?: number | null
           website?: string | null
         }
         Update: {
+          address?: string | null
           airport_checkin_hours?: number | null
           airport_checkout_min?: number | null
           arrival_location?: string | null
@@ -167,14 +184,21 @@ export type Database = {
           departure_tz?: string | null
           distance_km?: number | null
           entry_id?: string
+          google_maps_uri?: string | null
+          google_place_id?: string | null
           id?: string
           latitude?: number | null
           location_name?: string | null
           longitude?: number | null
           name?: string
+          opening_hours?: Json | null
+          phone?: string | null
+          price_level?: string | null
+          rating?: number | null
           route_polyline?: string | null
           transport_modes?: Json | null
           updated_at?: string
+          user_rating_count?: number | null
           website?: string | null
         }
         Relationships: [

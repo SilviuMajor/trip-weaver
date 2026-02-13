@@ -17,7 +17,8 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import AIRPORTS from '@/lib/airports';
-import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, AlertTriangle, RefreshCw, Phone, ChevronDown, MapPin as MapPinIcon } from 'lucide-react';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import PhotoStripPicker from './PhotoStripPicker';
 import ImageGallery from './ImageGallery';
@@ -92,6 +93,95 @@ const InlineField = ({ value, canEdit, onSave, renderDisplay, renderInput, class
     >
       {shown}
       {canEdit && <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />}
+    </div>
+  );
+};
+
+// ─── Price Level Helper ───
+const formatPriceLevel = (level: string | null): string | null => {
+  if (!level) return null;
+  const map: Record<string, string> = {
+    PRICE_LEVEL_FREE: 'Free',
+    PRICE_LEVEL_INEXPENSIVE: '💰',
+    PRICE_LEVEL_MODERATE: '💰💰',
+    PRICE_LEVEL_EXPENSIVE: '💰💰💰',
+    PRICE_LEVEL_VERY_EXPENSIVE: '💰💰💰💰',
+  };
+  return map[level] ?? null;
+};
+
+// ─── Opening Hours Helper ───
+const getTodayHours = (hours: string[] | null): string | null => {
+  if (!hours || hours.length === 0) return null;
+  // JS: 0=Sun, Google array: 0=Mon
+  const jsDay = new Date().getDay();
+  const googleIndex = jsDay === 0 ? 6 : jsDay - 1;
+  return hours[googleIndex] ?? null;
+};
+
+// ─── Place Details Section (view mode) ───
+const PlaceDetailsSection = ({ option }: { option: EntryOption }) => {
+  const rating = (option as any).rating as number | null;
+  const userRatingCount = (option as any).user_rating_count as number | null;
+  const phone = (option as any).phone as string | null;
+  const openingHours = (option as any).opening_hours as string[] | null;
+  const priceLevel = (option as any).price_level as string | null;
+  const [hoursOpen, setHoursOpen] = useState(false);
+
+  const hasAnyData = rating != null || phone || (openingHours && openingHours.length > 0) || priceLevel;
+  if (!hasAnyData) return null;
+
+  const priceLevelDisplay = formatPriceLevel(priceLevel);
+  const todayHours = getTodayHours(openingHours);
+
+  return (
+    <div className="space-y-2">
+      {/* Rating + Price level */}
+      {(rating != null || priceLevelDisplay) && (
+        <div className="flex items-center gap-2 text-sm">
+          {rating != null && (
+            <span className="font-medium">
+              ⭐ {rating}
+              {userRatingCount != null && (
+                <span className="text-muted-foreground font-normal"> ({userRatingCount.toLocaleString()} reviews)</span>
+              )}
+            </span>
+          )}
+          {priceLevelDisplay && (
+            <span className="text-sm">{priceLevelDisplay}</span>
+          )}
+        </div>
+      )}
+
+      {/* Phone */}
+      {phone && (
+        <a
+          href={`tel:${phone}`}
+          className="flex items-center gap-1.5 text-sm text-primary hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Phone className="h-3.5 w-3.5" />
+          {phone}
+        </a>
+      )}
+
+      {/* Opening Hours */}
+      {openingHours && openingHours.length > 0 && (
+        <Collapsible open={hoursOpen} onOpenChange={setHoursOpen}>
+          <CollapsibleTrigger className="flex items-center gap-1.5 text-sm text-foreground hover:text-primary transition-colors w-full text-left">
+            <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="flex-1 truncate text-muted-foreground">
+              {todayHours || 'Opening hours'}
+            </span>
+            <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', hoursOpen && 'rotate-180')} />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-1.5 pl-5 space-y-0.5">
+            {openingHours.map((day, i) => (
+              <p key={i} className="text-xs text-muted-foreground">{day}</p>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
     </div>
   );
 };
@@ -217,6 +307,14 @@ const EntrySheet = ({
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
   const [autoPhotos, setAutoPhotos] = useState<string[]>([]);
+  const [placePhone, setPlacePhone] = useState<string | null>(null);
+  const [placeAddress, setPlaceAddress] = useState<string | null>(null);
+  const [placeRating, setPlaceRating] = useState<number | null>(null);
+  const [placeUserRatingCount, setPlaceUserRatingCount] = useState<number | null>(null);
+  const [placeOpeningHours, setPlaceOpeningHours] = useState<string[] | null>(null);
+  const [placeGoogleMapsUri, setPlaceGoogleMapsUri] = useState<string | null>(null);
+  const [placeGooglePlaceId, setPlaceGooglePlaceId] = useState<string | null>(null);
+  const [placePriceLevel, setPlacePriceLevel] = useState<string | null>(null);
 
   const [departureLocation, setDepartureLocation] = useState('');
   const [arrivalLocation, setArrivalLocation] = useState('');
@@ -300,6 +398,14 @@ const EntrySheet = ({
           setTransferFrom(editOption.departure_location ?? '');
           setTransferTo(editOption.arrival_location ?? '');
         }
+        setPlacePhone((editOption as any).phone ?? null);
+        setPlaceAddress((editOption as any).address ?? null);
+        setPlaceRating((editOption as any).rating ?? null);
+        setPlaceUserRatingCount((editOption as any).user_rating_count ?? null);
+        setPlaceOpeningHours((editOption as any).opening_hours ?? null);
+        setPlaceGoogleMapsUri((editOption as any).google_maps_uri ?? null);
+        setPlaceGooglePlaceId((editOption as any).google_place_id ?? null);
+        setPlacePriceLevel((editOption as any).price_level ?? null);
         setStep('details');
       }
     }
@@ -371,6 +477,14 @@ const EntrySheet = ({
     setLatitude(details.lat);
     setLongitude(details.lng);
     if (details.photos.length > 0) setAutoPhotos(details.photos);
+    setPlacePhone(details.phone);
+    setPlaceAddress(details.address || null);
+    setPlaceRating(details.rating);
+    setPlaceUserRatingCount(details.userRatingCount);
+    setPlaceOpeningHours(details.openingHours);
+    setPlaceGoogleMapsUri(details.googleMapsUri);
+    setPlaceGooglePlaceId(details.placeId);
+    setPlacePriceLevel(details.priceLevel);
   };
 
   const reset = () => {
@@ -409,6 +523,14 @@ const EntrySheet = ({
     setFlightParseLoading(false);
     setDeleting(false);
     setToggling(false);
+    setPlacePhone(null);
+    setPlaceAddress(null);
+    setPlaceRating(null);
+    setPlaceUserRatingCount(null);
+    setPlaceOpeningHours(null);
+    setPlaceGoogleMapsUri(null);
+    setPlaceGooglePlaceId(null);
+    setPlacePriceLevel(null);
   };
 
   // Transport gap auto-fill
@@ -737,6 +859,14 @@ const EntrySheet = ({
         route_polyline: isTransfer ? (selectedPolyline || null) : null,
         distance_km: isTransfer ? (transportResults.find(r => r.mode === transferMode)?.distance_km ?? null) : null,
         transport_modes: isTransfer && transportResults.length > 0 ? transportResults : null,
+        phone: placePhone,
+        address: placeAddress,
+        rating: placeRating,
+        user_rating_count: placeUserRatingCount,
+        opening_hours: placeOpeningHours,
+        google_maps_uri: placeGoogleMapsUri,
+        google_place_id: placeGooglePlaceId,
+        price_level: placePriceLevel,
       };
 
       let optionId: string | null = null;
@@ -1398,6 +1528,11 @@ const EntrySheet = ({
               </p>
             )}
 
+            {/* Enriched Place Details (non-flight, non-transport) */}
+            {option.category !== 'flight' && option.category !== 'transfer' && (
+              <PlaceDetailsSection option={option} />
+            )}
+
             {/* Website (hidden for transport) */}
             {option.category !== 'transfer' && option.category !== 'flight' && (option.website || isEditor) && (
               <InlineField
@@ -1435,9 +1570,22 @@ const EntrySheet = ({
               </div>
             ) : null}
 
-            {/* Map */}
+            {/* Map + Google Maps link */}
             {option.latitude != null && option.longitude != null && (
-              <MapPreview latitude={option.latitude} longitude={option.longitude} locationName={option.location_name} />
+              <div className="space-y-2">
+                <MapPreview latitude={option.latitude} longitude={option.longitude} locationName={option.location_name} />
+                {(option as any).google_maps_uri && (
+                  <a
+                    href={(option as any).google_maps_uri}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MapPinIcon className="h-3 w-3" /> Open in Google Maps
+                  </a>
+                )}
+              </div>
             )}
 
             {/* Vote (hidden for transport & flights) */}
