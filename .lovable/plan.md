@@ -1,37 +1,82 @@
 
 
-# Remove Dead/Defunct Code
+# Fix Double Uber Buttons + Hotel Card Height
 
-## Changes
+## Bug B1: Remove duplicate map links in EntrySheet
 
-### 1. Delete files
-- `src/components/timeline/TravelSegmentCard.tsx`
-- `src/pages/StyleShowcase.tsx`
-- `src/components/timeline/CalendarDay.tsx`
+### Changes to `src/components/timeline/EntrySheet.tsx`
 
-### 2. `src/components/timeline/ContinuousTimeline.tsx`
-- Remove line 12: `import TravelSegmentCard from './TravelSegmentCard';`
-- Remove `travelSegments: TravelSegment[]` from the props interface (line 42)
-- Remove `travelSegments,` from the destructured props (line 75)
-- Remove `TravelSegment` from the type import on line 4 (if no longer used elsewhere in the file)
+**a) Remove standalone "Open in Google Maps" link (lines 1653-1663)**
 
-### 3. `src/pages/Timeline.tsx`
-- Remove `const [travelSegments, setTravelSegments] = useState<TravelSegment[]>([]);` (line 38)
-- Remove `supabase.from('travel_segments').select('*').eq('trip_id', tripId)` from the Promise.all (line 123), and remove `setTravelSegments(...)` (line 127). Adjust the destructuring accordingly.
-- Remove `travelSegments={travelSegments}` prop on ContinuousTimeline (line 1595)
-- Remove `TravelSegment` from the type import if no longer used
+Delete the `{(option as any).google_maps_uri && ...}` block that renders the `<a>` with MapPinIcon text link. MapPreview already has a Google Maps button.
 
-### 4. `src/App.tsx`
-- Remove line 13: `import StyleShowcase from "./pages/StyleShowcase";`
-- Remove line 35: `<Route path="/styles" element={<StyleShowcase />} />`
+**b) Remove standalone Uber button (lines 1667-1679)**
 
-## What does NOT change
-- Database tables/migrations (travel_segments table stays)
-- OptionSwiper, VoteButton, LivePanel, Live, UserSelect
-- All other timeline components
+Delete the entire `{option.category !== 'transfer' && ...}` block that renders the black Uber `<Button>`. MapPreview already provides an Uber button.
 
-## Test expectations
-- App builds without errors
-- Timeline renders correctly
-- No `/styles` route
-- No console errors for removed components
+### Changes to `src/components/timeline/MapPreview.tsx`
+
+**c) Style the Uber button with black/white branding**
+
+Change the Uber button from `variant="outline"` to include `bg-black text-white hover:bg-black/90 border-black` classes.
+
+**d) Change button layout to two rows**
+
+Wrap Apple Maps and Google Maps in a `flex gap-2` row (side by side, half width each), then put Uber on its own full-width row below:
+
+```
+<div className="space-y-2">
+  <div className="flex gap-2">
+    <!-- Apple Maps (flex-1) -->
+    <!-- Google Maps (flex-1) -->
+  </div>
+  <!-- Uber (full width, black bg) -->
+</div>
+```
+
+**e) RouteMapPreview verification**
+
+RouteMapPreview is only used inside EntryCard for transport entries and inside EntrySheet for transport overviews. MapPreview is used for non-transport entries. These don't overlap -- no changes needed to RouteMapPreview.
+
+---
+
+## Bug B2: Hotel check-in/checkout cards too tall
+
+### Root cause
+
+`PIXELS_PER_HOUR = 80` means a 1-hour check-in = 80px, which triggers the "condensed" layout (80-160px range). This layout includes category badge, title, time range, duration, distance, rating, and vote button -- quite a lot of content for a simple hotel check-in.
+
+### Changes to `src/components/timeline/EntryCard.tsx`
+
+In the condensed layout section (starting around line 522), add a check: if the option name starts with "Check in ·" or "Check out ·", render a simplified/compact variant:
+
+- Skip the category badge row
+- Use smaller font for the name (text-xs instead of text-sm)
+- Skip rating/distance/vote displays
+- Reduce vertical padding (py-1 instead of py-1.5)
+- This makes these specific hotel utility blocks visually lighter while still being proportional to their duration
+
+The check:
+```tsx
+const isHotelUtilityBlock = option.name?.startsWith('Check in ·') || option.name?.startsWith('Check out ·');
+```
+
+If `isCondensed && isHotelUtilityBlock`, render a minimal card with just the emoji + name + time range, similar to the `isMedium` layout but fitting the condensed height.
+
+---
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `src/components/timeline/EntrySheet.tsx` | Remove standalone Google Maps link and Uber button (lines 1653-1679) |
+| `src/components/timeline/MapPreview.tsx` | Uber button black styling, two-row layout |
+| `src/components/timeline/EntryCard.tsx` | Compact rendering for hotel check-in/checkout blocks in condensed layout |
+
+## What Does NOT Change
+
+- RouteMapPreview.tsx (transport maps -- already correct)
+- HotelWizard, flight systems, transport connectors
+- Timeline rendering logic (PIXELS_PER_HOUR, height calculations)
+- ContinuousTimeline.tsx
+
