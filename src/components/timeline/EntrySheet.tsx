@@ -289,6 +289,8 @@ const EntrySheet = ({
 
   // ─── View mode state ───
   const [deleting, setDeleting] = useState(false);
+  const [hotelBlockCount, setHotelBlockCount] = useState(0);
+  const [hotelBlockEntryIds, setHotelBlockEntryIds] = useState<string[]>([]);
   const [toggling, setToggling] = useState(false);
   const [viewRefreshing, setViewRefreshing] = useState(false);
   const [viewResults, setViewResults] = useState<TransportResult[]>([]);
@@ -304,6 +306,21 @@ const EntrySheet = ({
       setNotesDirty(false);
     }
   }, [mode, entry]);
+
+  // Fetch hotel block count when delete dialog opens for a hotel entry
+  useEffect(() => {
+    if (deleting && option?.hotel_id) {
+      (async () => {
+        const { data } = await supabase
+          .from('entry_options')
+          .select('entry_id')
+          .eq('hotel_id', option.hotel_id);
+        const ids = data?.map(d => d.entry_id) ?? [];
+        setHotelBlockEntryIds(ids);
+        setHotelBlockCount(ids.length);
+      })();
+    }
+  }, [deleting, option?.hotel_id]);
 
   // Part 2: Preload transport modes from stored data on open
   useEffect(() => {
@@ -1696,31 +1713,90 @@ const EntrySheet = ({
             )}
 
             {/* Delete confirmation */}
-            <AlertDialog open={deleting} onOpenChange={setDeleting}>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
-                  <AlertDialogDescription>This will permanently delete the entry and all its options. This action cannot be undone.</AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    onClick={async () => {
-                      try {
-                        const { error } = await supabase.from('entries').delete().eq('id', entry.id);
-                        if (error) throw error;
-                        toast({ title: 'Entry deleted' });
-                        onOpenChange(false);
-                        onSaved();
-                      } catch (err: any) {
-                        toast({ title: 'Failed to delete', description: err.message, variant: 'destructive' });
-                      } finally { setDeleting(false); }
-                    }}
-                  >Delete</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+            {option?.hotel_id ? (
+              <AlertDialog open={deleting} onOpenChange={setDeleting}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete hotel block</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Do you want to delete just this block, or all blocks for {option.name}?
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <div className="flex flex-col gap-2 pt-2">
+                    <Button
+                      variant="destructive"
+                      className="w-full"
+                      onClick={async () => {
+                        try {
+                          if (hotelBlockEntryIds.length > 0) {
+                            const { error } = await supabase.from('entries').delete().in('id', hotelBlockEntryIds);
+                            if (error) throw error;
+                          }
+                          await supabase.from('hotels').delete().eq('id', option.hotel_id!);
+                          toast({ title: 'All hotel blocks deleted' });
+                          onOpenChange(false);
+                          onSaved();
+                        } catch (err: any) {
+                          toast({ title: 'Failed to delete', description: err.message, variant: 'destructive' });
+                        } finally { setDeleting(false); }
+                      }}
+                    >
+                      Delete All — {hotelBlockCount} blocks
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={async () => {
+                        try {
+                          const { error } = await supabase.from('entries').delete().eq('id', entry.id);
+                          if (error) throw error;
+                          toast({ title: 'Entry deleted' });
+                          onOpenChange(false);
+                          onSaved();
+                        } catch (err: any) {
+                          toast({ title: 'Failed to delete', description: err.message, variant: 'destructive' });
+                        } finally { setDeleting(false); }
+                      }}
+                    >
+                      Just This Block
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="w-full"
+                      onClick={() => setDeleting(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : (
+              <AlertDialog open={deleting} onOpenChange={setDeleting}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
+                    <AlertDialogDescription>This will permanently delete the entry and all its options. This action cannot be undone.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={async () => {
+                        try {
+                          const { error } = await supabase.from('entries').delete().eq('id', entry.id);
+                          if (error) throw error;
+                          toast({ title: 'Entry deleted' });
+                          onOpenChange(false);
+                          onSaved();
+                        } catch (err: any) {
+                          toast({ title: 'Failed to delete', description: err.message, variant: 'destructive' });
+                        } finally { setDeleting(false); }
+                      }}
+                    >Delete</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
           </div>
         </DialogContent>
       </Dialog>
