@@ -10,20 +10,22 @@ const MODE_CONFIG: { mode: string; emoji: string; label: string; apiMode: string
   { mode: 'bicycle', emoji: '🚲', label: 'Bike', apiMode: 'bicycle' },
 ];
 
-const MODE_COLORS_LIGHT: Record<string, string> = {
-  walk: 'hsla(140, 50%, 50%, 0.8)',
-  drive: 'hsla(0, 50%, 50%, 0.8)',
-  transit: 'hsla(45, 60%, 50%, 0.8)',
-  bicycle: 'hsla(210, 50%, 50%, 0.8)',
+/* Layer 1: Background strip — low opacity, fills the gap */
+const STRIP_COLORS_LIGHT: Record<string, string> = {
+  walk: 'hsla(140, 50%, 50%, 0.15)',
+  drive: 'hsla(0, 50%, 50%, 0.15)',
+  transit: 'hsla(45, 60%, 50%, 0.15)',
+  bicycle: 'hsla(210, 50%, 50%, 0.15)',
 };
 
-const MODE_COLORS_DARK: Record<string, string> = {
-  walk: 'hsla(140, 50%, 50%, 0.5)',
-  drive: 'hsla(0, 50%, 50%, 0.5)',
-  transit: 'hsla(45, 60%, 50%, 0.5)',
-  bicycle: 'hsla(210, 50%, 50%, 0.5)',
+const STRIP_COLORS_DARK: Record<string, string> = {
+  walk: 'hsla(140, 50%, 50%, 0.1)',
+  drive: 'hsla(0, 50%, 50%, 0.1)',
+  transit: 'hsla(45, 60%, 50%, 0.1)',
+  bicycle: 'hsla(210, 50%, 50%, 0.1)',
 };
 
+/* Layer 2: Content pill — selected mode highlight */
 const MODE_HIGHLIGHT_LIGHT: Record<string, string> = {
   walk: 'hsl(140, 45%, 75%)',
   drive: 'hsl(0, 45%, 80%)',
@@ -112,27 +114,42 @@ const TransportConnector = ({
   };
 
   const currentMode = detectCurrentMode();
-  const MIN_HEIGHT = 40;
-  const renderedHeight = Math.max(height, MIN_HEIGHT);
-  const isOverlay = height < MIN_HEIGHT;
-  const showExtended = renderedHeight >= 100;
+  const showExtended = height >= 100;
 
   const selectedData = transportModes.find(m => m.mode === currentMode);
   const selectedDistance = selectedData ? fmtDist(selectedData.distance_km) : '';
 
   const isDark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
-  const backgroundColor = isDark
-    ? (MODE_COLORS_DARK[currentMode] || MODE_COLORS_DARK.transit)
-    : (MODE_COLORS_LIGHT[currentMode] || MODE_COLORS_LIGHT.transit);
+  const stripColor = isDark
+    ? (STRIP_COLORS_DARK[currentMode] || STRIP_COLORS_DARK.transit)
+    : (STRIP_COLORS_LIGHT[currentMode] || STRIP_COLORS_LIGHT.transit);
 
   const highlightColor = isDark
     ? (MODE_HIGHLIGHT_DARK[currentMode] || MODE_HIGHLIGHT_DARK.transit)
     : (MODE_HIGHLIGHT_LIGHT[currentMode] || MODE_HIGHLIGHT_LIGHT.transit);
 
-  const mainRow = (
-    <div className="flex items-center justify-between w-full px-2">
-      {/* Left: info icon */}
-      <div className="flex items-center shrink-0">
+  return (
+    <div
+      className="relative w-full"
+      style={{ height, overflow: 'visible' }}
+    >
+      {/* Layer 1: Background strip — fills the gap exactly, never overflows */}
+      <div
+        className="absolute inset-0 rounded-sm overflow-hidden"
+        style={{ backgroundColor: stripColor }}
+      />
+
+      {/* Layer 2: Content pill — centred, can overflow into adjacent cards */}
+      <div
+        className={cn(
+          'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',
+          'z-20 min-h-[40px] w-fit px-3 py-1',
+          'bg-white/95 dark:bg-stone-900/95',
+          'rounded-full shadow-md border border-stone-200/60 dark:border-stone-700/60',
+          'flex items-center gap-1.5'
+        )}
+      >
+        {/* Info icon */}
         {onInfoTap ? (
           <button
             onClick={(e) => { e.stopPropagation(); onInfoTap(); }}
@@ -140,11 +157,9 @@ const TransportConnector = ({
           >
             <Info className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
-        ) : <div className="w-6" />}
-      </div>
+        ) : <div className="w-5" />}
 
-      {/* Centre: mode buttons */}
-      <div className="flex items-center gap-1">
+        {/* Mode buttons */}
         {MODE_CONFIG.map(({ mode, emoji, apiMode }) => {
           const modeData = transportModes.find(m => m.mode === apiMode);
           const isSelected = currentMode === apiMode;
@@ -161,7 +176,7 @@ const TransportConnector = ({
               }}
               className={cn(
                 'flex flex-col items-center rounded-md px-1.5 py-0.5 transition-all',
-                !isSelected && 'opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30',
+                !isSelected && 'opacity-50 hover:opacity-80',
                 !modeData && 'opacity-20 pointer-events-none'
               )}
               style={isSelected ? { backgroundColor: highlightColor, transform: 'scale(1.05)' } : undefined}
@@ -178,10 +193,8 @@ const TransportConnector = ({
             </button>
           );
         })}
-      </div>
 
-      {/* Right: refresh + delete */}
-      <div className="flex items-center gap-0.5 shrink-0">
+        {/* Refresh */}
         <button
           onClick={(e) => { e.stopPropagation(); onRefresh(); }}
           className="flex items-center justify-center rounded-md p-1 opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
@@ -193,6 +206,7 @@ const TransportConnector = ({
           )}
         </button>
 
+        {/* Delete */}
         {onDelete && (
           <button
             onClick={handleDeleteTap}
@@ -207,32 +221,17 @@ const TransportConnector = ({
           </button>
         )}
       </div>
-    </div>
-  );
 
-  return (
-    <div
-      className={cn(
-        'relative flex flex-col items-center justify-center rounded-lg',
-        'cursor-default select-none overflow-hidden transition-colors duration-300',
-        isOverlay
-          ? 'border border-solid border-stone-400/60 dark:border-stone-600/50 shadow-sm'
-          : 'border border-dashed border-stone-300/50 dark:border-stone-700/30'
-      )}
-      style={{ height: renderedHeight, backgroundColor }}
-    >
-      {/* Extended: from→to labels above */}
+      {/* Extended: from→to + distance (only when gap is large) */}
       {showExtended && fromLabel && toLabel && (
-        <div className="text-[9px] text-muted-foreground/60 truncate max-w-[90%] mb-0.5">
-          {fromLabel} → {toLabel}
+        <div className="absolute bottom-1 left-0 right-0 flex flex-col items-center pointer-events-none">
+          <span className="text-[9px] text-muted-foreground/60 truncate max-w-[90%]">
+            {fromLabel} → {toLabel}
+          </span>
+          {selectedDistance && (
+            <span className="text-[9px] text-muted-foreground/50">{selectedDistance}</span>
+          )}
         </div>
-      )}
-
-      {mainRow}
-
-      {/* Extended: distance below */}
-      {showExtended && selectedDistance && (
-        <span className="text-[9px] text-muted-foreground/50 mt-0.5">{selectedDistance}</span>
       )}
     </div>
   );

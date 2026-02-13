@@ -734,11 +734,11 @@ const ContinuousTimeline = ({
                     !isDragged && 'z-10'
                   )}
                   style={{
-                    top: isTransport && height < 40 ? top + (height / 2) - 20 : top,
-                    height: isTransport && height < 40 ? 40 : height,
+                    top,
+                    height,
                     left: '0%',
                     width: '100%',
-                    zIndex: isDragged ? 30 : isTransport && height < 40 ? 20 : hasConflict ? 10 + index : 10,
+                    zIndex: isDragged ? 30 : hasConflict ? 10 + index : 10,
                   }}
                 >
                 <div className="relative h-full">
