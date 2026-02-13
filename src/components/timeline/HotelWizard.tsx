@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, ArrowRight, Building2, Clock, Check, Plus, Upload, Pencil, Loader2, CalendarDays } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Building2, Clock, Check, Plus, Upload, Pencil, Loader2, CalendarDays, Star, Search } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { localToUTC } from '@/lib/timezoneUtils';
@@ -41,6 +41,15 @@ interface HotelWizardProps {
   dayTimezoneMap?: Map<string, { activeTz: string; flights: Array<any> }>;
 }
 
+interface PlaceCandidate {
+  placeId: string;
+  name: string;
+  address: string;
+  photoUrl?: string;
+}
+
+type EnrichmentStep = 'idle' | 'searching' | 'matched' | 'candidates' | 'manual';
+
 const REFERENCE_DATE = '2099-01-01';
 
 const fileToBase64 = (file: File): Promise<string> =>
@@ -53,6 +62,17 @@ const fileToBase64 = (file: File): Promise<string> =>
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+
+/** Check if parsed name and Places result name are a strong match */
+const isStrongMatch = (parsedName: string, placeName: string): boolean => {
+  const a = parsedName.toLowerCase().trim();
+  const b = placeName.toLowerCase().trim();
+  if (a.includes(b) || b.includes(a)) return true;
+  const wordsA = a.split(/\s+/).filter(w => w.length >= 3);
+  const wordsB = new Set(b.split(/\s+/).filter(w => w.length >= 3));
+  const shared = wordsA.filter(w => wordsB.has(w));
+  return shared.length >= 2;
+};
 
 const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneMap }: HotelWizardProps) => {
   const [step, setStep] = useState(0);
@@ -81,6 +101,12 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
   const [checkoutTime, setCheckoutTime] = useState('11:00');
   const [eveningReturn, setEveningReturn] = useState('22:00');
   const [morningLeave, setMorningLeave] = useState('08:00');
+
+  // Auto-enrichment state
+  const [enrichmentStep, setEnrichmentStep] = useState<EnrichmentStep>('idle');
+  const [autoMatchedPlace, setAutoMatchedPlace] = useState<PlaceDetails | null>(null);
+  const [placeCandidates, setPlaceCandidates] = useState<PlaceCandidate[]>([]);
+  const [fetchingCandidate, setFetchingCandidate] = useState<string | null>(null);
 
   // Multi-hotel tracking
   const [allHotels, setAllHotels] = useState<HotelDraft[]>([]);
@@ -116,6 +142,10 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
     setCheckoutTime('11:00');
     setEveningReturn('22:00');
     setMorningLeave('08:00');
+    setEnrichmentStep('idle');
+    setAutoMatchedPlace(null);
+    setPlaceCandidates([]);
+    setFetchingCandidate(null);
   };
 
   const resetAll = () => {
@@ -124,7 +154,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
     setStep(0);
   };
 
-  const handlePlaceSelect = (details: PlaceDetails) => {
+  const applyPlaceDetails = (details: PlaceDetails) => {
     setHotelName(details.name);
     setAddress(details.address);
     setLat(details.lat);
@@ -136,6 +166,110 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
     setGooglePlaceId(details.placeId);
     setGoogleMapsUri(details.googleMapsUri);
     setPhotos(details.photos);
+  };
+
+  const handlePlaceSelect = (details: PlaceDetails) => {
+    applyPlaceDetails(details);
+  };
+
+  /** Auto-enrich: search Google Places with parsed hotel name */
+  const autoEnrichFromParsedName = async (parsedHotelName: string) => {
+    setEnrichmentStep('searching');
+    try {
+      // 1. Autocomplete search
+      const { data: acData, error: acErr } = await supabase.functions.invoke('google-places', {
+        body: { action: 'autocomplete', query: parsedHotelName },
+      });
+      if (acErr) throw acErr;
+
+      const predictions = acData?.predictions ?? [];
+      if (predictions.length === 0) {
+        setEnrichmentStep('manual');
+        return;
+      }
+
+      // 2. Fetch details for top result
+      const topPrediction = predictions[0];
+      const { data: detailsData, error: detErr } = await supabase.functions.invoke('google-places', {
+        body: { action: 'details', placeId: topPrediction.place_id },
+      });
+      if (detErr) throw detErr;
+
+      const topDetails: PlaceDetails = {
+        name: detailsData.name,
+        address: detailsData.address,
+        website: detailsData.website,
+        phone: detailsData.phone ?? null,
+        lat: detailsData.lat,
+        lng: detailsData.lng,
+        rating: detailsData.rating ?? null,
+        userRatingCount: detailsData.userRatingCount ?? null,
+        openingHours: detailsData.openingHours ?? null,
+        googleMapsUri: detailsData.googleMapsUri ?? null,
+        placeId: topPrediction.place_id,
+        priceLevel: detailsData.priceLevel ?? null,
+        placeTypes: detailsData.placeTypes ?? null,
+        photos: detailsData.photos ?? [],
+      };
+
+      // 3. Confidence check
+      if (isStrongMatch(parsedHotelName, topDetails.name)) {
+        setAutoMatchedPlace(topDetails);
+        setEnrichmentStep('matched');
+      } else {
+        // Build candidates from all predictions
+        const candidates: PlaceCandidate[] = predictions.slice(0, 5).map((p: any) => ({
+          placeId: p.place_id,
+          name: p.structured_formatting?.main_text || p.description,
+          address: p.structured_formatting?.secondary_text || '',
+        }));
+        // Top result already has details, store its photo if available
+        if (topDetails.photos.length > 0) {
+          candidates[0].photoUrl = topDetails.photos[0];
+        }
+        setPlaceCandidates(candidates);
+        setEnrichmentStep('candidates');
+      }
+    } catch (err) {
+      console.error('Auto-enrichment error:', err);
+      setEnrichmentStep('manual');
+    }
+  };
+
+  /** Select a candidate: fetch its details and apply */
+  const selectCandidate = async (candidate: PlaceCandidate) => {
+    setFetchingCandidate(candidate.placeId);
+    try {
+      const { data, error } = await supabase.functions.invoke('google-places', {
+        body: { action: 'details', placeId: candidate.placeId },
+      });
+      if (error) throw error;
+
+      const details: PlaceDetails = {
+        name: data.name,
+        address: data.address,
+        website: data.website,
+        phone: data.phone ?? null,
+        lat: data.lat,
+        lng: data.lng,
+        rating: data.rating ?? null,
+        userRatingCount: data.userRatingCount ?? null,
+        openingHours: data.openingHours ?? null,
+        googleMapsUri: data.googleMapsUri ?? null,
+        placeId: candidate.placeId,
+        priceLevel: data.priceLevel ?? null,
+        placeTypes: data.placeTypes ?? null,
+        photos: data.photos ?? [],
+      };
+      applyPlaceDetails(details);
+      setEnrichmentStep('idle');
+      setStep(2); // Skip to dates since we have place data
+    } catch (err) {
+      console.error('Failed to fetch candidate details:', err);
+      toast({ title: 'Failed to load hotel details', variant: 'destructive' });
+    } finally {
+      setFetchingCandidate(null);
+    }
   };
 
   const handleUpload = async (file: File) => {
@@ -154,6 +288,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
         return;
       }
 
+      // Apply parsed data
       setHotelName(hotel.hotel_name);
       if (hotel.address) setAddress(hotel.address);
       if (hotel.check_in_date) setCheckInDate(hotel.check_in_date);
@@ -161,11 +296,15 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
       if (hotel.checkout_date) setCheckoutDate(hotel.checkout_date);
       if (hotel.checkout_time) setCheckoutTime(hotel.checkout_time);
 
+      // Move to step 1 and auto-enrich
       setStep(1);
+      setParsing(false);
+
+      // Trigger auto-enrichment
+      autoEnrichFromParsedName(hotel.hotel_name);
     } catch (err: any) {
       console.error('Hotel parse error:', err);
       toast({ title: 'Failed to parse booking', description: err?.message, variant: 'destructive' });
-    } finally {
       setParsing(false);
     }
   };
@@ -173,7 +312,6 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) handleUpload(file);
-    // Reset so same file can be re-selected
     e.target.value = '';
   };
 
@@ -211,7 +349,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
       const fallbackTz = trip.home_timezone;
 
       for (const hotel of hotelsToCreate) {
-        // 1. Insert into hotels table
+        // 1. Insert into hotels table (all enrichment fields included)
         const { data: hotelRow, error: hotelErr } = await supabase
           .from('hotels')
           .insert({
@@ -252,6 +390,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
           endIso: string,
           optionName: string,
           scheduledDay: number | null,
+          linkedType?: string | null,
         ) => {
           const { data: entry, error: eErr } = await supabase
             .from('entries')
@@ -261,6 +400,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
               end_time: endIso,
               is_scheduled: true,
               scheduled_day: scheduledDay,
+              linked_type: linkedType || null,
             } as any)
             .select('id')
             .single();
@@ -318,25 +458,25 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
         const ciEnd = localToUTC(ciDate, ciEndTime, ciTz);
         await createBlock(ciStart, ciEnd, `Check in · ${hotel.name}`, dayIndex(ciDate));
 
-        // 3. Overnight blocks
+        // 3. Overnight blocks — last night extends to checkout time
         for (let n = 0; n < nights; n++) {
           const nightDate = format(addDays(parseISO(ciDate), n), 'yyyy-MM-dd');
           const nextDate = format(addDays(parseISO(ciDate), n + 1), 'yyyy-MM-dd');
           const nightTz = tzFor(nightDate);
           const nextTz = tzFor(nextDate);
           const oStart = localToUTC(nightDate, hotel.eveningReturn || '22:00', nightTz);
-          const oEnd = localToUTC(nextDate, hotel.morningLeave || '08:00', nextTz);
-          await createBlock(oStart, oEnd, hotel.name, dayIndex(nightDate));
+
+          const isLastNight = n === nights - 1;
+          const endTime = isLastNight ? (hotel.checkoutTime || '11:00') : (hotel.morningLeave || '08:00');
+          const oEnd = localToUTC(nextDate, endTime, nextTz);
+
+          const optionName = isLastNight ? `Check out · ${hotel.name}` : hotel.name;
+          const linkedType = isLastNight ? 'checkout' : null;
+
+          await createBlock(oStart, oEnd, optionName, dayIndex(nightDate), linkedType);
         }
 
-        // 4. Checkout block (1hr, ending at checkout_time)
-        const coTz = tzFor(coDate);
-        const coTimeHr = parseInt(hotel.checkoutTime || '11');
-        const coTimeMin = (hotel.checkoutTime || '11:00').split(':')[1];
-        const coStartTime = `${String(Math.max(0, coTimeHr - 1)).padStart(2, '0')}:${coTimeMin}`;
-        const coStart = localToUTC(coDate, coStartTime, coTz);
-        const coEnd = localToUTC(coDate, hotel.checkoutTime || '11:00', coTz);
-        await createBlock(coStart, coEnd, `Check out · ${hotel.name}`, dayIndex(coDate));
+        // No separate checkout block — final overnight covers it
       }
 
       const totalNights = hotelsToCreate.reduce((sum, h) => {
@@ -373,6 +513,147 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
     </div>
   );
 
+  /** Render the enrichment-aware Step 1 UI */
+  const renderStep1 = () => {
+    // Searching state
+    if (enrichmentStep === 'searching') {
+      return (
+        <div className="flex flex-col items-center gap-3 py-8">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Finding your hotel on Google…</p>
+        </div>
+      );
+    }
+
+    // Strong match found
+    if (enrichmentStep === 'matched' && autoMatchedPlace) {
+      return (
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-foreground">We found your hotel</p>
+          <div className="rounded-lg border border-border overflow-hidden">
+            {autoMatchedPlace.photos.length > 0 && (
+              <img
+                src={autoMatchedPlace.photos[0]}
+                alt={autoMatchedPlace.name}
+                className="w-full h-32 object-cover"
+              />
+            )}
+            <div className="p-3 space-y-1">
+              <p className="text-sm font-semibold">{autoMatchedPlace.name}</p>
+              <p className="text-xs text-muted-foreground">📍 {autoMatchedPlace.address}</p>
+              {autoMatchedPlace.rating && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                  {autoMatchedPlace.rating}
+                  {autoMatchedPlace.userRatingCount && (
+                    <span>({autoMatchedPlace.userRatingCount.toLocaleString()})</span>
+                  )}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              className="flex-1"
+              onClick={() => {
+                applyPlaceDetails(autoMatchedPlace);
+                setEnrichmentStep('idle');
+                setStep(2);
+              }}
+            >
+              <Check className="h-4 w-4 mr-1" /> Confirm
+            </Button>
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => {
+                if (placeCandidates.length > 0) {
+                  setEnrichmentStep('candidates');
+                } else {
+                  setEnrichmentStep('manual');
+                }
+              }}
+            >
+              This isn't right
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
+    // Multiple candidates
+    if (enrichmentStep === 'candidates' && placeCandidates.length > 0) {
+      return (
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-foreground">Select your hotel</p>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {placeCandidates.map((c) => (
+              <button
+                key={c.placeId}
+                type="button"
+                className="w-full flex items-center gap-3 rounded-lg border border-border p-2.5 text-left hover:bg-accent/50 transition-colors disabled:opacity-50"
+                onClick={() => selectCandidate(c)}
+                disabled={fetchingCandidate !== null}
+              >
+                {c.photoUrl ? (
+                  <img src={c.photoUrl} alt={c.name} className="h-12 w-16 rounded object-cover shrink-0" />
+                ) : (
+                  <div className="h-12 w-16 rounded bg-muted flex items-center justify-center shrink-0">
+                    <Building2 className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium truncate">{c.name}</p>
+                  <p className="text-xs text-muted-foreground truncate">{c.address}</p>
+                </div>
+                {fetchingCandidate === c.placeId && (
+                  <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                )}
+              </button>
+            ))}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full gap-1"
+            onClick={() => setEnrichmentStep('manual')}
+          >
+            <Search className="h-3.5 w-3.5" /> Search manually
+          </Button>
+        </div>
+      );
+    }
+
+    // Manual / idle — show PlacesAutocomplete
+    return (
+      <div className="space-y-3">
+        <PlacesAutocomplete
+          value={hotelName}
+          onChange={setHotelName}
+          onPlaceSelect={handlePlaceSelect}
+          placeholder="Search for a hotel..."
+          tripLocation={tripLocation}
+          autoFocus
+        />
+        {address && (
+          <p className="text-xs text-muted-foreground">📍 {address}</p>
+        )}
+        {photos.length > 0 && (
+          <div className="flex gap-1.5 overflow-x-auto py-1">
+            {photos.slice(0, 3).map((url, i) => (
+              <img
+                key={i}
+                src={url}
+                alt={`${hotelName} photo`}
+                className="h-16 w-24 rounded-md object-cover shrink-0"
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -387,7 +668,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
           </DialogTitle>
           <DialogDescription>
             {step === 0 && 'Upload a booking confirmation or enter details manually.'}
-            {step === 1 && 'Search for your hotel to auto-fill details.'}
+            {step === 1 && (enrichmentStep === 'searching' ? 'Looking up your hotel…' : enrichmentStep === 'matched' ? 'Confirm this is your hotel.' : enrichmentStep === 'candidates' ? 'Pick the right hotel from the results.' : 'Search for your hotel to auto-fill details.')}
             {step === 2 && 'Set your check-in and checkout dates and times.'}
             {step === 3 && 'When do you return in the evening and leave in the morning?'}
             {step === 4 && 'Review your hotel and add another or finish.'}
@@ -435,33 +716,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
         )}
 
         {/* Step 1: Hotel Details */}
-        {step === 1 && (
-          <div className="space-y-3">
-            <PlacesAutocomplete
-              value={hotelName}
-              onChange={setHotelName}
-              onPlaceSelect={handlePlaceSelect}
-              placeholder="Search for a hotel..."
-              tripLocation={tripLocation}
-              autoFocus
-            />
-            {address && (
-              <p className="text-xs text-muted-foreground">📍 {address}</p>
-            )}
-            {photos.length > 0 && (
-              <div className="flex gap-1.5 overflow-x-auto py-1">
-                {photos.slice(0, 3).map((url, i) => (
-                  <img
-                    key={i}
-                    src={url}
-                    alt={`${hotelName} photo`}
-                    className="h-16 w-24 rounded-md object-cover shrink-0"
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {step === 1 && renderStep1()}
 
         {/* Step 2: Dates & Times */}
         {step === 2 && (
