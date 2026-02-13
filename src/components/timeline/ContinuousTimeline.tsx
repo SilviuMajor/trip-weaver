@@ -11,7 +11,7 @@ import EntryCard from './EntryCard';
 import FlightGroupCard from './FlightGroupCard';
 import TravelSegmentCard from './TravelSegmentCard';
 import TransportConnector from './TransportConnector';
-import TransportOverviewSheet from './TransportOverviewSheet';
+
 import WeatherBadge from './WeatherBadge';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -313,7 +313,7 @@ const ContinuousTimeline = ({
   // Locked-entry drag feedback
   const [shakeEntryId, setShakeEntryId] = useState<string | null>(null);
   const [refreshingTransportId, setRefreshingTransportId] = useState<string | null>(null);
-  const [transportSheetEntry, setTransportSheetEntry] = useState<EntryWithOptions | null>(null);
+  
   const handleLockedAttempt = useCallback((entryId: string) => {
     toast.error('Cannot drag a locked event');
     setShakeEntryId(entryId);
@@ -847,7 +847,7 @@ const ContinuousTimeline = ({
                         fromLabel={primaryOption.departure_location || undefined}
                         toLabel={primaryOption.arrival_location || undefined}
                         isRefreshing={refreshingTransportId === entry.id}
-                        onInfoTap={() => setTransportSheetEntry(entry)}
+                        onInfoTap={() => onCardTap(entry, primaryOption)}
                         onModeSelect={async (mode, durationMin, distanceKm, polyline) => {
                           if (onModeSwitchConfirm) {
                             await onModeSwitchConfirm(entry.id, mode, durationMin, distanceKm, polyline);
@@ -1198,61 +1198,6 @@ const ContinuousTimeline = ({
         🏁 Trip Ends
       </div>
 
-      {/* Transport Overview Sheet */}
-      {transportSheetEntry && (() => {
-        const sheetOption = transportSheetEntry.options[0];
-        if (!sheetOption) return null;
-        const nameLower = sheetOption.name.toLowerCase();
-        let sheetMode = 'transit';
-        if (nameLower.startsWith('walk')) sheetMode = 'walk';
-        else if (nameLower.startsWith('drive')) sheetMode = 'drive';
-        else if (nameLower.startsWith('cycle') || nameLower.startsWith('bic')) sheetMode = 'bicycle';
-
-        return (
-          <TransportOverviewSheet
-            open={!!transportSheetEntry}
-            onOpenChange={(open) => { if (!open) setTransportSheetEntry(null); }}
-            entry={transportSheetEntry}
-            option={sheetOption}
-            fromLabel={sheetOption.departure_location || ''}
-            toLabel={sheetOption.arrival_location || ''}
-            selectedMode={sheetMode}
-            onModeSelect={async (mode, durationMin, distanceKm, polyline) => {
-              if (onModeSwitchConfirm) {
-                await onModeSwitchConfirm(transportSheetEntry.id, mode, durationMin, distanceKm, polyline);
-              }
-            }}
-            onRefresh={async () => {
-              setRefreshingTransportId(transportSheetEntry.id);
-              try {
-                const { data, error } = await supabase.functions.invoke('google-directions', {
-                  body: {
-                    fromAddress: sheetOption.departure_location,
-                    toAddress: sheetOption.arrival_location,
-                    modes: ['walk', 'transit', 'drive', 'bicycle'],
-                    departureTime: transportSheetEntry.start_time,
-                  },
-                });
-                if (!error && data?.results) {
-                  await supabase.from('entry_options').update({
-                    transport_modes: data.results,
-                  } as any).eq('id', sheetOption.id);
-                  onVoteChange();
-                }
-              } catch (err) {
-                console.error('Transport refresh failed:', err);
-              } finally {
-                setRefreshingTransportId(null);
-              }
-            }}
-            isRefreshing={refreshingTransportId === transportSheetEntry.id}
-            onDelete={() => {
-              if (onDeleteTransport) onDeleteTransport(transportSheetEntry.id);
-              setTransportSheetEntry(null);
-            }}
-          />
-        );
-      })()}
     </div>
   );
 };
