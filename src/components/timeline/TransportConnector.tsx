@@ -153,7 +153,7 @@ const TransportConnector = ({
         {onInfoTap ? (
           <button
             onClick={(e) => { e.stopPropagation(); onInfoTap(); }}
-            className="flex items-center justify-center rounded-md p-1 opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
+            className="flex items-center justify-center rounded-md p-1 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
           >
             <Info className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
@@ -179,7 +179,7 @@ const TransportConnector = ({
                 !isSelected && 'opacity-50 hover:opacity-80',
                 !modeData && 'opacity-20 pointer-events-none'
               )}
-              style={isSelected ? { boxShadow: isDark ? '0 0 0 1.5px rgba(255,255,255,0.3), 0 1px 3px rgba(0,0,0,0.3)' : '0 0 0 1.5px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.15)', transform: 'scale(1.05)' } : undefined}
+              style={isSelected ? { boxShadow: isDark ? '0 0 0 1px rgba(255,255,255,0.15), 0 1px 2px rgba(0,0,0,0.15)' : '0 0 0 1px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08)', transform: 'scale(1.05)' } : undefined}
             >
               <span className={cn('leading-none', isSelected ? 'text-base' : 'text-sm')}>
                 {emoji}
@@ -197,7 +197,7 @@ const TransportConnector = ({
         {/* Refresh */}
         <button
           onClick={(e) => { e.stopPropagation(); onRefresh(); }}
-          className="flex items-center justify-center rounded-md p-1 opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
+          className="flex items-center justify-center rounded-md p-1 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30 transition-all"
         >
           {isRefreshing ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -214,7 +214,7 @@ const TransportConnector = ({
               'flex items-center justify-center rounded-md p-1 transition-all',
               confirmingDelete
                 ? 'bg-red-500 text-white scale-105'
-                : 'opacity-50 hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30'
+                : 'hover:opacity-80 hover:bg-stone-200/50 dark:hover:bg-stone-800/30'
             )}
           >
             <Trash2 className={cn('h-3.5 w-3.5', confirmingDelete ? 'text-white' : 'text-muted-foreground')} />
