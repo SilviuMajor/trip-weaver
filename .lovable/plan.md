@@ -1,116 +1,97 @@
 
+# Transport Connector: Mode Colours, Compressed Overlay, Info Sheet
 
-# Enrich Google Places Data: Full Integration
+## Overview
 
-This is a multi-layer change that captures richer data from Google Places and displays it across the app. Here's the full breakdown:
+Rework the TransportConnector component with mode-based background colours, a compressed overlay mode for short transports, and a new transport overview sheet. Also swap the X icon for a trash icon and add an (i) info button.
 
-## Part 1 -- Database Migration
+## Part 1 -- Mode-Based Background Colours
 
-Add new nullable columns to the `entry_options` table:
+Update `TransportConnector.tsx` to apply a background colour based on the selected mode:
 
-- `phone` (text) -- international phone number
-- `address` (text) -- full formatted address (separate from `location_name`)
-- `rating` (numeric) -- Google rating (e.g. 4.5)
-- `user_rating_count` (integer) -- number of reviews
-- `opening_hours` (jsonb) -- array of 7 weekday description strings
-- `google_maps_uri` (text) -- direct Google Maps link
-- `google_place_id` (text) -- Google place ID for future lookups
-- `price_level` (text) -- e.g. "PRICE_LEVEL_MODERATE"
+| Mode | Colour (light) | Colour (dark) |
+|------|----------------|---------------|
+| Walk | `hsl(140, 40%, 85%)` | `hsla(140, 40%, 30%, 0.3)` |
+| Drive | `hsl(0, 40%, 85%)` | `hsla(0, 40%, 30%, 0.3)` |
+| Transit | `hsl(45, 50%, 85%)` | `hsla(45, 50%, 30%, 0.3)` |
+| Bicycle | `hsl(210, 40%, 85%)` | `hsla(210, 40%, 30%, 0.3)` |
 
-All nullable, no defaults. Existing entries remain unaffected.
+Replace the static `bg-stone-100` class with a dynamic `style={{ backgroundColor }}` that changes based on `currentMode`. Add `transition-colors duration-300` for smooth switching.
 
-## Part 2 -- Edge Function Update (`supabase/functions/google-places/index.ts`)
+## Part 2 -- Info Icon and Trash Icon
 
-- Expand `X-Goog-FieldMask` to include: `nationalPhoneNumber`, `internationalPhoneNumber`, `rating`, `userRatingCount`, `regularOpeningHours`, `googleMapsUri`, `priceLevel`, `types`
-- Return new fields in the JSON response: `phone`, `rating`, `userRatingCount`, `openingHours`, `googleMapsUri`, `priceLevel`, `placeTypes`
+**TransportConnector.tsx changes:**
 
-## Part 3 -- Frontend Type Updates
+- Add a new `onInfoTap` prop to the component
+- Add an `Info` icon (from lucide-react) on the left side of the mode icons row, with a 32x32px minimum tap target. Tapping calls `onInfoTap`.
+- Replace the `X` icon with `Trash2` icon (from lucide-react). Same position, same two-tap delete behaviour.
+- Remove any `onClick` handler from the card body itself (the outer `div` already has `cursor-default`, so this is mostly about ensuring no click propagation triggers anything)
 
-**`PlacesAutocomplete.tsx`** -- Expand `PlaceDetails` interface to include all new fields. Update `handleSelect` to also pass `placeId` from the prediction through to `onPlaceSelect`.
+## Part 3 -- Compressed Overlay Mode
 
-**`src/types/trip.ts`** -- Add matching fields to `EntryOption`: `phone`, `address`, `rating`, `user_rating_count`, `opening_hours`, `google_maps_uri`, `google_place_id`, `price_level`.
+When `height <= 50`, switch to compressed mode:
 
-## Part 4 -- Store Data on Save (`EntrySheet.tsx`)
+**TransportConnector.tsx:**
+- New `isCompressed` flag: `height <= 50`
+- When compressed:
+  - Card width becomes `60%` and is centred: `style={{ width: '60%', margin: '0 auto' }}`
+  - Show content as a horizontal pill: selected mode emoji + duration, then smaller unselected mode icons
+  - Info (i) and trash icons shrink but remain accessible (min 28x28px tap target)
+  - Mode switching still works by tapping icons
 
-- Add state variables for all new fields: `phone`, `address`, `rating`, `userRatingCount`, `openingHours`, `googleMapsUri`, `placeId`, `priceLevel`
-- Update `handlePlaceSelect` to capture all new fields from the PlaceDetails response
-- Include all new fields in the `optionPayload` for both insert and update operations
-- Reset new state in the `reset()` function
-- When editing, pre-populate from `editOption`
+**ContinuousTimeline.tsx:**
+- For transport entries, when `height <= 50`:
+  - Apply `z-index: 20` (above normal cards at z-10) so the compressed card overlays adjacent events
+  - Adjust the positioned `div` to allow the card to visually overflow by adding negative margins or extending height slightly (e.g., `top: top - 8, height: height + 16`) so the pill overlaps boundaries
+  - The `overflow-visible` class is already on the parent
 
-## Part 5 -- Display on Timeline Cards (`EntryCard.tsx`)
+## Part 4 -- Transport Overview Sheet (New Component)
 
-For the full-size and condensed card variants (non-transport, non-flight):
+Create `src/components/timeline/TransportOverviewSheet.tsx`:
 
-- Below the event name, add a rating line: "star 4.5 (1,234)" using the star emoji and formatted count
-- Only shown when `option.rating` exists
-- Small, subtle styling (`text-[10px]`) that doesn't clutter the card
+**Props:**
+- `open: boolean`
+- `onOpenChange: (open: boolean) => void`
+- `option: EntryOption`
+- `entry: EntryWithOptions`
+- `fromLabel: string`
+- `toLabel: string`
+- `selectedMode: string`
+- `onModeSelect: (mode, durationMin, distanceKm, polyline?) => void`
+- `onRefresh: () => void`
+- `isRefreshing: boolean`
+- `onDelete: () => void`
 
-## Part 6 -- Display in Event Detail View (`EntrySheet.tsx` view mode)
+**Content (using existing Sheet component):**
+1. **Title**: "Route" at top
+2. **From/To**: Full place names with arrow
+3. **Mode grid**: 4 mode cards in a 2x2 grid, each showing emoji + label + duration + distance. Selected mode highlighted with coloured border matching mode colour. Tapping switches mode.
+4. **Selected mode details**: Duration and distance shown prominently
+5. **Map preview**: Use existing `RouteMapPreview` component with `size="full"` if `route_polyline` exists
+6. **Refresh button**: Full-width secondary button
+7. **Delete button**: Full-width red destructive button at bottom. Tapping calls `onDelete` and closes sheet.
+8. **Close (X)**: 44x44px tap target, top-right
 
-For non-flight, non-transport entries, add a new details section between the title and the time picker:
+**Integration in ContinuousTimeline.tsx:**
+- Add state: `transportSheetEntry` (the entry to show in the sheet, or null)
+- Pass `onInfoTap={() => setTransportSheetEntry(entry)}` to TransportConnector
+- Render `<TransportOverviewSheet>` once at the bottom of the component, controlled by `transportSheetEntry`
 
-1. **Rating** -- "star 4.5 (1,234 reviews)" with price level indicators ("money bag" x1-4)
-2. **Phone** -- Phone icon + number, wrapped in a `tel:` link for tap-to-call on mobile
-3. **Opening hours** -- Collapsible section. Collapsed: shows today's hours (e.g. "Open today: 9:00 AM - 9:00 PM"). Expanded: all 7 days listed
-4. **Google Maps link** -- "Open in Google Maps" button that opens `googleMapsUri` in a new tab. Shown near the existing map preview
+## Files Modified
 
-Website and address (via `location_name`) continue showing as they do now.
+| File | Changes |
+|------|---------|
+| `src/components/timeline/TransportConnector.tsx` | Mode colours, compressed mode, info icon, trash icon, `onInfoTap` prop |
+| `src/components/timeline/TransportOverviewSheet.tsx` | **NEW** -- transport overview sheet component |
+| `src/components/timeline/ContinuousTimeline.tsx` | Transport sheet state, pass `onInfoTap`, compressed overlay z-index/positioning |
 
-## Part 7 -- Display on Sidebar Cards (`SidebarEntryCard.tsx`)
+## What Does NOT Change
 
-Below the location name line, add:
-- "star 4.5 (1,234)" in the same subtle style as timeline cards
-- Only when rating data exists
-
-## Technical Details
-
-### Files Modified
-
-| File | Change |
-|------|--------|
-| `supabase/functions/google-places/index.ts` | Expand field mask + return new fields |
-| `src/components/timeline/PlacesAutocomplete.tsx` | Expand `PlaceDetails` interface, pass `placeId` |
-| `src/types/trip.ts` | Add new fields to `EntryOption` |
-| `src/components/timeline/EntrySheet.tsx` | New state, capture on place select, save to DB, display in view mode |
-| `src/components/timeline/EntryCard.tsx` | Show rating on full + condensed cards |
-| `src/components/timeline/SidebarEntryCard.tsx` | Show rating below name |
-
-### Database Migration SQL
-
-```text
-ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS phone text;
-ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS address text;
-ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS rating numeric;
-ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS user_rating_count integer;
-ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS opening_hours jsonb;
-ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS google_maps_uri text;
-ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS google_place_id text;
-ALTER TABLE entry_options ADD COLUMN IF NOT EXISTS price_level text;
-```
-
-### Opening Hours Logic
-
-Google returns `regularOpeningHours.weekdayDescriptions` as an array of 7 strings like `["Monday: 9:00 AM - 5:00 PM", ...]`. To show "today's hours":
-- Get current day of week (0=Sunday in JS, but Google starts with Monday)
-- Map JS day index to the correct string in the array
-- Display that string when collapsed; show all 7 when expanded
-
-### Price Level Display
-
-```text
-PRICE_LEVEL_FREE        -> "Free"
-PRICE_LEVEL_INEXPENSIVE -> money bag
-PRICE_LEVEL_MODERATE    -> money bag money bag
-PRICE_LEVEL_EXPENSIVE   -> money bag money bag money bag
-PRICE_LEVEL_VERY_EXPENSIVE -> money bag money bag money bag money bag
-```
-
-### What Does NOT Change
-
-- Timeline drag/drop, SNAP, transport connectors
-- Flight or transport card display
-- Photo handling (already working)
-- Navigation, tabs, panels
-- Existing entries without new data display correctly (all fields nullable)
-
+- Transport connector positioning logic (global hour system)
+- Transport duration locking
+- Transport attachment logic (starts at exact end of departing event)
+- SNAP system behaviour
+- Drag chain behaviour
+- EntryCard transport variants (compact/medium/condensed/full in EntryCard.tsx -- these are separate from TransportConnector and used in different contexts)
+- Auto-scroll or continuous timeline
+- Flight cards, regular event cards
