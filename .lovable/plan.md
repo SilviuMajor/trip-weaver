@@ -1,101 +1,107 @@
 
 
-# Four Quick Fixes
+# Fix: Stale Lock State in EntrySheet
 
-## Fix 1: TZ badge centered on flight portion
+## Problem
 
-**File**: `src/components/timeline/ContinuousTimeline.tsx` (lines 1204-1205)
+When toggling lock from the EntrySheet, `handleToggleLock` updates the database and calls `onSaved()`, which triggers `fetchData()` in Timeline.tsx. This refreshes the main entries arrays, but `sheetEntry` is a separate `useState` variable that was set when the sheet opened. It never gets updated with fresh data, so `entry.is_locked` (and therefore `isLocked` and the "Send to Planner" disabled state) remains stale until the sheet is closed and reopened.
 
-Change:
+## Solution
+
+In Timeline.tsx's `onSaved` callback, after `fetchData()` completes, refresh `sheetEntry` from the newly fetched data so the sheet reflects the latest state.
+
+### File: `src/pages/Timeline.tsx`
+
+In the `onSaved` callback (line 1786), after `await fetchData()`, add logic to update `sheetEntry` if it's currently set:
+
 ```typescript
-const globalFlightEndHour = dayIndex * 24 + f.flightEndHour;
-const badgeTop = globalFlightEndHour * PIXELS_PER_HOUR + PIXELS_PER_HOUR / 2 - 8;
+onSaved={async () => {
+  await fetchData();
+
+  // Refresh sheetEntry with latest data so lock state updates in the open sheet
+  if (sheetEntry) {
+    const freshEntries = /* reference to the latest scheduledEntries + ideaEntries */;
+    const fresh = freshEntries.find(e => e.id === sheetEntry.id);
+    if (fresh) {
+      setSheetEntry(fresh);
+      // Also refresh option if present
+      if (sheetOption && fresh.options) {
+        const freshOpt = fresh.options.find(o => o.id === sheetOption.id);
+        if (freshOpt) setSheetOption(freshOpt);
+      }
+    }
+  }
+
+  // existing auto-extend logic...
+}}
 ```
-To:
+
+Because `fetchData` updates state asynchronously and we can't read the new state immediately, we have two approaches:
+
+**Approach A (recommended)**: Make `fetchData` return the fetched data so `onSaved` can use it directly.
+
+Currently `fetchData` sets state internally but doesn't return anything. We modify it to return the entries so the caller can use them:
+
+1. In `fetchData`, add `return { scheduledEntries, ideaEntries }` at the end (returning the data before it's set into state).
+2. In `onSaved`, capture the return value and use it to update `sheetEntry`.
+
 ```typescript
-const globalFlightMidHour = dayIndex * 24 + (f.flightStartHour + f.flightEndHour) / 2;
-const badgeTop = globalFlightMidHour * PIXELS_PER_HOUR - 8;
+onSaved={async () => {
+  const result = await fetchData();
+  
+  if (sheetEntry && result) {
+    const allEntries = [...(result.scheduledEntries || []), ...(result.ideaEntries || [])];
+    const fresh = allEntries.find(e => e.id === sheetEntry.id);
+    if (fresh) {
+      setSheetEntry(fresh);
+      if (sheetOption && fresh.options) {
+        const freshOpt = fresh.options.find(o => o.id === sheetOption.id);
+        if (freshOpt) setSheetOption(freshOpt);
+      }
+    }
+  }
+
+  // existing auto-extend logic stays as-is
+}}
 ```
 
----
+**Approach B (simpler)**: Re-fetch just the single entry inside `onSaved` after the main `fetchData`:
 
-## Fix 2: "Send to Planner" disabled when locked
+```typescript
+onSaved={async () => {
+  await fetchData();
+  
+  if (sheetEntry) {
+    const { data: freshEntry } = await supabase
+      .from('entries')
+      .select('*, entry_options(*)')
+      .eq('id', sheetEntry.id)
+      .single();
+    if (freshEntry) {
+      const mapped = mapEntryWithOptions(freshEntry);
+      setSheetEntry(mapped);
+      if (sheetOption && mapped.options) {
+        const freshOpt = mapped.options.find(o => o.id === sheetOption.id);
+        if (freshOpt) setSheetOption(freshOpt);
+      }
+    }
+  }
 
-**File**: `src/components/timeline/EntrySheet.tsx` (lines 1682-1687)
-
-Replace the conditional hide with always-visible but disabled-when-locked:
-```tsx
-{isEditor && onMoveToIdeas && option?.category !== 'transfer' && option?.category !== 'flight' && (
-  <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={isLocked}
-      onClick={() => {
-        if (isLocked) {
-          toast({ title: 'Unlock this entry first', description: 'Locked entries cannot be sent to the Planner.' });
-          return;
-        }
-        onMoveToIdeas(entry.id);
-      }}
-    >
-      <ClipboardList className="mr-1.5 h-3.5 w-3.5" /> Send to Planner
-    </Button>
-  </div>
-)}
+  // existing auto-extend logic stays as-is
+}}
 ```
 
-The `disabled` prop greys out the button; the guard in `onClick` is a safety fallback.
-
----
-
-## Fix 3: Planner sidebar independent scroll
-
-**File**: `src/components/timeline/CategorySidebar.tsx` (lines 318-331)
-
-Update the desktop container to be a flex column with explicit height:
-```tsx
-<div
-  className={cn(
-    'shrink-0 border-l border-border bg-background flex flex-col overflow-hidden transition-all duration-300',
-    open
-      ? compact ? 'w-[25vw]' : 'w-[30vw] max-w-[500px]'
-      : 'w-0'
-  )}
-  style={{ height: '100%' }}
->
-  {open && panelContent}
-</div>
-```
-
-The `panelContent` variable (line 183) already uses `flex h-full flex-col`. The scrollable area inside it needs `flex-1 overflow-y-auto` -- will verify the inner scroll container has this. Since `panelContent` is defined at line 183 as `<div className="flex h-full flex-col">`, the structure should work once the parent has explicit height.
-
----
-
-## Fix 4: Sticky header/nav stability
-
-**File**: `src/components/timeline/TimelineHeader.tsx` (line ~24)
-
-Add `will-change-transform` to the header element's className.
-
-**File**: `src/components/timeline/TripNavBar.tsx` (line ~48)
-
-Add `will-change-transform` to the nav container's className.
-
----
+I'll use whichever approach fits cleanest with the existing `fetchData` structure. The key outcome: after any save/toggle, the open sheet immediately reflects the latest DB state.
 
 ## Files Modified
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/ContinuousTimeline.tsx` | TZ badge position: midpoint of flight |
-| `src/components/timeline/EntrySheet.tsx` | Send to Planner: visible but disabled when locked |
-| `src/components/timeline/CategorySidebar.tsx` | Desktop sidebar: flex column with height constraint |
-| `src/components/timeline/TimelineHeader.tsx` | Add `will-change-transform` |
-| `src/components/timeline/TripNavBar.tsx` | Add `will-change-transform` |
+| `src/pages/Timeline.tsx` | Update `onSaved` to refresh `sheetEntry` and `sheetOption` after `fetchData`; potentially modify `fetchData` to return data |
 
 ## What Does NOT Change
-- Flight card rendering, hotel system, transport system
-- Entry card drag/resize behavior
-- Weather system, auto-extend logic, trim logic
+- EntrySheet.tsx (no changes needed -- it correctly reads from props)
+- Lock toggle DB logic
+- Timeline rendering
+- Auto-extend logic (preserved as-is after the new refresh code)
 
