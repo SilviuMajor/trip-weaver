@@ -254,6 +254,53 @@ const Timeline = () => {
     return days;
   };
 
+  const handleTrimDay = async (side: 'start' | 'end') => {
+    if (!trip || !tripId) return;
+    const days = getDays();
+    if (days.length <= 1) return;
+
+    if (side === 'end') {
+      let lastOccupied = -1;
+      for (let i = days.length - 1; i >= 0; i--) {
+        const dayStr = format(days[i], 'yyyy-MM-dd');
+        if (scheduledEntries.some(e => getDateInTimezone(e.start_time, homeTimezone) === dayStr)) {
+          lastOccupied = i;
+          break;
+        }
+      }
+      const trimTo = lastOccupied >= 0 ? lastOccupied : 0;
+      const trimCount = days.length - 1 - trimTo;
+      if (trimCount <= 0) return;
+
+      if (trip.start_date) {
+        await supabase.from('trips').update({ end_date: format(days[trimTo], 'yyyy-MM-dd') }).eq('id', tripId);
+      } else {
+        await supabase.from('trips').update({ duration_days: trimTo + 1 }).eq('id', tripId);
+      }
+      toast({ title: `Trimmed ${trimCount} empty day(s) from end` });
+      await fetchData();
+    } else {
+      let firstOccupied = days.length;
+      for (let i = 0; i < days.length; i++) {
+        const dayStr = format(days[i], 'yyyy-MM-dd');
+        if (scheduledEntries.some(e => getDateInTimezone(e.start_time, homeTimezone) === dayStr)) {
+          firstOccupied = i;
+          break;
+        }
+      }
+      const trimCount = firstOccupied;
+      if (trimCount <= 0 || firstOccupied >= days.length) return;
+
+      if (trip.start_date) {
+        await supabase.from('trips').update({ start_date: format(days[firstOccupied], 'yyyy-MM-dd') }).eq('id', tripId);
+      } else {
+        await supabase.from('trips').update({ duration_days: (trip.duration_days ?? 3) - trimCount }).eq('id', tripId);
+      }
+      toast({ title: `Trimmed ${trimCount} empty day(s) from start` });
+      await fetchData();
+    }
+  };
+
   // Compute timezone map per day based on flights
   const dayTimezoneMap = useMemo(() => {
     const map = new Map<string, { activeTz: string; flights: Array<{ originTz: string; destinationTz: string; flightStartHour: number; flightEndHour: number; flightEndUtc: string }> }>();
@@ -1650,6 +1697,7 @@ const Timeline = () => {
                   scrollContainerRef={mainScrollRef}
                   isUndated={isUndated}
                   onCurrentDayChange={setCurrentDayIndex}
+                  onTrimDay={handleTrimDay}
                 />
               </main>
             )}

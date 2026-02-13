@@ -57,6 +57,7 @@ interface ContinuousTimelineProps {
   scrollContainerRef?: React.RefObject<HTMLElement>;
   isUndated?: boolean;
   onCurrentDayChange?: (dayIndex: number) => void;
+  onTrimDay?: (side: 'start' | 'end') => void;
 }
 
 const ContinuousTimeline = ({
@@ -90,6 +91,7 @@ const ContinuousTimeline = ({
   scrollContainerRef,
   isUndated,
   onCurrentDayChange,
+  onTrimDay,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
@@ -553,12 +555,36 @@ const ContinuousTimeline = ({
                     <>
                       <span className="text-muted-foreground/50">·</span>
                       <span className="text-muted-foreground/70">🚩 Trip Begins</span>
+                      {(() => {
+                        const dayStr = format(day, 'yyyy-MM-dd');
+                        const isEmpty = !scheduledEntries.some(e => getDateInTimezone(e.start_time, homeTimezone) === dayStr);
+                        return isEmpty && days.length > 1 ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onTrimDay?.('start'); }}
+                            className="ml-1 text-[10px] text-muted-foreground/70 hover:text-destructive underline"
+                          >
+                            ✂ Trim
+                          </button>
+                        ) : null;
+                      })()}
                     </>
                   )}
                   {dayIndex === days.length - 1 && (
                     <>
                       <span className="text-muted-foreground/50">·</span>
                       <span className="text-muted-foreground/70">🏁 Trip Ends</span>
+                      {(() => {
+                        const dayStr = format(day, 'yyyy-MM-dd');
+                        const isEmpty = !scheduledEntries.some(e => getDateInTimezone(e.start_time, homeTimezone) === dayStr);
+                        return isEmpty && days.length > 1 ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onTrimDay?.('end'); }}
+                            className="ml-1 text-[10px] text-muted-foreground/70 hover:text-destructive underline"
+                          >
+                            ✂ Trim
+                          </button>
+                        ) : null;
+                      })()}
                     </>
                   )}
                 </div>
