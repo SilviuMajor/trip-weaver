@@ -1449,9 +1449,14 @@ const Timeline = () => {
       if (timelineEl) {
         const rect = timelineEl.getBoundingClientRect();
         const relativeY = touch.clientY - rect.top;
-        const globalHour = relativeY / PIXELS_PER_HOUR;
-        const snapped = Math.round(globalHour * 4) / 4;
-        setTouchDragGlobalHour(snapped >= 0 ? snapped : null);
+        const rawGlobalHour = relativeY / PIXELS_PER_HOUR;
+        const entryDurationHours = touchDragEntryRef.current
+          ? (new Date(touchDragEntryRef.current.end_time).getTime() -
+             new Date(touchDragEntryRef.current.start_time).getTime()) / 3600000
+          : 1;
+        const centredHour = rawGlobalHour - (entryDurationHours / 2);
+        const snapped = Math.round(centredHour * 4) / 4;
+        setTouchDragGlobalHour(snapped >= 0 ? snapped : 0);
       } else {
         setTouchDragGlobalHour(null);
       }
@@ -2280,7 +2285,7 @@ const Timeline = () => {
             className="pointer-events-none absolute z-[101]"
             style={{
               left: touchDragPosition.x - (window.innerWidth * 0.3 - 12),
-              top: touchDragPosition.y - 40,
+              top: touchDragPosition.y - 55,
               width: 'calc(60vw - 24px)',
               minWidth: 256,
               opacity: 0.8,
