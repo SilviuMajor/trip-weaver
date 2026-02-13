@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { ArrowLeft, Save } from 'lucide-react';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { useProfile } from '@/hooks/useProfile';
@@ -14,6 +15,9 @@ const Settings = () => {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [zoomEnabled, setZoomEnabled] = useState(() => {
+    return localStorage.getItem('timeline-zoom-enabled') !== 'false';
+  });
 
   useEffect(() => {
     if (!authLoading && !isAdmin) navigate('/auth');
@@ -76,6 +80,27 @@ const Settings = () => {
           <Save className="mr-2 h-4 w-4" />
           {saving ? 'Saving…' : 'Save'}
         </Button>
+
+        {/* Timeline section */}
+        <div className="space-y-4 pt-4 border-t border-border">
+          <h2 className="text-lg font-semibold">Timeline</h2>
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <Label>Pinch-to-zoom</Label>
+              <p className="text-xs text-muted-foreground">
+                Enable pinch and scroll zoom on the timeline
+              </p>
+            </div>
+            <Switch
+              checked={zoomEnabled}
+              onCheckedChange={(checked) => {
+                setZoomEnabled(checked);
+                localStorage.setItem('timeline-zoom-enabled', String(checked));
+                toast({ title: checked ? 'Zoom enabled' : 'Zoom disabled' });
+              }}
+            />
+          </div>
+        </div>
       </main>
     </div>
   );
