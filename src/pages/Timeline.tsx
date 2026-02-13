@@ -1423,7 +1423,7 @@ const Timeline = () => {
   if (!currentUser) return null;
 
   return (
-    <div className="flex min-h-screen flex-col bg-background" ref={scrollRef}>
+    <div className="flex h-screen flex-col bg-background" ref={scrollRef}>
       <TimelineHeader
         trip={trip}
         tripId={tripId ?? ''}
