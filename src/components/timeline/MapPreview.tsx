@@ -32,33 +32,35 @@ const MapPreview = ({ latitude, longitude, locationName }: MapPreviewProps) => {
           />
         </div>
       )}
-      <div className="flex gap-2">
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 text-xs"
+            asChild
+          >
+            <a href={appleMapsUrl} target="_blank" rel="noopener noreferrer">
+              <Navigation className="mr-1 h-3 w-3" />
+              Apple Maps
+            </a>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 text-xs"
+            asChild
+          >
+            <a href={googleMapsUrl} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="mr-1 h-3 w-3" />
+              Google Maps
+            </a>
+          </Button>
+        </div>
         <Button
           variant="outline"
           size="sm"
-          className="flex-1 text-xs"
-          asChild
-        >
-          <a href={appleMapsUrl} target="_blank" rel="noopener noreferrer">
-            <Navigation className="mr-1 h-3 w-3" />
-            Apple Maps
-          </a>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="flex-1 text-xs"
-          asChild
-        >
-          <a href={googleMapsUrl} target="_blank" rel="noopener noreferrer">
-            <ExternalLink className="mr-1 h-3 w-3" />
-            Google Maps
-          </a>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="flex-1 text-xs"
+          className="w-full text-xs bg-black text-white hover:bg-black/90 border-black"
           asChild
         >
           <a href={uberUrl} target="_blank" rel="noopener noreferrer">
