@@ -95,7 +95,7 @@ const ContinuousTimeline = ({
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
-  const containerHeight = totalHours * PIXELS_PER_HOUR;
+  const containerHeight = totalHours * PIXELS_PER_HOUR + 30;
   const gridRef = useRef<HTMLDivElement>(null);
   const [gridTopPx, setGridTopPx] = useState(0);
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
@@ -474,7 +474,7 @@ const ContinuousTimeline = ({
   }, [days, dayTimezoneMap, homeTimezone]);
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-2">
+    <div className="mx-auto max-w-2xl px-4 pb-2 pt-[50px]">
       <div
         ref={gridRef}
         className="relative ml-20"
@@ -569,24 +569,6 @@ const ContinuousTimeline = ({
                       })()}
                     </>
                   )}
-                  {dayIndex === days.length - 1 && (
-                    <>
-                      <span className="text-muted-foreground/50">·</span>
-                      <span className="text-muted-foreground/70">🏁 Trip Ends</span>
-                      {(() => {
-                        const dayStr = format(day, 'yyyy-MM-dd');
-                        const isEmpty = !scheduledEntries.some(e => getDateInTimezone(e.start_time, homeTimezone) === dayStr);
-                        return isEmpty && days.length > 1 ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); onTrimDay?.('end'); }}
-                            className="ml-1 text-[10px] text-muted-foreground/70 hover:text-destructive underline"
-                          >
-                            ✂ Trim
-                          </button>
-                        ) : null;
-                      })()}
-                    </>
-                  )}
                 </div>
                 {today && (
                   <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">TODAY</span>
@@ -603,7 +585,31 @@ const ContinuousTimeline = ({
           );
         })}
 
-        {/* Drag-to-create preview */}
+        {/* Trip Ends marker — positioned at end of last day */}
+        {days.length > 0 && (
+          <div
+            className="absolute z-[16] flex items-center gap-1"
+            style={{ top: days.length * 24 * PIXELS_PER_HOUR - 8, left: -12 }}
+          >
+            <div className="inline-flex items-center gap-1 rounded-full bg-secondary border border-border/40 px-3 py-1 text-xs font-semibold text-secondary-foreground shadow-sm">
+              <span>🏁 Trip Ends</span>
+              {(() => {
+                const lastDay = days[days.length - 1];
+                const dayStr = format(lastDay, 'yyyy-MM-dd');
+                const isEmpty = !scheduledEntries.some(e => getDateInTimezone(e.start_time, homeTimezone) === dayStr);
+                return isEmpty && days.length > 1 ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onTrimDay?.('end'); }}
+                    className="ml-1 text-[10px] text-muted-foreground/70 hover:text-destructive underline"
+                  >
+                    ✂ Trim
+                  </button>
+                ) : null;
+              })()}
+            </div>
+          </div>
+        )}
+
         {slotDragStart !== null && slotDragEnd !== null && slotDraggingRef.current && (() => {
           const s = Math.min(slotDragStart, slotDragEnd);
           const e = Math.max(slotDragStart, slotDragEnd);
