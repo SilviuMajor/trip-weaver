@@ -1,95 +1,65 @@
 
 
-# Touch Drag & Drop from Planner to Timeline (Mobile)
+# Fix Touch Drag: Suppress Native Long-Press + Ghost Card Visibility
 
-## Problem
-The HTML5 Drag API (`draggable`, `onDragStart`, `onDrop`) does not work on touch devices. Mobile users cannot drag entries from the Planner sidebar onto the timeline.
-
-## Solution
-Build a parallel touch-based drag system that works alongside the existing desktop drag. Long-press (400ms) triggers drag mode, auto-closes the Planner sheet, shows a floating ghost card, and places the entry on finger lift.
+## Overview
+Two bugs with the touch drag system: (1) the browser's native long-press gesture fires before our 400ms timer, and (2) the ghost card doesn't appear because the initial touch position isn't captured and document-level listeners aren't used.
 
 ---
 
 ## Changes
 
-### 1. SidebarEntryCard.tsx -- Add touch handlers + new prop
+### 1. SidebarEntryCard.tsx -- Suppress native gestures + pass initial position
 
-- Add `onTouchDragStart?: (entry: EntryWithOptions) => void` prop
-- Add `touchTimerRef` and `touchStartRef` refs
-- On `onTouchStart`: record position, start 400ms timer; on timeout call `onTouchDragStart(entry)`
-- On `onTouchMove`: if finger moves >10px before timer fires, cancel
-- On `onTouchEnd`: clear timer
-- Only active when `isDraggable` is true (scheduled flights blocked)
+**CSS on card div**: Add inline styles to prevent text selection, callout menu, and double-tap zoom:
+- `WebkitUserSelect: 'none'`
+- `userSelect: 'none'`
+- `WebkitTouchCallout: 'none'`
+- `touchAction: 'manipulation'`
 
-### 2. CategorySidebar.tsx -- Pass through the new prop
+**Context menu**: Add `onContextMenu={(e) => e.preventDefault()}` to the card div.
 
-- Add `onTouchDragStart?: (entry: EntryWithOptions) => void` to `CategorySidebarProps`
-- Pass it to each `<SidebarEntryCard>` component
+**Timer**: Reduce from 400ms to 300ms.
 
-### 3. Timeline.tsx -- Core touch drag orchestration
+**Prop signature change**: `onTouchDragStart` now passes initial position:
+```text
+onTouchDragStart?: (entry: EntryWithOptions, initialPosition: { x: number; y: number }) => void;
+```
 
-Add state:
-- `touchDragEntry: EntryWithOptions | null`
-- `touchDragPosition: { x: number; y: number } | null`
-- `touchDragGlobalHour: number | null`
-- `touchDragTimeoutRef` for 3-second cancel timer
+In the timer callback, pass `touchStartRef.current` as the initial position.
 
-Add handler `handleTouchDragStart(entry)`:
-- Set `touchDragEntry` to the entry
-- Close Planner sheet (`setSidebarOpen(false)`)
-- Start 3-second timeout that cancels drag if no movement to timeline
+### 2. CategorySidebar.tsx -- Update prop passthrough
 
-Render a full-screen transparent overlay when `touchDragEntry` is set:
-- `onTouchMove`: track finger position, calculate `globalHour` from timeline grid position using `mainScrollRef` and `data-timeline-area`, 15-min snap, auto-scroll near edges
-- `onTouchEnd`: if valid `globalHour`, call existing `handleDropOnTimeline(entry.id, globalHour)`; clean up all state
-- `e.preventDefault()` on touchmove to prevent page scroll
+Update the `onTouchDragStart` prop type to include the initial position parameter. Pass it through unchanged.
 
-Inside the overlay, render:
-- A floating ghost card (160px wide, semi-transparent) showing entry name + computed time
-- A horizontal drop indicator line on the timeline at the snapped position
+### 3. Timeline.tsx -- Document-level listeners + initial position + ref for stale closure
 
-Pass `onTouchDragStart={handleTouchDragStart}` to both mobile and desktop `CategorySidebar` instances.
+**handleTouchDragStart**: Accept `initialPosition` parameter, call `setTouchDragPosition(initialPosition)` immediately so the ghost is visible from the start.
 
-### 4. ContinuousTimeline.tsx -- Add data attribute
+**Add a ref** `touchDragGlobalHourRef` that mirrors `touchDragGlobalHour` state (via a small useEffect) to avoid stale closures in the document listener.
 
-Add `data-timeline-area` to the grid `<div>` (the one with `ref={gridRef}`) so the overlay can locate it for hour calculations.
+**Replace the overlay's React touch handlers** with a `useEffect` that adds document-level `touchmove`, `touchend`, and `touchcancel` listeners when `touchDragEntry` is set. This is critical because when the Planner sheet closes, the original touch source element is removed from the DOM, and iOS won't deliver synthetic React touch events to the overlay.
+
+The `useEffect`:
+- `touchmove`: preventDefault, update position, calculate globalHour, auto-scroll
+- `touchend`: if `touchDragGlobalHourRef.current` is valid, call `handleDropOnTimeline`; then cleanup
+- `touchcancel`: cleanup
+- Cleanup on unmount removes all three listeners
+
+**Overlay div**: Becomes `pointer-events-none` (purely visual), renders the ghost card when `touchDragPosition` is set. No touch handlers on the div itself.
 
 ---
 
 ## Technical Details
 
-### Ghost card hour calculation
-```text
-1. Find timeline element via mainScrollRef.querySelector('[data-timeline-area]')
-2. Get its bounding rect
-3. relativeY = touch.clientY - rect.top + scrollTop of mainScrollRef
-4. globalHour = relativeY / PIXELS_PER_HOUR (80)
-5. Snap to 15-min: Math.round(globalHour * 4) / 4
-```
+### Why document listeners?
+When `onTouchDragStart` fires, the Planner sheet closes and the `SidebarEntryCard` is unmounted. On iOS, touch events "belong" to the element that received `touchstart`. Once that element is removed, no other element receives the remaining touch events via React's synthetic system. Document-level native listeners still receive them.
 
-### Auto-scroll during drag
-```text
-SCROLL_ZONE = 80px from screen edges
-SCROLL_SPEED = 8px per touchmove event
-If touch.clientY < 80: scroll up
-If touch.clientY > window.innerHeight - 80: scroll down
-```
+### Stale closure fix
+The `handleTouchEnd` inside the useEffect closure captures `touchDragGlobalHour` at effect setup time. Since it only runs once (when `touchDragEntry` changes), the value would be stale. A ref (`touchDragGlobalHourRef`) updated via a separate useEffect solves this.
 
-### Cancel conditions
-- Finger lifts outside timeline area (no valid globalHour) -- cancel, no placement
-- 3 seconds pass without a valid drop -- cancel
-- Short tap (< 400ms) -- normal tap behavior, no drag
-
-### What does NOT change
-- Desktop HTML5 drag/drop (draggable + onDragStart + onDrop)
-- Timeline card drag/resize (useDragResize hook)
-- Tap behavior on sidebar cards (opens entry sheet)
-- Flight drag restrictions
-- Any existing component APIs
-
-## Files Changed
-1. `src/components/timeline/SidebarEntryCard.tsx` -- touch handlers + new prop
-2. `src/components/timeline/CategorySidebar.tsx` -- pass through prop
-3. `src/pages/Timeline.tsx` -- touch drag state, overlay, ghost card
-4. `src/components/timeline/ContinuousTimeline.tsx` -- add `data-timeline-area` attribute
+### Files changed
+1. `src/components/timeline/SidebarEntryCard.tsx` -- CSS, timer, prop signature
+2. `src/components/timeline/CategorySidebar.tsx` -- prop type update
+3. `src/pages/Timeline.tsx` -- document listeners, initial position, ref
 
