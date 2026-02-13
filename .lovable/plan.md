@@ -1,86 +1,58 @@
 
 
-# Fix Hotel Cards, Wizard Inputs, Timeline Labels, and Planner Drag
+# Fix Hotel Card Titles and CHECKOUT Badge Position
 
-## Fix 1: Revert hotel card sizing changes in EntryCard.tsx
+## Fix 1: Strip "Check in · " and "Check out · " prefixes from card titles
 
-The previous change added a special compact variant for hotel utility blocks in the condensed layout (lines 522-575). This will be removed entirely so hotel check-in/checkout cards render identically to all other event cards.
+In `EntryCard.tsx`, create a display name variable after the existing `isCheckIn`/`isCheckOut` detection (line 524):
 
-**What changes:**
-- Remove the `isHotelUtilityBlock` variable declaration (line 522)
-- Remove the entire `if (isHotelUtilityBlock)` block inside `if (isCondensed)` (lines 526-575)
-- Hotel cards will now use the same condensed layout as every other event card
-
----
-
-## Fix 2: Compact inputs in HotelWizard Step 2
-
-The date and time inputs on Step 2 (lines 722-778) use the default `Input` component which has `h-10` height. Add a className to reduce their height.
-
-**What changes:**
-- Add `className="h-8"` to all four `<Input>` fields in Step 2 (check-in date, check-in time, checkout date, checkout time)
-- This matches compact input styling used elsewhere without changing the 2-column grid layout
-
----
-
-## Fix 3: CHECK-IN and CHECKOUT aesthetic labels on timeline cards
-
-Add small uppercase text badges to hotel utility blocks. These are purely decorative, not interactive.
-
-**What changes in EntryCard.tsx:**
-
-Detect hotel utility blocks using the existing name-based check:
-- Check-in: `option.name?.startsWith('Check in ·')`
-- Checkout: `option.name?.startsWith('Check out ·')` or `linkedType === 'checkout'`
-
-For the **condensed layout** (the one that now renders identically to other cards after Fix 1): add a small "CHECK-IN" or "CHECKOUT" text label next to the category badge row.
-
-For the **full-size layout**: same approach -- add the label in the top badge area.
-
-Badge styling: `text-[8px] uppercase tracking-wider font-semibold text-muted-foreground` (or `text-white/60` over images). Not a colored badge, just small muted text.
-
-- CHECK-IN label appears at the **top** of the card, next to the category badge
-- CHECKOUT label appears at the **bottom** of the card, near the time/duration row
-
-This applies to all card size variants (condensed and full), but NOT compact or medium (too small for labels).
-
----
-
-## Fix 4: Planner sidebar representative selection for hotels
-
-Currently, `CategorySidebar.tsx` groups hotel entries by `hotel_id` and uses `deduplicatedMap` which picks the earliest-created entry as the representative. Since check-in blocks are created first in HotelWizard, the check-in block becomes the representative.
-
-**What changes in CategorySidebar.tsx:**
-
-In `getFilteredOriginals`, when building hotel groups, prefer an overnight block (one whose name does NOT start with "Check in" or "Check out") as the representative. If no overnight block exists, fall back to whatever is available.
-
-Implementation: Instead of relying on `deduplicatedMap` for hotel entries, find the best representative from the raw entries:
-
-```
-// For hotel groups, prefer an overnight block as representative
-const hotelEntries = catEntries.filter(e => e.options[0]?.hotel_id === hotelId);
-const overnight = hotelEntries.find(e => {
-  const name = e.options[0]?.name ?? '';
-  return !name.startsWith('Check in ·') && !name.startsWith('Check out ·');
-});
-const representative = overnight ?? hotelEntries[0];
+```tsx
+const displayName = isCheckIn
+  ? option.name?.replace(/^Check in · /, '') ?? option.name
+  : isCheckOut && option.name?.startsWith('Check out · ')
+    ? option.name?.replace(/^Check out · /, '')
+    : option.name;
 ```
 
-This ensures the sidebar card shows the hotel name (not "Check in - Hotel Name"), the hotel image, and when dragged creates a normal hotel block.
+Then replace all `{option.name}` references in the card rendering with `{displayName}`:
+- Line 577 (condensed layout title)
+- Line 723 (full-size layout title)
 
----
+The `option.name` used in the `alt` attribute for images (line 553) can stay as-is.
+
+## Fix 2: CHECKOUT badge pinned to absolute bottom of card
+
+Currently the CHECKOUT badge sits inline in the content flow (lines 619-621 in condensed, lines 839-841 in full-size). For tall checkout blocks, it needs to be at the very bottom edge.
+
+**Condensed layout (line 619-621):**
+- Remove the inline CHECKOUT span from inside the bottom flex row
+- Add an absolutely-positioned CHECKOUT span as a direct child of the card container (the `motion.div`), just before the overlap div:
+```tsx
+{isCheckOut && (
+  <span className={cn(
+    'absolute bottom-1 left-2.5 z-10 text-[10px] font-semibold uppercase tracking-wider',
+    firstImage ? 'text-white/60' : 'text-muted-foreground/70'
+  )}>checkout</span>
+)}
+```
+
+**Full-size layout (line 839-841):**
+- Same approach: remove the inline CHECKOUT span from the bottom row
+- Add an absolutely-positioned span as a child of the outer card container
+
+The card containers already use `relative` positioning (via the `motion.div` with `overflow-hidden`), so absolute positioning will work.
+
+CHECK-IN badges stay where they are (top of card, inline with content) -- no change needed.
 
 ## Files Modified
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/EntryCard.tsx` | Revert hotel utility block sizing; add CHECK-IN/CHECKOUT aesthetic labels |
-| `src/components/timeline/HotelWizard.tsx` | Add `className="h-8"` to Step 2 date/time inputs |
-| `src/components/timeline/CategorySidebar.tsx` | Prefer overnight block as hotel representative in sidebar |
+| `src/components/timeline/EntryCard.tsx` | Add `displayName` variable; replace `option.name` with `displayName` in titles; move CHECKOUT badges to absolute bottom positioning |
 
 ## What Does NOT Change
+- Database values (names stored as "Check in · Hotel Name")
+- EntrySheet / overview display
+- MapPreview, HotelWizard, transport, flights
+- CHECK-IN badge positioning (stays at top, inline)
 
-- MapPreview / Uber button fixes from previous prompt
-- Hotel wizard steps other than Step 2 field sizing
-- Transport, flight, timeline rendering systems
-- RouteMapPreview
