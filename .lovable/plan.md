@@ -1,106 +1,95 @@
 
 
-# Magnet Icon Overhaul: Gap-Aware, Transport-Aware, with Correct Rotation
+# Touch Drag & Drop from Planner to Timeline (Mobile)
 
-## Overview
-Four interconnected fixes to make the magnet snap system smarter: only show the icon when there's actually a gap, show it on the right element (card or transport), support snapping from transport cards, and fix the icon rotation.
+## Problem
+The HTML5 Drag API (`draggable`, `onDragStart`, `onDrop`) does not work on touch devices. Mobile users cannot drag entries from the Planner sidebar onto the timeline.
 
----
-
-## Fix 1 -- Icon faces downward (inline style)
-
-**File: `src/components/timeline/ContinuousTimeline.tsx`**
-
-Replace the Tailwind `rotate-180` class with an inline `style={{ transform: 'rotate(180deg)' }}` on the `<Magnet>` component to guarantee the rotation works regardless of CSS specificity.
+## Solution
+Build a parallel touch-based drag system that works alongside the existing desktop drag. Long-press (400ms) triggers drag mode, auto-closes the Planner sheet, shows a floating ghost card, and places the entry on finger lift.
 
 ---
 
-## Fix 2 -- Only show magnet when there is a gap
+## Changes
 
-**File: `src/components/timeline/ContinuousTimeline.tsx`**
+### 1. SidebarEntryCard.tsx -- Add touch handlers + new prop
 
-Replace the current `hasNextEntry` boolean logic (lines ~990-998) with a `computeMagnetState` function that checks for actual time gaps using a 2-minute tolerance (120,000ms). If the end of the current element (card or transport) aligns with the start of the next element within 2 minutes, no magnet is shown.
+- Add `onTouchDragStart?: (entry: EntryWithOptions) => void` prop
+- Add `touchTimerRef` and `touchStartRef` refs
+- On `onTouchStart`: record position, start 400ms timer; on timeout call `onTouchDragStart(entry)`
+- On `onTouchMove`: if finger moves >10px before timer fires, cancel
+- On `onTouchEnd`: clear timer
+- Only active when `isDraggable` is true (scheduled flights blocked)
 
----
+### 2. CategorySidebar.tsx -- Pass through the new prop
 
-## Fix 3 -- Magnet appears on cards AND transport connectors
+- Add `onTouchDragStart?: (entry: EntryWithOptions) => void` to `CategorySidebarProps`
+- Pass it to each `<SidebarEntryCard>` component
 
-**File: `src/components/timeline/ContinuousTimeline.tsx`**
+### 3. Timeline.tsx -- Core touch drag orchestration
 
-Currently, the magnet button only renders inside the regular card branch (line 924 onward). The transport connector branch (lines 882-922) has no magnet.
+Add state:
+- `touchDragEntry: EntryWithOptions | null`
+- `touchDragPosition: { x: number; y: number } | null`
+- `touchDragGlobalHour: number | null`
+- `touchDragTimeoutRef` for 3-second cancel timer
 
-Changes:
-- Extract the magnet button into a shared rendering block
-- For **regular cards**: show magnet if there's a gap between the card's end and the transport start (or next event if no transport)
-- For **transport connectors**: show magnet if there's a gap between the transport's end and the next event's start
-- The `computeMagnetState` function handles all 5 scenarios from the prompt table
+Add handler `handleTouchDragStart(entry)`:
+- Set `touchDragEntry` to the entry
+- Close Planner sheet (`setSidebarOpen(false)`)
+- Start 3-second timeout that cancels drag if no movement to timeline
 
----
+Render a full-screen transparent overlay when `touchDragEntry` is set:
+- `onTouchMove`: track finger position, calculate `globalHour` from timeline grid position using `mainScrollRef` and `data-timeline-area`, 15-min snap, auto-scroll near edges
+- `onTouchEnd`: if valid `globalHour`, call existing `handleDropOnTimeline(entry.id, globalHour)`; clean up all state
+- `e.preventDefault()` on touchmove to prevent page scroll
 
-## Fix 4 -- handleMagnetSnap works from transport cards
+Inside the overlay, render:
+- A floating ghost card (160px wide, semi-transparent) showing entry name + computed time
+- A horizontal drop indicator line on the timeline at the snapped position
 
-**File: `src/pages/Timeline.tsx`**
+Pass `onTouchDragStart={handleTouchDragStart}` to both mobile and desktop `CategorySidebar` instances.
 
-Add a check at the start of `handleMagnetSnap` for whether the source entry is a transport (`opt.category === 'transfer'`). If so:
-- Skip transport lookup (the source IS the transport)
-- Find the next non-transport event
-- Snap it to this transport's end time
-- Include undo/redo support
-- Return early before the existing Case A/B/C logic
+### 4. ContinuousTimeline.tsx -- Add data attribute
 
-Existing Case A, B, and C logic remains unchanged for regular card sources.
+Add `data-timeline-area` to the grid `<div>` (the one with `ref={gridRef}`) so the overlay can locate it for hour calculations.
 
 ---
 
 ## Technical Details
 
-### computeMagnetState logic (ContinuousTimeline.tsx)
-
+### Ghost card hour calculation
 ```text
-For each entry in the render loop:
-
-1. Skip flights and airport_processing -- no magnet ever
-2. Find transportAfter and nextEvent by scanning forward
-3. GAP_TOLERANCE = 2 minutes (120000ms)
-
-If entry is transport:
-  - gapMs = nextEvent.start_time - entry.end_time
-  - showMagnet = gapMs > tolerance
-
-If entry is regular card:
-  - If transportAfter exists:
-      gapMs = transportAfter.start_time - entry.end_time
-  - Else:
-      gapMs = nextEvent.start_time - entry.end_time
-  - showMagnet = gapMs > tolerance
-
-nextLocked = nextEvent.is_locked
+1. Find timeline element via mainScrollRef.querySelector('[data-timeline-area]')
+2. Get its bounding rect
+3. relativeY = touch.clientY - rect.top + scrollTop of mainScrollRef
+4. globalHour = relativeY / PIXELS_PER_HOUR (80)
+5. Snap to 15-min: Math.round(globalHour * 4) / 4
 ```
 
-### Transport magnet button placement
-
-The magnet button for transport connectors will be added inside the transport branch (after the `<TransportConnector>` component), using the same absolute positioning (`-bottom-3 -right-3`) and styling as the regular card magnet.
-
-### handleMagnetSnap transport-source path (Timeline.tsx)
-
+### Auto-scroll during drag
 ```text
-At top of handleMagnetSnap, after finding opt:
-
-if (opt.category === 'transfer'):
-  - Scan forward for next non-transport, non-flight event
-  - If not found or locked, return
-  - Snap next event start to entry.end_time, preserve duration
-  - Push undo action
-  - Update DB, toast, fetchData, return
+SCROLL_ZONE = 80px from screen edges
+SCROLL_SPEED = 8px per touchmove event
+If touch.clientY < 80: scroll up
+If touch.clientY > window.innerHeight - 80: scroll down
 ```
+
+### Cancel conditions
+- Finger lifts outside timeline area (no valid globalHour) -- cancel, no placement
+- 3 seconds pass without a valid drop -- cancel
+- Short tap (< 400ms) -- normal tap behavior, no drag
+
+### What does NOT change
+- Desktop HTML5 drag/drop (draggable + onDragStart + onDrop)
+- Timeline card drag/resize (useDragResize hook)
+- Tap behavior on sidebar cards (opens entry sheet)
+- Flight drag restrictions
+- Any existing component APIs
 
 ## Files Changed
-1. `src/components/timeline/ContinuousTimeline.tsx` -- Fixes 1, 2, 3
-2. `src/pages/Timeline.tsx` -- Fix 4
+1. `src/components/timeline/SidebarEntryCard.tsx` -- touch handlers + new prop
+2. `src/components/timeline/CategorySidebar.tsx` -- pass through prop
+3. `src/pages/Timeline.tsx` -- touch drag state, overlay, ghost card
+4. `src/components/timeline/ContinuousTimeline.tsx` -- add `data-timeline-area` attribute
 
-## What Does NOT Change
-- Case B/C magnet snap logic for regular cards
-- "+ Add something" buttons
-- Lock icon positioning
-- Card drag/resize
-- Hotel, flight, EntrySheet systems
