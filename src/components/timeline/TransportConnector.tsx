@@ -12,17 +12,17 @@ const MODE_CONFIG: { mode: string; emoji: string; label: string; apiMode: string
 
 /* Layer 1: Background strip — low opacity, fills the gap */
 const STRIP_COLORS_LIGHT: Record<string, string> = {
-  walk: 'hsla(140, 50%, 50%, 0.8)',
-  drive: 'hsla(0, 50%, 50%, 0.8)',
-  transit: 'hsla(45, 60%, 50%, 0.8)',
-  bicycle: 'hsla(210, 50%, 50%, 0.8)',
+  walk: 'hsl(140, 50%, 50%)',
+  drive: 'hsl(0, 50%, 50%)',
+  transit: 'hsl(45, 60%, 50%)',
+  bicycle: 'hsl(210, 50%, 50%)',
 };
 
 const STRIP_COLORS_DARK: Record<string, string> = {
-  walk: 'hsla(140, 50%, 50%, 0.8)',
-  drive: 'hsla(0, 50%, 50%, 0.8)',
-  transit: 'hsla(45, 60%, 50%, 0.8)',
-  bicycle: 'hsla(210, 50%, 50%, 0.8)',
+  walk: 'hsl(140, 50%, 50%)',
+  drive: 'hsl(0, 50%, 50%)',
+  transit: 'hsl(45, 60%, 50%)',
+  bicycle: 'hsl(210, 50%, 50%)',
 };
 
 /* Layer 2: Content pill — selected mode highlight */
@@ -144,7 +144,7 @@ const TransportConnector = ({
         className={cn(
           'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',
           'z-20 min-h-[40px] w-fit px-3 py-1 pointer-events-auto',
-          'rounded-full shadow-md border border-stone-200/60 dark:border-stone-700/60',
+          'rounded-full shadow-md',
           'flex items-center gap-1.5'
         )}
         style={{ backgroundColor: stripColor }}
