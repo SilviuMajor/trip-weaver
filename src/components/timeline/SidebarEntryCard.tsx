@@ -11,7 +11,7 @@ interface SidebarEntryCardProps {
   onClick?: () => void;
   onDuplicate?: (entry: EntryWithOptions) => void;
   onInsert?: (entry: EntryWithOptions) => void;
-  onTouchDragStart?: (entry: EntryWithOptions) => void;
+  onTouchDragStart?: (entry: EntryWithOptions, initialPosition: { x: number; y: number }) => void;
   usageCount?: number;
   isFlight?: boolean;
 }
@@ -27,11 +27,11 @@ const formatDuration = (startIso: string, endIso: string): string => {
 };
 
 const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, onTouchDragStart, usageCount, isFlight }: SidebarEntryCardProps) => {
-  const option = entry.options[0];
-  if (!option) return null;
-
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const option = entry.options[0];
+  if (!option) return null;
 
   const cat = findCategory(option.category ?? '');
   const emoji = cat?.emoji ?? '📌';
@@ -53,14 +53,17 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
       draggable={isDraggable}
       onDragStart={(e) => isDraggable && onDragStart?.(e, entry)}
       onClick={onClick}
+      onContextMenu={(e) => e.preventDefault()}
       onTouchStart={(e) => {
         if (!isDraggable || !onTouchDragStart) return;
         const touch = e.touches[0];
         touchStartRef.current = { x: touch.clientX, y: touch.clientY };
         touchTimerRef.current = setTimeout(() => {
-          onTouchDragStart(entry);
+          if (touchStartRef.current) {
+            onTouchDragStart(entry, touchStartRef.current);
+          }
           touchTimerRef.current = null;
-        }, 400);
+        }, 300);
       }}
       onTouchMove={(e) => {
         if (touchTimerRef.current && touchStartRef.current) {
@@ -88,7 +91,11 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
       style={{
         opacity: isScheduled ? 0.7 : 1,
         ...((!firstImage) ? { borderLeftWidth: 3, borderLeftColor: color } : {}),
-      }}
+        WebkitUserSelect: 'none',
+        userSelect: 'none',
+        WebkitTouchCallout: 'none',
+        touchAction: 'manipulation',
+      } as React.CSSProperties}
     >
       {/* Usage count badge */}
       {usageCount != null && usageCount > 1 && (
