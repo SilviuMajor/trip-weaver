@@ -122,6 +122,7 @@ export type Database = {
           entry_id: string
           google_maps_uri: string | null
           google_place_id: string | null
+          hotel_id: string | null
           id: string
           latitude: number | null
           location_name: string | null
@@ -154,6 +155,7 @@ export type Database = {
           entry_id: string
           google_maps_uri?: string | null
           google_place_id?: string | null
+          hotel_id?: string | null
           id?: string
           latitude?: number | null
           location_name?: string | null
@@ -186,6 +188,7 @@ export type Database = {
           entry_id?: string
           google_maps_uri?: string | null
           google_place_id?: string | null
+          hotel_id?: string | null
           id?: string
           latitude?: number | null
           location_name?: string | null
@@ -207,6 +210,90 @@ export type Database = {
             columns: ["entry_id"]
             isOneToOne: false
             referencedRelation: "entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entry_options_hotel_id_fkey"
+            columns: ["hotel_id"]
+            isOneToOne: false
+            referencedRelation: "hotels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hotels: {
+        Row: {
+          address: string | null
+          check_in_date: string | null
+          check_in_time: string | null
+          checkout_date: string | null
+          checkout_time: string | null
+          created_at: string
+          evening_return: string | null
+          google_maps_uri: string | null
+          google_place_id: string | null
+          id: string
+          latitude: number | null
+          longitude: number | null
+          morning_leave: string | null
+          name: string
+          phone: string | null
+          rating: number | null
+          trip_id: string
+          updated_at: string
+          user_rating_count: number | null
+          website: string | null
+        }
+        Insert: {
+          address?: string | null
+          check_in_date?: string | null
+          check_in_time?: string | null
+          checkout_date?: string | null
+          checkout_time?: string | null
+          created_at?: string
+          evening_return?: string | null
+          google_maps_uri?: string | null
+          google_place_id?: string | null
+          id?: string
+          latitude?: number | null
+          longitude?: number | null
+          morning_leave?: string | null
+          name: string
+          phone?: string | null
+          rating?: number | null
+          trip_id: string
+          updated_at?: string
+          user_rating_count?: number | null
+          website?: string | null
+        }
+        Update: {
+          address?: string | null
+          check_in_date?: string | null
+          check_in_time?: string | null
+          checkout_date?: string | null
+          checkout_time?: string | null
+          created_at?: string
+          evening_return?: string | null
+          google_maps_uri?: string | null
+          google_place_id?: string | null
+          id?: string
+          latitude?: number | null
+          longitude?: number | null
+          morning_leave?: string | null
+          name?: string
+          phone?: string | null
+          rating?: number | null
+          trip_id?: string
+          updated_at?: string
+          user_rating_count?: number | null
+          website?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hotels_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
             referencedColumns: ["id"]
           },
         ]
