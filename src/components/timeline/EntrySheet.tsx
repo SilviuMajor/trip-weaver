@@ -270,6 +270,7 @@ interface EntrySheetProps {
   transportContext?: { fromAddress: string; toAddress: string; gapMinutes?: number; fromEntryId?: string; toEntryId?: string; resolvedTz?: string } | null;
   gapContext?: { fromName: string; toName: string; fromAddress: string; toAddress: string } | null;
   onTransportConflict?: (blockDuration: number, gapMinutes: number) => void;
+  onHotelSelected?: () => void;
 }
 
 type Step = 'category' | 'details';
@@ -282,6 +283,7 @@ const EntrySheet = ({
   editEntry, editOption, prefillStartTime, prefillEndTime, prefillCategory, transportContext,
   gapContext,
   onTransportConflict,
+  onHotelSelected,
 }: EntrySheetProps) => {
   const { currentUser, isEditor } = useCurrentUser();
 
@@ -704,6 +706,10 @@ const EntrySheet = ({
   };
 
   const handleCategorySelect = (catId: string) => {
+    if (catId === 'hotel' && onHotelSelected) {
+      onHotelSelected();
+      return;
+    }
     setCategoryId(catId);
     const cat = allCategories.find(c => c.id === catId);
     if (cat) applySmartDefaults(cat);

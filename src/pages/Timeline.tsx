@@ -1719,6 +1719,10 @@ const Timeline = () => {
             prefillCategory={prefillCategory}
             transportContext={transportContext}
             gapContext={gapContext}
+            onHotelSelected={() => {
+              setSheetOpen(false);
+              setHotelWizardOpen(true);
+            }}
             onTransportConflict={(blockDuration, gapMinutes) => {
               const overflow = blockDuration - gapMinutes;
               if (overflow > 0) {
