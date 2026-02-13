@@ -12,17 +12,17 @@ const MODE_CONFIG: { mode: string; emoji: string; label: string; apiMode: string
 
 /* Layer 1: Background strip — low opacity, fills the gap */
 const STRIP_COLORS_LIGHT: Record<string, string> = {
-  walk: 'hsl(140, 50%, 50%)',
-  drive: 'hsl(0, 50%, 50%)',
-  transit: 'hsl(45, 60%, 50%)',
-  bicycle: 'hsl(210, 50%, 50%)',
+  walk: 'hsl(140, 45%, 75%)',
+  drive: 'hsl(0, 45%, 80%)',
+  transit: 'hsl(45, 55%, 75%)',
+  bicycle: 'hsl(210, 45%, 78%)',
 };
 
 const STRIP_COLORS_DARK: Record<string, string> = {
-  walk: 'hsl(140, 50%, 50%)',
-  drive: 'hsl(0, 50%, 50%)',
-  transit: 'hsl(45, 60%, 50%)',
-  bicycle: 'hsl(210, 50%, 50%)',
+  walk: 'hsl(140, 40%, 30%)',
+  drive: 'hsl(0, 40%, 30%)',
+  transit: 'hsl(45, 50%, 30%)',
+  bicycle: 'hsl(210, 40%, 30%)',
 };
 
 /* Layer 2: Content pill — selected mode highlight */
@@ -179,7 +179,7 @@ const TransportConnector = ({
                 !isSelected && 'opacity-50 hover:opacity-80',
                 !modeData && 'opacity-20 pointer-events-none'
               )}
-              style={isSelected ? { backgroundColor: highlightColor, transform: 'scale(1.05)' } : undefined}
+              style={isSelected ? { boxShadow: isDark ? '0 0 0 1.5px rgba(255,255,255,0.3), 0 1px 3px rgba(0,0,0,0.3)' : '0 0 0 1.5px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.15)', transform: 'scale(1.05)' } : undefined}
             >
               <span className={cn('leading-none', isSelected ? 'text-base' : 'text-sm')}>
                 {emoji}
