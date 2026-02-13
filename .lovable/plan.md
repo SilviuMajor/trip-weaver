@@ -1,75 +1,127 @@
 
-# Fix 1: Always Show Hotel Category + Fix 2: FAB Hotel Routing
+# Parser Auto-Enrichment from Google Places + Checkout Block Fix
 
-## Changes
+## Overview
 
-### 1. CategorySidebar.tsx
+Three changes: (1) after parsing a hotel booking, auto-search Google Places and either auto-select a strong match or show candidates, (2) remove the separate checkout block and extend the final overnight to checkout time, (3) ensure all enrichment fields are written to the hotels table.
 
-**A) Always show Hotel category** (line 189)
+---
 
-Replace the early return `if (dedupedEntries.length === 0) return null` with a check that allows `hotel` to always render. When the hotel section is empty, show a "No hotel added yet" placeholder.
+## Fix 1: Auto-enrich parsed hotel with Google Places
+
+### After parsing succeeds (line ~156-164 in `handleUpload`)
+
+Instead of jumping straight to Step 1, insert a new async flow:
+
+1. Call `supabase.functions.invoke('google-places', { body: { action: 'autocomplete', query: hotel.hotel_name } })` to get predictions.
+2. If predictions exist, fetch details for the top result: `supabase.functions.invoke('google-places', { body: { action: 'details', placeId: topPrediction.place_id } })`.
+3. **Confidence check**: Compare parsed `hotel_name` (lowercased, trimmed) against top result name. If one contains the other or they share 2+ significant words (split on spaces, filter out words < 3 chars), treat as strong match.
+
+### New state variables
 
 ```tsx
-const alwaysShowCategories = ['hotel'];
-// ...
-if (dedupedEntries.length === 0 && !alwaysShowCategories.includes(cat.id)) return null;
+const [placeCandidates, setPlaceCandidates] = useState<Array<{ placeId: string; name: string; address: string; }>>([]);
+const [autoMatchedPlace, setAutoMatchedPlace] = useState<PlaceDetails | null>(null);
+const [enrichmentStep, setEnrichmentStep] = useState<'idle' | 'searching' | 'matched' | 'candidates' | 'manual'>('idle');
 ```
 
-When empty, render the header with the + button and a subtle placeholder text.
+### Step 1 UI changes
 
-**B) Hotel dedup by hotel_id**
+Step 1 now has conditional rendering based on `enrichmentStep`:
 
-For hotel entries, group by `hotel_id` (from `entry.options[0].hotel_id`) instead of by `name::category`. Show one card per unique hotel. Legacy entries without `hotel_id` fall back to name-based dedup as before.
+- **`searching`**: Show spinner "Finding your hotel on Google..."
+- **`matched`** (strong match found): Show a confirmation card with photo, name, address, rating. Two buttons: "Confirm" (applies enrichment, goes to Step 2) and "This isn't right" (switches to `candidates` or `manual`).
+- **`candidates`** (multiple matches): Show top 3-5 results as tappable cards (photo thumb, name, address, rating). Tapping one fetches full details and applies enrichment. Bottom option: "Search manually" switches to `manual`.
+- **`manual`** / **`idle`**: Show the existing PlacesAutocomplete input (pre-filled with parsed hotel name if from parser).
 
-Modify `getFilteredOriginals` to check if category is `hotel` and use `hotel_id` as the dedup key when available.
+### Enrichment merge logic
 
-**C) Temporary debug log**
+When a Google Places result is selected (auto or manual), apply all Place data (lat, lng, photos, phone, website, rating, userRatingCount, googlePlaceId, googleMapsUri, address) but keep the parser's dates/times.
 
-Add `console.log('[CategorySidebar] entries:', entries.map(e => ({ id: e.id, cat: e.options[0]?.category, name: e.options[0]?.name })))` at the top of the component body.
+---
 
-### 2. EntrySheet.tsx
+## Fix 2: Remove separate checkout block, extend final overnight
 
-**A) Add `onHotelSelected` prop** to `EntrySheetProps` interface:
+### In `handleFinish` (lines 322-339)
+
+Change the overnight block loop and remove the checkout block:
 
 ```tsx
-onHotelSelected?: () => void;
+for (let n = 0; n < nights; n++) {
+  const nightDate = format(addDays(parseISO(ciDate), n), 'yyyy-MM-dd');
+  const nextDate = format(addDays(parseISO(ciDate), n + 1), 'yyyy-MM-dd');
+  const nightTz = tzFor(nightDate);
+  const nextTz = tzFor(nextDate);
+  const oStart = localToUTC(nightDate, hotel.eveningReturn || '22:00', nightTz);
+
+  const isLastNight = n === nights - 1;
+  // Last night extends to checkout time instead of morning_leave
+  const endTime = isLastNight ? (hotel.checkoutTime || '11:00') : (hotel.morningLeave || '08:00');
+  const oEnd = localToUTC(nextDate, endTime, nextTz);
+
+  const optionName = isLastNight ? `Check out · ${hotel.name}` : hotel.name;
+  const linkedType = isLastNight ? 'checkout' : null;
+
+  // createBlock gets a new optional linkedType param
+  await createBlock(oStart, oEnd, optionName, dayIndex(nightDate), linkedType);
+}
+
+// DELETE the checkout block section (lines 332-339)
 ```
 
-**B) Intercept hotel category selection** in `handleCategorySelect` (line 706):
+Update `createBlock` to accept optional `linkedType`:
 
 ```tsx
-const handleCategorySelect = (catId: string) => {
-  if (catId === 'hotel' && onHotelSelected) {
-    onHotelSelected();
-    return;
-  }
-  // ... existing logic
+const createBlock = async (
+  startIso: string,
+  endIso: string,
+  optionName: string,
+  scheduledDay: number | null,
+  linkedType?: string | null,
+) => {
+  const { data: entry } = await supabase.from('entries').insert({
+    trip_id: tripId,
+    start_time: startIso,
+    end_time: endIso,
+    is_scheduled: true,
+    scheduled_day: scheduledDay,
+    linked_type: linkedType || null,  // Add this field
+  } as any).select('id').single();
+  // ... rest unchanged
 };
 ```
 
-### 3. Timeline.tsx
+### Result for 3-night stay (Mon check-in 15:00, Thu checkout 11:00):
+- Check-in: Mon 15:00-16:00 -- "Check in . Hotel Pulitzer"
+- Night 1: Mon 22:00-Tue 08:00 -- "Hotel Pulitzer"
+- Night 2: Tue 22:00-Wed 08:00 -- "Hotel Pulitzer"
+- Night 3: Wed 22:00-Thu 11:00 -- "Check out . Hotel Pulitzer", linked_type: 'checkout'
 
-Pass the new prop to EntrySheet (~line 1686):
+---
 
-```tsx
-<EntrySheet
-  ...
-  onHotelSelected={() => {
-    setSheetOpen(false);
-    setHotelWizardOpen(true);
-  }}
-/>
-```
+## Fix 3: Ensure all enrichment data written to hotels table
+
+The current `handleFinish` already writes most fields (lines 215-235). Verify and ensure these are all populated:
+- `phone` -- already written
+- `rating` -- already written
+- `user_rating_count` -- already written
+- `google_place_id` -- already written
+- `google_maps_uri` -- already written
+
+This is already correct in the current code. No changes needed here.
+
+---
 
 ## Files Modified
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/CategorySidebar.tsx` | Always show hotel section, hotel dedup by hotel_id, debug log |
-| `src/components/timeline/EntrySheet.tsx` | Add `onHotelSelected` prop, intercept hotel category pick |
-| `src/pages/Timeline.tsx` | Pass `onHotelSelected` to EntrySheet |
+| `src/components/timeline/HotelWizard.tsx` | Add auto-enrichment flow after parsing, new enrichment UI in Step 1, remove checkout block, extend final overnight |
 
 ## What Does NOT Change
 
-- HotelWizard, ContinuousTimeline, transport, flight systems
-- Other category behavior in sidebar or EntrySheet
+- `parse-hotel-booking` edge function
+- `google-places` edge function
+- EntrySheet, EntryCard, ContinuousTimeline
+- Transport, flight systems
+- Check-in block (stays as separate 1hr block)
