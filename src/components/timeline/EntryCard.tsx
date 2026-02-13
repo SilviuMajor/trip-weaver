@@ -156,7 +156,7 @@ const EntryCard = ({
       onTouchStart={(e) => e.stopPropagation()}
       onTouchEnd={(e) => e.stopPropagation()}
       className={cn(
-        'absolute bottom-1.5 right-1.5 z-20 flex h-6 w-6 items-center justify-center rounded-full shadow-sm transition-all',
+        'absolute -bottom-1 -right-1 z-20 flex h-6 w-6 items-center justify-center rounded-full shadow-sm transition-all',
         nextEntryLocked
           ? 'bg-muted text-muted-foreground/40 cursor-not-allowed'
           : 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer',
@@ -167,7 +167,7 @@ const EntryCard = ({
       {magnetLoading ? (
         <Loader2 className="h-3 w-3 animate-spin" />
       ) : (
-        <Magnet className="h-3 w-3" />
+        <Magnet className="h-3 w-3 rotate-180" />
       )}
     </button>
   ) : null;

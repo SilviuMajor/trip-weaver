@@ -1,0 +1,1 @@
+ALTER TABLE public.trips ADD COLUMN default_transport_mode text NOT NULL DEFAULT 'transit';

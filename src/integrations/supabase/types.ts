@@ -482,6 +482,7 @@ export type Database = {
           created_at: string
           default_checkin_hours: number
           default_checkout_min: number
+          default_transport_mode: string
           destination: string | null
           duration_days: number | null
           emoji: string | null
@@ -501,6 +502,7 @@ export type Database = {
           created_at?: string
           default_checkin_hours?: number
           default_checkout_min?: number
+          default_transport_mode?: string
           destination?: string | null
           duration_days?: number | null
           emoji?: string | null
@@ -520,6 +522,7 @@ export type Database = {
           created_at?: string
           default_checkin_hours?: number
           default_checkout_min?: number
+          default_transport_mode?: string
           destination?: string | null
           duration_days?: number | null
           emoji?: string | null

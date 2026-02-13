@@ -528,15 +528,19 @@ const Timeline = () => {
       return;
     }
 
-    // Case B: Calculate transport via directions
+    // Case B: Calculate transport via directions (all modes)
     try {
       const { data: dirData, error: dirError } = await supabase.functions.invoke('google-directions', {
-        body: { fromAddress: fromAddr, toAddress: toAddr, mode: 'walk', departureTime: entry.end_time },
+        body: { fromAddress: fromAddr, toAddress: toAddr, modes: ['walk', 'transit', 'drive', 'bicycle'], departureTime: entry.end_time },
       });
 
       if (dirError) throw dirError;
 
-      const durationMin = dirData?.duration_min ?? 15;
+      // Determine default mode from trip settings
+      const defaultMode = (trip as any)?.default_transport_mode || 'transit';
+      const allResults: Array<{ mode: string; duration_min: number; distance_km: number; polyline?: string }> = dirData?.results ?? [];
+      const defaultResult = allResults.find((r: any) => r.mode === defaultMode) || allResults[0];
+      const durationMin = defaultResult?.duration_min ?? dirData?.duration_min ?? 15;
       const blockDur = Math.ceil(durationMin / 5) * 5;
       const transportStartMs = new Date(entry.end_time).getTime();
       const transportEndMs = transportStartMs + blockDur * 60000;
@@ -553,15 +557,16 @@ const Timeline = () => {
 
       if (newTransport) {
         const toShort = toAddr.split(',')[0].trim();
+        const modeLabel = defaultMode === 'walk' ? 'Walk' : defaultMode === 'transit' ? 'Transit' : defaultMode === 'drive' ? 'Drive' : defaultMode === 'bicycle' ? 'Cycle' : 'Transit';
         await supabase.from('entry_options').insert({
           entry_id: newTransport.id,
-          name: `Walk to ${toShort}`,
+          name: `${modeLabel} to ${toShort}`,
           category: 'transfer',
           departure_location: fromAddr,
           arrival_location: toAddr,
-          distance_km: dirData?.distance_km ?? null,
-          route_polyline: dirData?.polyline ?? null,
-          transport_modes: dirData?.results ? dirData.results : [{ mode: 'walk', duration_min: durationMin, distance_km: dirData?.distance_km ?? 0, polyline: dirData?.polyline ?? null }],
+          distance_km: defaultResult?.distance_km ?? dirData?.distance_km ?? null,
+          route_polyline: defaultResult?.polyline ?? dirData?.polyline ?? null,
+          transport_modes: allResults.length > 0 ? allResults : [{ mode: defaultMode, duration_min: durationMin, distance_km: dirData?.distance_km ?? 0, polyline: dirData?.polyline ?? null }],
         } as any);
       }
 
