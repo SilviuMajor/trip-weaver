@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { MapPin, Clock, Plane, ArrowRight, Lock, LockOpen, RefreshCw, Loader2, Check, Magnet } from 'lucide-react';
+import { MapPin, Clock, Plane, ArrowRight, Lock, LockOpen, RefreshCw, Loader2, Check } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import { toast } from 'sonner';
 import RouteMapPreview from './RouteMapPreview';
@@ -55,10 +55,6 @@ interface EntryCardProps {
   isShaking?: boolean;
   notes?: string | null;
   entryId?: string;
-  onMagnetSnap?: (entryId: string) => Promise<void>;
-  nextEntryLocked?: boolean;
-  hasNextEntry?: boolean;
-  magnetLoading?: boolean;
 }
 
 const getCategoryColor = (catId: string | null, customColor: string | null): string => {
@@ -127,10 +123,6 @@ const EntryCard = ({
   isShaking,
   notes,
   entryId,
-  onMagnetSnap,
-  nextEntryLocked,
-  hasNextEntry,
-  magnetLoading,
 }: EntryCardProps) => {
   const firstImage = option.images?.[0]?.image_url;
   const catColor = getCategoryColor(option.category, option.category_color);
@@ -140,37 +132,6 @@ const EntryCard = ({
   const isFlight = option.category === 'flight';
   const isAirportProcessing = option.category === 'airport_processing';
 
-  // Shared magnet snap button
-  const showMagnet = hasNextEntry && !isTransfer && !isFlight && !isAirportProcessing && entryId;
-  const magnetButton = showMagnet ? (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        if (nextEntryLocked) {
-          toast('Next event is locked', { description: 'Unlock it before snapping' });
-          return;
-        }
-        onMagnetSnap?.(entryId!);
-      }}
-      onTouchStart={(e) => e.stopPropagation()}
-      onTouchEnd={(e) => e.stopPropagation()}
-      className={cn(
-        'absolute -bottom-1 -right-1 z-20 flex h-6 w-6 items-center justify-center rounded-full shadow-sm transition-all',
-        nextEntryLocked
-          ? 'bg-muted text-muted-foreground/40 cursor-not-allowed'
-          : 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer',
-        magnetLoading && 'animate-pulse'
-      )}
-      title="Snap next event"
-    >
-      {magnetLoading ? (
-        <Loader2 className="h-3 w-3 animate-spin" />
-      ) : (
-        <Magnet className="h-3 w-3 rotate-180" />
-      )}
-    </button>
-  ) : null;
 
   const tintBg = isProcessing ? `${catColor}10` : `${catColor}18`;
 
@@ -519,7 +480,6 @@ const EntryCard = ({
             }}
           />
         )}
-        {magnetButton}
       </motion.div>
     );
   }
@@ -559,7 +519,6 @@ const EntryCard = ({
             {formatTime(startTime)}–{formatTime(endTime)} <span className="font-bold">{durationLabel}</span>
           </span>
         </div>
-        {magnetButton}
       </motion.div>
     );
   }
@@ -693,7 +652,6 @@ const EntryCard = ({
             }}
           />
         )}
-        {magnetButton}
       </motion.div>
     );
   }
@@ -935,7 +893,6 @@ const EntryCard = ({
           }}
         />
       )}
-      {magnetButton}
     </motion.div>
   );
 };
