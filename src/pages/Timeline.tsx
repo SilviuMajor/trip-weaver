@@ -14,6 +14,8 @@ import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { analyzeConflict, generateRecommendations } from '@/lib/conflictEngine';
 import { toast } from '@/hooks/use-toast';
 import { toast as sonnerToast } from 'sonner';
+import { Trash2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
 import TripNavBar from '@/components/timeline/TripNavBar';
 import ContinuousTimeline from '@/components/timeline/ContinuousTimeline';
@@ -156,6 +158,11 @@ const Timeline = () => {
   const mainScrollRef = useRef<HTMLElement>(null);
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
   const [scrollContainerReady, setScrollContainerReady] = useState(false);
+
+  // Drag-to-delete bin state
+  const [dragActiveEntryId, setDragActiveEntryId] = useState<string | null>(null);
+  const [binHighlighted, setBinHighlighted] = useState(false);
+  const binRef = useRef<HTMLDivElement>(null);
 
 
 
@@ -1610,6 +1617,58 @@ const Timeline = () => {
     return () => el.removeEventListener('wheel', handleWheel);
   }, [zoomEnabled, scrollContainerReady]);
 
+  // Bin proximity detection during drag
+  useEffect(() => {
+    if (!dragActiveEntryId) return;
+
+    const checkBinProximity = (clientX: number, clientY: number) => {
+      if (!binRef.current) return;
+      const rect = binRef.current.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const dist = Math.hypot(clientX - cx, clientY - cy);
+      setBinHighlighted(dist < 60);
+    };
+
+    const handleMouseMove = (e: MouseEvent) => checkBinProximity(e.clientX, e.clientY);
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 1) checkBinProximity(e.touches[0].clientX, e.touches[0].clientY);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('touchmove', handleTouchMove);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, [dragActiveEntryId]);
+
+  // Drag-to-delete commit override
+  const handleDragCommitOverride = useCallback((entryId: string): boolean => {
+    if (!binHighlighted) return false;
+
+    const entry = entries.find(e => e.id === entryId);
+    if (!entry) return false;
+
+    if (entry.is_locked) {
+      sonnerToast.error("Can't delete — unlock first");
+      return true;
+    }
+
+    const cat = entry.options[0]?.category;
+    if (cat === 'flight' || cat === 'airport_processing') {
+      sonnerToast.error("Can't delete flights by dragging");
+      return true;
+    }
+
+    supabase.from('entries').delete().eq('id', entryId).then(() => {
+      fetchData();
+      sonnerToast.success(entry.options[0]?.name ? `Deleted ${entry.options[0].name}` : 'Entry deleted');
+    });
+
+    return true;
+  }, [binHighlighted, entries, fetchData]);
+
 
   const handleApplyRecommendation = async (rec: Recommendation) => {
     for (const change of rec.changes) {
@@ -2194,6 +2253,11 @@ const Timeline = () => {
                   onMagnetSnap={handleMagnetSnap}
                   pixelsPerHour={pixelsPerHour}
                   onResetZoom={() => setZoomLevel(1.0)}
+                  onDragActiveChange={(active, entryId) => {
+                    setDragActiveEntryId(active ? entryId : null);
+                    if (!active) setBinHighlighted(false);
+                  }}
+                  onDragCommitOverride={handleDragCommitOverride}
                 />
               </main>
             )}
@@ -2435,6 +2499,21 @@ const Timeline = () => {
           </span>
         </div>
       )}
+
+      {/* Drag-to-delete bin */}
+      <div
+        ref={binRef}
+        className={cn(
+          "fixed bottom-6 left-6 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-200",
+          dragActiveEntryId
+            ? binHighlighted
+              ? "bg-destructive scale-110"
+              : "bg-muted-foreground/80 scale-100"
+            : "scale-0 opacity-0 pointer-events-none"
+        )}
+      >
+        <Trash2 className={cn("h-5 w-5 transition-colors", binHighlighted ? "text-destructive-foreground" : "text-background")} />
+      </div>
 
       {/* Undo/Redo floating buttons */}
       <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} />
