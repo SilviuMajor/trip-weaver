@@ -168,6 +168,9 @@ const Timeline = () => {
   const plannerFabRef = useRef<HTMLButtonElement>(null);
   const [plannerFabHighlighted, setPlannerFabHighlighted] = useState(false);
 
+  // Three-stage drag phase from ContinuousTimeline
+  const [currentDragPhase, setCurrentDragPhase] = useState<'timeline' | 'detached' | null>(null);
+
 
 
   // Redirect if no user
@@ -2073,7 +2076,7 @@ const Timeline = () => {
         }}
         className={cn(
           "fixed bottom-24 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-200",
-          dragActiveEntryId
+          currentDragPhase === 'detached'
             ? plannerFabHighlighted
               ? "bg-primary scale-125 text-primary-foreground"
               : "bg-primary/60 text-primary-foreground scale-100"
@@ -2200,6 +2203,8 @@ const Timeline = () => {
                     }
                   }}
                   onDragCommitOverride={(entryId, clientX, clientY) => {
+                    // Only check bin/planner when in detached phase
+                    if (currentDragPhase !== 'detached') return false;
                     // Check bin proximity
                     if (binRef.current) {
                       const rect = binRef.current.getBoundingClientRect();
@@ -2252,6 +2257,7 @@ const Timeline = () => {
                     return false;
                   }}
                   onDragPositionUpdate={(clientX, clientY) => {
+                    if (currentDragPhase !== 'detached') return;
                     if (binRef.current) {
                       const rect = binRef.current.getBoundingClientRect();
                       const dist = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
@@ -2267,7 +2273,9 @@ const Timeline = () => {
                     setDragActiveEntryId(null);
                     setBinHighlighted(false);
                     setPlannerFabHighlighted(false);
+                    setCurrentDragPhase(null);
                   }}
+                  onDragPhaseChange={setCurrentDragPhase}
                 />
               </main>
             )}
@@ -2515,7 +2523,7 @@ const Timeline = () => {
         ref={binRef}
         className={cn(
           "fixed bottom-6 left-6 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-200",
-          dragActiveEntryId
+          dragActiveEntryId && currentDragPhase === 'detached'
             ? binHighlighted
               ? "bg-red-500 scale-125"
               : "bg-red-400/80 scale-100"

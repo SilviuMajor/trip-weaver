@@ -276,10 +276,12 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     tz?: string,
   ) => {
     const touch = e.touches[0];
-    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+    const startX = touch.clientX;
+    const startY = touch.clientY;
+    touchStartPosRef.current = { x: startX, y: startY };
     
     touchTimerRef.current = setTimeout(() => {
-      startDrag(entryId, type, touch.clientX, touch.clientY, entryStartHour, entryEndHour, tz);
+      startDrag(entryId, type, startX, startY, entryStartHour, entryEndHour, tz);
     }, TOUCH_HOLD_MS);
   }, [startDrag]);
 
