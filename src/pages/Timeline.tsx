@@ -1643,32 +1643,6 @@ const Timeline = () => {
     };
   }, [dragActiveEntryId]);
 
-  // Drag-to-delete commit override
-  const handleDragCommitOverride = useCallback((entryId: string): boolean => {
-    if (!binHighlighted) return false;
-
-    const entry = entries.find(e => e.id === entryId);
-    if (!entry) return false;
-
-    if (entry.is_locked) {
-      sonnerToast.error("Can't delete — unlock first");
-      return true;
-    }
-
-    const cat = entry.options[0]?.category;
-    if (cat === 'flight' || cat === 'airport_processing') {
-      sonnerToast.error("Can't delete flights by dragging");
-      return true;
-    }
-
-    supabase.from('entries').delete().eq('id', entryId).then(() => {
-      fetchData();
-      sonnerToast.success(entry.options[0]?.name ? `Deleted ${entry.options[0].name}` : 'Entry deleted');
-    });
-
-    return true;
-  }, [binHighlighted, entries, fetchData]);
-
 
   const handleApplyRecommendation = async (rec: Recommendation) => {
     for (const change of rec.changes) {
@@ -2257,7 +2231,29 @@ const Timeline = () => {
                     setDragActiveEntryId(active ? entryId : null);
                     if (!active) setBinHighlighted(false);
                   }}
-                  onDragCommitOverride={handleDragCommitOverride}
+                  onDetachedDragChange={(active, entryId) => {
+                    setDragActiveEntryId(active ? entryId : null);
+                    if (!active) setBinHighlighted(false);
+                  }}
+                  onDetachedDrop={(entryId) => {
+                    if (binHighlighted) {
+                      const entry = entries.find(e => e.id === entryId);
+                      if (!entry) return;
+                      if (entry.is_locked) {
+                        sonnerToast.error("Can't delete — unlock first");
+                        return;
+                      }
+                      const cat = entry.options[0]?.category;
+                      if (cat === 'flight' || cat === 'airport_processing') {
+                        sonnerToast.error("Can't delete flights by dragging");
+                        return;
+                      }
+                      supabase.from('entries').delete().eq('id', entryId).then(() => {
+                        fetchData();
+                        sonnerToast.success(entry.options[0]?.name ? `Deleted ${entry.options[0].name}` : 'Entry deleted');
+                      });
+                    }
+                  }}
                 />
               </main>
             )}
@@ -2507,12 +2503,12 @@ const Timeline = () => {
           "fixed bottom-6 left-6 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-200",
           dragActiveEntryId
             ? binHighlighted
-              ? "bg-destructive scale-110"
-              : "bg-muted-foreground/80 scale-100"
+              ? "bg-red-500 scale-125"
+              : "bg-red-400/80 scale-100"
             : "scale-0 opacity-0 pointer-events-none"
         )}
       >
-        <Trash2 className={cn("h-5 w-5 transition-colors", binHighlighted ? "text-destructive-foreground" : "text-background")} />
+        <Trash2 className="h-5 w-5 text-white" />
       </div>
 
       {/* Undo/Redo floating buttons */}
