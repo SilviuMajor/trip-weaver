@@ -14,7 +14,7 @@ import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { analyzeConflict, generateRecommendations } from '@/lib/conflictEngine';
 import { toast } from '@/hooks/use-toast';
 import { toast as sonnerToast } from 'sonner';
-import { Trash2 } from 'lucide-react';
+import { Trash2, LayoutGrid } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
 import TripNavBar from '@/components/timeline/TripNavBar';
@@ -163,6 +163,10 @@ const Timeline = () => {
   const [dragActiveEntryId, setDragActiveEntryId] = useState<string | null>(null);
   const [binHighlighted, setBinHighlighted] = useState(false);
   const binRef = useRef<HTMLDivElement>(null);
+
+  // Planner FAB drop target state
+  const plannerFabRef = useRef<HTMLButtonElement>(null);
+  const [plannerFabHighlighted, setPlannerFabHighlighted] = useState(false);
 
 
 
@@ -1617,22 +1621,26 @@ const Timeline = () => {
     return () => el.removeEventListener('wheel', handleWheel);
   }, [zoomEnabled, scrollContainerReady]);
 
-  // Bin proximity detection during drag
+  // Bin + Planner FAB proximity detection during drag
   useEffect(() => {
     if (!dragActiveEntryId) return;
 
-    const checkBinProximity = (clientX: number, clientY: number) => {
-      if (!binRef.current) return;
-      const rect = binRef.current.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const dist = Math.hypot(clientX - cx, clientY - cy);
-      setBinHighlighted(dist < 60);
+    const checkProximity = (clientX: number, clientY: number) => {
+      if (binRef.current) {
+        const rect = binRef.current.getBoundingClientRect();
+        const dist = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
+        setBinHighlighted(dist < 60);
+      }
+      if (plannerFabRef.current) {
+        const rect = plannerFabRef.current.getBoundingClientRect();
+        const dist = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
+        setPlannerFabHighlighted(dist < 60);
+      }
     };
 
-    const handleMouseMove = (e: MouseEvent) => checkBinProximity(e.clientX, e.clientY);
+    const handleMouseMove = (e: MouseEvent) => checkProximity(e.clientX, e.clientY);
     const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 1) checkBinProximity(e.touches[0].clientX, e.touches[0].clientY);
+      if (e.touches.length === 1) checkProximity(e.touches[0].clientX, e.touches[0].clientY);
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -2121,6 +2129,27 @@ const Timeline = () => {
         <span className="text-2xl font-light">+</span>
       </button>
 
+      {/* Planner FAB — above + FAB */}
+      <button
+        ref={plannerFabRef}
+        onClick={() => {
+          if (!dragActiveEntryId) setSidebarOpen(!sidebarOpen);
+        }}
+        className={cn(
+          "fixed bottom-24 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-200",
+          dragActiveEntryId
+            ? plannerFabHighlighted
+              ? "bg-primary scale-125 text-primary-foreground"
+              : "bg-primary/60 text-primary-foreground scale-100"
+            : sidebarOpen
+              ? "bg-primary text-primary-foreground"
+              : "bg-background border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+        )}
+        title="Planner"
+      >
+        <LayoutGrid className="h-5 w-5" />
+      </button>
+
       {loading ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
@@ -2229,11 +2258,17 @@ const Timeline = () => {
                   onResetZoom={() => setZoomLevel(1.0)}
                   onDragActiveChange={(active, entryId) => {
                     setDragActiveEntryId(active ? entryId : null);
-                    if (!active) setBinHighlighted(false);
+                    if (!active) {
+                      setBinHighlighted(false);
+                      setPlannerFabHighlighted(false);
+                    }
                   }}
                   onDetachedDragChange={(active, entryId) => {
                     setDragActiveEntryId(active ? entryId : null);
-                    if (!active) setBinHighlighted(false);
+                    if (!active) {
+                      setBinHighlighted(false);
+                      setPlannerFabHighlighted(false);
+                    }
                   }}
                   onDetachedDrop={(entryId) => {
                     if (binHighlighted) {
@@ -2252,7 +2287,27 @@ const Timeline = () => {
                         fetchData();
                         sonnerToast.success(entry.options[0]?.name ? `Deleted ${entry.options[0].name}` : 'Entry deleted');
                       });
+                    } else if (plannerFabHighlighted) {
+                      const entry = entries.find(e => e.id === entryId);
+                      if (!entry) return;
+                      if (entry.is_locked) {
+                        sonnerToast.error("Can't move — unlock first");
+                        return;
+                      }
+                      const cat = entry.options[0]?.category;
+                      if (cat === 'flight' || cat === 'airport_processing') {
+                        sonnerToast.error("Can't move flights to Planner");
+                        return;
+                      }
+                      supabase.from('entries')
+                        .update({ is_scheduled: false, scheduled_day: null })
+                        .eq('id', entryId)
+                        .then(() => {
+                          fetchData();
+                          sonnerToast.success(entry.options[0]?.name ? `Moved ${entry.options[0].name} to Planner` : 'Moved to Planner');
+                        });
                     }
+                    setPlannerFabHighlighted(false);
                   }}
                 />
               </main>
