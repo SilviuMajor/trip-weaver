@@ -2195,6 +2195,7 @@ const Timeline = () => {
                   onMagnetSnap={handleMagnetSnap}
                   pixelsPerHour={pixelsPerHour}
                   onResetZoom={() => setZoomLevel(1.0)}
+                  binRef={binRef}
                   onDragActiveChange={(active, entryId) => {
                     setDragActiveEntryId(active ? entryId : null);
                     if (!active) {

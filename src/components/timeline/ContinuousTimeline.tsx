@@ -64,6 +64,7 @@ interface ContinuousTimelineProps {
   onDragPositionUpdate?: (clientX: number, clientY: number) => void;
   onDragEnd?: () => void;
   onDragPhaseChange?: (phase: 'timeline' | 'detached' | null) => void;
+  binRef?: React.RefObject<HTMLDivElement>;
 }
 
 const ContinuousTimeline = ({
@@ -106,6 +107,7 @@ const ContinuousTimeline = ({
   onDragPositionUpdate,
   onDragEnd,
   onDragPhaseChange,
+  binRef,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
@@ -657,13 +659,37 @@ const ContinuousTimeline = ({
         {Array.from({ length: totalHours }, (_, i) => i).map(globalHour => {
           const localHour = globalHour % 24;
           const displayHour = `${String(localHour).padStart(2, '0')}:00`;
+          const labelTop = globalHour * pixelsPerHour;
+
+          // Hide hour label if a drag time pill is nearby
+          let hideForPill = false;
+          if (dragState) {
+            const dragEntry = sortedEntries.find(e => e.id === dragState.entryId);
+            if (dragEntry) {
+              const origGH = getEntryGlobalHours(dragEntry);
+              const durationGH = origGH.endGH - origGH.startGH;
+              if (dragState.type === 'move') {
+                const startPx = dragState.currentStartHour * pixelsPerHour;
+                const endPx = (dragState.currentStartHour + durationGH) * pixelsPerHour;
+                if (Math.abs(labelTop - startPx) < 20 || Math.abs(labelTop - endPx) < 20) hideForPill = true;
+              } else if (dragState.type === 'resize-top') {
+                if (Math.abs(labelTop - dragState.currentStartHour * pixelsPerHour) < 20) hideForPill = true;
+              } else if (dragState.type === 'resize-bottom') {
+                if (Math.abs(labelTop - dragState.currentEndHour * pixelsPerHour) < 20) hideForPill = true;
+              }
+            }
+          }
+
           return (
             <div
               key={globalHour}
               className="absolute left-0 right-0 border-t border-border/30"
-              style={{ top: globalHour * pixelsPerHour }}
+              style={{ top: labelTop }}
             >
-              <span className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center" style={{ left: -46, width: 30 }}>
+              <span
+                className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center"
+                style={{ left: -46, width: 30, opacity: hideForPill ? 0 : 1, transition: 'opacity 0.15s' }}
+              >
                 {displayHour}
               </span>
             </div>
@@ -1520,31 +1546,61 @@ const ContinuousTimeline = ({
           })}
         </div>
 
+        {/* Time pills during move drag */}
+        {dragState && dragState.type === 'move' && (() => {
+          const entry = sortedEntries.find(e => e.id === dragState.entryId);
+          if (!entry) return null;
+          const origGH = getEntryGlobalHours(entry);
+          const durationGH = origGH.endGH - origGH.startGH;
+          const startGH = dragState.currentStartHour;
+          const endGH = startGH + durationGH;
+          const formatGH = (gh: number) => {
+            const h = Math.floor(gh % 24);
+            const m = Math.round((gh % 1) * 60);
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+          };
+          const startTop = startGH * pixelsPerHour;
+          const endTop = endGH * pixelsPerHour;
+          return (
+            <>
+              <div className="absolute z-[60] pointer-events-none" style={{ top: startTop - 10, left: -72 }}>
+                <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">{formatGH(startGH)}</span>
+              </div>
+              <div className="absolute z-[60] pointer-events-none" style={{ top: endTop - 10, left: -72 }}>
+                <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">{formatGH(endGH)}</span>
+              </div>
+            </>
+          );
+        })()}
+
+        {/* Time pill during resize */}
+        {dragState && (dragState.type === 'resize-top' || dragState.type === 'resize-bottom') && (() => {
+          const isTop = dragState.type === 'resize-top';
+          const activeGH = isTop ? dragState.currentStartHour : dragState.currentEndHour;
+          const activeTop = activeGH * pixelsPerHour;
+          const h = Math.floor(activeGH % 24);
+          const m = Math.round((activeGH % 1) * 60);
+          const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+          return (
+            <div className="absolute z-[60] pointer-events-none" style={{ top: activeTop - 10, left: -72 }}>
+              <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">{timeStr}</span>
+            </div>
+          );
+        })()}
+
         {/* Ghost outline during Stage 2 (detached) move drag */}
         {dragState && dragState.type === 'move' && dragPhase === 'detached' && (() => {
           const entry = sortedEntries.find(e => e.id === dragState.entryId);
           if (!entry) return null;
           const origGH = getEntryGlobalHours(entry);
           const durationGH = origGH.endGH - origGH.startGH;
-
-          const ghostStartGH = dragState.currentStartHour;
-          const ghostTop = ghostStartGH * pixelsPerHour;
+          const ghostTop = dragState.currentStartHour * pixelsPerHour;
           const ghostHeight = durationGH * pixelsPerHour;
-
-          const startH = Math.floor(ghostStartGH % 24);
-          const startM = Math.round((ghostStartGH % 1) * 60);
-          const endGH = ghostStartGH + durationGH;
-          const endH = Math.floor(endGH % 24);
-          const endM = Math.round((endGH % 1) * 60);
-          const timeLabel = `${String(startH).padStart(2,'0')}:${String(startM).padStart(2,'0')} – ${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`;
-
           return (
             <div
               className="absolute left-0 right-0 z-[11] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 pointer-events-none"
               style={{ top: ghostTop, height: ghostHeight }}
-            >
-              <span className="absolute left-2 top-1 text-xs font-medium text-primary/70">{timeLabel}</span>
-            </div>
+            />
           );
         })()}
 
@@ -1598,27 +1654,37 @@ const ContinuousTimeline = ({
         if (!entry) return null;
         const opt = entry.options[0];
         if (!opt) return null;
+        const origGH = getEntryGlobalHours(entry);
+        const durationGH = origGH.endGH - origGH.startGH;
+        const moveHeight = durationGH * pixelsPerHour;
+        const isCompactMove = moveHeight < 40;
 
         const gridRect = gridRef.current?.getBoundingClientRect();
         const cardWidth = gridRect ? gridRect.width - 4 : 220;
 
         let shrinkFactor = 1;
-        // No bin ref available here, just use scale
-        const baseScale = 0.92;
+        if (binRef?.current) {
+          const br = binRef.current.getBoundingClientRect();
+          const binDist = Math.hypot(
+            dragState.currentClientX - (br.left + br.width / 2),
+            dragState.currentClientY - (br.top + br.height / 2)
+          );
+          shrinkFactor = binDist < 150 ? Math.max(0.3, binDist / 150) : 1;
+        }
 
         return (
           <div
-            className="fixed z-[200] pointer-events-none transition-all duration-150 ease-out"
+            className="fixed z-[200] pointer-events-none"
             style={{
               left: dragState.currentClientX - cardWidth / 2,
-              top: dragState.currentClientY - 30,
+              top: dragState.currentClientY - moveHeight / 2,
               width: cardWidth,
-              opacity: 0.9,
-              transform: `scale(${baseScale}) rotate(-1.5deg)`,
-              filter: 'drop-shadow(0 16px 32px rgba(0,0,0,0.25))',
+              height: moveHeight,
+              transform: shrinkFactor < 1 ? `scale(${shrinkFactor})` : undefined,
+              transition: 'left 0.1s ease-out, top 0.1s ease-out, transform 0.1s ease-out',
             }}
           >
-            <div className="rounded-2xl overflow-hidden">
+            <div className="h-full ring-2 ring-primary/60 shadow-lg shadow-primary/20 rounded-2xl overflow-hidden">
               <EntryCard
                 option={opt}
                 startTime={entry.start_time}
@@ -1631,7 +1697,7 @@ const ContinuousTimeline = ({
                 hasVoted={false}
                 onVoteChange={() => {}}
                 cardSizeClass="h-full"
-                isCompact
+                isCompact={isCompactMove}
               />
             </div>
           </div>
