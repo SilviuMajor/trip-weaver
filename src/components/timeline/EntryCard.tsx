@@ -301,7 +301,7 @@ const EntryCard = ({
           )}
           style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
         >
-          <div className="flex w-full items-center gap-1.5 px-2 py-0.5">
+          <div className="flex w-full items-center gap-1.5 px-2 py-0.5 pointer-events-none">
             <span className="text-xs shrink-0">{mode.emoji}</span>
             <span className="text-[10px] font-semibold text-orange-700 dark:text-orange-300">{durationLabel}</span>
             {distStr && <span className="text-[10px] text-orange-600/70 dark:text-orange-400/70">· {distStr}</span>}
@@ -326,7 +326,7 @@ const EntryCard = ({
           )}
           style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
         >
-          <div className="flex w-full items-center gap-2 px-2.5 py-1">
+          <div className="flex w-full items-center gap-2 px-2.5 py-1 pointer-events-none">
             <span className="text-base shrink-0">{mode.emoji}</span>
             <span className="truncate text-xs font-medium text-foreground flex-1 min-w-0">{option.name}</span>
             <span className="shrink-0 text-[10px] font-bold text-orange-700 dark:text-orange-300">{durationLabel}</span>
@@ -352,7 +352,7 @@ const EntryCard = ({
           )}
           style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
         >
-          <div className="flex h-full">
+          <div className="flex h-full pointer-events-none">
             <div className="flex items-center justify-center w-12 shrink-0">
               <span className="text-xl">{mode.emoji}</span>
             </div>
@@ -365,7 +365,7 @@ const EntryCard = ({
                 <span className="text-muted-foreground">{formatTime(startTime)} — {formatTime(endTime)}</span>
               </div>
             </div>
-            <div className="flex items-start pt-2 pr-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-start pt-2 pr-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto">
               {refreshPopover}
             </div>
           </div>
@@ -390,7 +390,7 @@ const EntryCard = ({
           )}
         style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
       >
-        <div className="relative z-10 flex h-full">
+        <div className="relative z-10 flex h-full pointer-events-none">
           <div className="flex items-center justify-center w-14 shrink-0">
             <div className="flex items-center justify-center w-10 h-10 rounded-full bg-orange-100 dark:bg-orange-900/30">
               <span className="text-2xl">{mode.emoji}</span>
@@ -460,7 +460,7 @@ const EntryCard = ({
           background: tintBg,
         }}
       >
-        <div className="relative z-10 flex h-full flex-col justify-center gap-0.5 px-2.5 py-1">
+        <div className="relative z-10 flex h-full flex-col justify-center gap-0.5 px-2.5 py-1 pointer-events-none">
           <span className="truncate text-xs font-semibold leading-tight">
             {catEmoji} {option.name}
           </span>
@@ -510,7 +510,7 @@ const EntryCard = ({
           background: tintBg,
         }}
       >
-        <div className="relative z-10 flex w-full items-center gap-1.5 px-2 py-0.5">
+        <div className="relative z-10 flex w-full items-center gap-1.5 px-2 py-0.5 pointer-events-none">
           <span className="text-xs shrink-0">{catEmoji}</span>
           <span className="truncate text-[11px] font-semibold leading-tight flex-1 min-w-0">
             {option.name}
@@ -565,7 +565,7 @@ const EntryCard = ({
           </div>
         )}
         <div className={cn(
-          'relative z-10 flex h-full flex-col justify-between px-2.5 py-1.5',
+          'relative z-10 flex h-full flex-col justify-between px-2.5 py-1.5 pointer-events-none',
           firstImage ? 'text-white' : 'text-foreground'
         )}>
           <div>
@@ -594,20 +594,11 @@ const EntryCard = ({
                 ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
               </p>
             )}
-            {option.location_name && option.latitude != null && option.longitude != null && (
-              <a
-                href={`https://www.google.com/maps/search/?api=1&query=${option.latitude},${option.longitude}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className={cn(
-                  'flex items-center gap-0.5 text-[9px] truncate hover:underline',
-                  firstImage ? 'text-white/70' : 'text-muted-foreground'
-                )}
-              >
+            {option.location_name && (
+              <p className={cn('flex items-center gap-0.5 text-[9px] truncate', firstImage ? 'text-white/70' : 'text-muted-foreground')}>
                 <MapPin className="h-2.5 w-2.5 shrink-0" />
                 <span className="truncate">{option.location_name}</span>
-              </a>
+              </p>
             )}
             {notes && (
               <p className={cn(
@@ -692,7 +683,7 @@ const EntryCard = ({
 
       {/* Content */}
       <div className={cn(
-        'relative z-10 p-4',
+        'relative z-10 p-4 pointer-events-none',
         firstImage ? 'text-white' : 'text-foreground',
         isProcessing && 'p-3'
       )}>
@@ -745,20 +736,11 @@ const EntryCard = ({
             ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
           </p>
         )}
-        {!isTransfer && !isProcessing && option.location_name && option.latitude != null && option.longitude != null && (
-          <a
-            href={`https://www.google.com/maps/search/?api=1&query=${option.latitude},${option.longitude}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className={cn(
-              'mb-2 flex items-center gap-1 text-xs truncate hover:underline',
-              firstImage ? 'text-white/80' : 'text-muted-foreground'
-            )}
-          >
+        {!isTransfer && !isProcessing && option.location_name && (
+          <p className={cn('mb-2 flex items-center gap-1 text-xs truncate', firstImage ? 'text-white/80' : 'text-muted-foreground')}>
             <MapPin className="h-3 w-3 shrink-0" />
             <span className="truncate">{option.location_name}</span>
-          </a>
+          </p>
         )}
 
         {/* Notes */}
@@ -859,6 +841,7 @@ const EntryCard = ({
                 {durationLabel}
               </span>
               {userId && totalOptions > 1 && option.category !== 'transfer' && option.category !== 'flight' && (
+                <span className="pointer-events-auto">
                 <VoteButton
                   optionId={option.id}
                   userId={userId}
@@ -867,6 +850,7 @@ const EntryCard = ({
                   locked={votingLocked}
                   onVoteChange={onVoteChange}
                 />
+                </span>
               )}
             </div>
           </div>

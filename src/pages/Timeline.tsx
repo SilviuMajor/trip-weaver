@@ -496,6 +496,15 @@ const Timeline = () => {
     const opt = entry.options[0];
     if (!opt) return;
 
+    // For flights: use the group's effective end (checkout end, not flight end)
+    let effectiveEndTime = entry.end_time;
+    if (opt.category === 'flight') {
+      const checkout = entries.find(e => e.linked_flight_id === entry.id && e.linked_type === 'checkout');
+      if (checkout) {
+        effectiveEndTime = checkout.end_time;
+      }
+    }
+
     // Find sorted scheduled entries
     const sorted = [...scheduledEntries].sort(
       (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
@@ -547,6 +556,8 @@ const Timeline = () => {
     for (let i = entryIdx + 1; i < sorted.length; i++) {
       const candidate = sorted[i];
       const candOpt = candidate.options[0];
+      // Skip entries that are part of THIS flight group
+      if (opt.category === 'flight' && (candidate.linked_flight_id === entry.id)) continue;
       if (candOpt?.category === 'transfer') {
         transportEntry = candidate;
       } else if (candOpt?.category !== 'airport_processing' && !candidate.linked_flight_id) {
@@ -571,7 +582,7 @@ const Timeline = () => {
       const transportOldEnd = transportEntry.end_time;
       const transportDuration = new Date(transportOldEnd).getTime() - new Date(transportOldStart).getTime();
 
-      const entryEndMs = new Date(entry.end_time).getTime();
+      const entryEndMs = new Date(effectiveEndTime).getTime();
       const newTransportStart = new Date(entryEndMs).toISOString();
       const newTransportEnd = new Date(entryEndMs + transportDuration).toISOString();
       const newNextStart = new Date(entryEndMs + transportDuration).toISOString();
@@ -597,13 +608,15 @@ const Timeline = () => {
     }
 
     // Case B/C: No transport
-    const fromAddr = opt.address || opt.location_name || opt.arrival_location;
+    const fromAddr = opt.category === 'flight'
+      ? (opt.arrival_location || opt.address || opt.location_name)
+      : (opt.address || opt.location_name || opt.arrival_location);
     const nextOpt = nextEvent.options[0];
     const toAddr = nextOpt?.address || nextOpt?.location_name || nextOpt?.departure_location;
 
     if (!fromAddr || !toAddr) {
       // Case C: No addresses → snap directly
-      const entryEndMs = new Date(entry.end_time).getTime();
+      const entryEndMs = new Date(effectiveEndTime).getTime();
       const newStart = new Date(entryEndMs).toISOString();
       const newEnd = new Date(entryEndMs + nextDuration).toISOString();
 
@@ -626,7 +639,7 @@ const Timeline = () => {
     // Case B: Calculate transport via directions (all modes)
     try {
       const { data: dirData, error: dirError } = await supabase.functions.invoke('google-directions', {
-        body: { fromAddress: fromAddr, toAddress: toAddr, modes: ['walk', 'transit', 'drive', 'bicycle'], departureTime: entry.end_time },
+        body: { fromAddress: fromAddr, toAddress: toAddr, modes: ['walk', 'transit', 'drive', 'bicycle'], departureTime: effectiveEndTime },
       });
 
       if (dirError) throw dirError;
@@ -637,7 +650,7 @@ const Timeline = () => {
       const defaultResult = allResults.find((r: any) => r.mode === defaultMode) || allResults[0];
       const durationMin = defaultResult?.duration_min ?? dirData?.duration_min ?? 15;
       const blockDur = Math.ceil(durationMin / 5) * 5;
-      const transportStartMs = new Date(entry.end_time).getTime();
+      const transportStartMs = new Date(effectiveEndTime).getTime();
       const transportEndMs = transportStartMs + blockDur * 60000;
 
       // Create transport entry
