@@ -916,7 +916,9 @@ const ContinuousTimeline = ({
           let entryEndGH: number;
           let resolvedTz: string;
 
-          if (isDragged && dragState) {
+          const isResizing = isDragged && dragState && (dragState.type === 'resize-top' || dragState.type === 'resize-bottom');
+
+          if (isResizing && dragState) {
             entryStartGH = dragState.currentStartHour;
             entryEndGH = dragState.currentEndHour;
             resolvedTz = getEntryGlobalHours(entry).resolvedTz;
