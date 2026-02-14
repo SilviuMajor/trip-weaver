@@ -1,52 +1,92 @@
 
-# Fix Mobile Pinch-to-Zoom Registration and Add Account Settings Access
+# Three Features: Mobile Tap-to-Create, Resize Handle Pills, Drag-to-Delete Bin
 
-## Problem
-1. The pinch-to-zoom `useEffect` runs before the `<main>` element renders (it's behind a loading gate), so `mainScrollRef.current` is null and listeners never attach. The deps don't change when the DOM becomes ready.
-2. iOS Safari's native page zoom competes with the custom pinch handler.
-3. No way to reach Account Settings (where the zoom toggle lives) from the timeline header.
+## Overview
+Three independent features that improve timeline interactivity, especially on mobile: (A) single-tap on empty space to create entries, (B) visible resize handle pills on cards, and (C) a trash bin that appears during drag for quick deletion.
 
-## Changes
+## Feature A -- Mobile Tap-to-Create
 
-### 1. `index.html` -- Disable native browser zoom
-Update the viewport meta tag (line 5) to prevent iOS Safari from intercepting pinch gestures:
-```html
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
-```
+### File: `src/components/timeline/ContinuousTimeline.tsx`
 
-### 2. `src/pages/Timeline.tsx` -- Callback ref for scroll container
+**Add refs** (near line 108):
+- `tapCreateTimeoutRef` for the 320ms delay to distinguish single-tap from double-tap
+- `slotTouchStartRef` to track touch start position for scroll-vs-tap detection
 
-Add a `scrollContainerReady` state:
-```typescript
-const [scrollContainerReady, setScrollContainerReady] = useState(false);
-```
+**Add `onTouchStart` to the grid div** (line 498-514, the `data-timeline-area` div):
+- Record touch start position when `e.touches.length === 1`
 
-Replace the `ref={mainScrollRef}` on `<main>` with a callback ref that sets both the ref and the ready flag:
-```tsx
-<main
-  ref={(el) => {
-    (mainScrollRef as React.MutableRefObject<HTMLElement | null>).current = el;
-    if (el && !scrollContainerReady) setScrollContainerReady(true);
-  }}
-  ...
->
-```
+**Replace `handleSlotTouchEnd`** (lines 485-494):
+- Check if finger moved more than 15px (scroll) -- if so, ignore
+- If double-tap (within 300ms of last tap), cancel any pending create timeout and call `onResetZoom`
+- Otherwise, set a 320ms timeout. When it fires, compute the tapped global minute (snapped to 15min), then call `onDragSlot(minutesToIso(minutes), minutesToIso(minutes + 60))` to open EntrySheet with a 1-hour block
 
-Update both zoom `useEffect` dependency arrays to `[zoomEnabled, scrollContainerReady]` (removing `isMobile` and `mobileView` since they're no longer needed -- the callback ref handles re-mount).
+No changes to desktop drag-to-create (mouse events remain untouched).
 
-### 3. `src/components/timeline/TimelineHeader.tsx` -- Add Account Settings button
-- Import `User` from lucide-react
-- Add a `User` icon button before the logout button that navigates to `/settings`
-- Visible to all users (not gated by `isOrganizer`)
+## Feature B -- Resize Handle Visual Pills
+
+### File: `src/components/timeline/ContinuousTimeline.tsx`
+
+**Top resize handle** (lines 898-906, the `canDrag && !flightGroup` block):
+- Change `h-2` to `h-3`, add `group/resize` class
+- Insert a child div: `w-8 h-1 rounded-full bg-muted-foreground/20 group-hover/resize:bg-primary/50 transition-colors`, centered horizontally at top
+
+**Top locked resize handle** (lines 907-913):
+- Change `h-2` to `h-3`
+- Insert similar pill but dimmer: `bg-muted-foreground/10`, no hover effect
+
+**Bottom resize handle** (lines 1156-1164):
+- Change `h-2` to `h-3`, add `group/resize` class
+- Insert child pill at `bottom-0` instead of `top-0`
+
+**Bottom locked resize handle** (lines 1165-1171):
+- Same as above but dimmer styling
+
+**Excluded from**: flight group resize handles (lines 957-980), transport connectors, compact cards (add `!isCompact` guard to the canDrag conditions for top/bottom handles)
+
+## Feature C -- Drag-to-Delete Bin
+
+### File: `src/components/timeline/ContinuousTimeline.tsx`
+
+**New props** on `ContinuousTimelineProps` interface (line 27):
+- `onDragActiveChange?: (active: boolean, entryId: string | null) => void`
+- `onDragCommitOverride?: (entryId: string) => boolean`
+
+**Expose drag-active state** -- add a `useEffect` that calls `onDragActiveChange` when `dragState` changes
+
+**Modify `handleDragCommit`** (line 238) -- at the top, check `if (onDragCommitOverride?.(entryId)) return;` before doing any time change logic
+
+### File: `src/pages/Timeline.tsx`
+
+**New state** (near line 158):
+- `dragActiveEntryId: string | null`
+- `binHighlighted: boolean`
+- `binRef: React.RefObject<HTMLDivElement>`
+
+**Pass callbacks to ContinuousTimeline**:
+- `onDragActiveChange` sets/clears `dragActiveEntryId`
+- `onDragCommitOverride` returns true (intercepting the drop) when `binHighlighted` is true
+
+**Bin proximity detection** -- `useEffect` that, when `dragActiveEntryId` is set, listens to `mousemove` and `touchmove` on `document`, computes distance from pointer to bin center, and sets `binHighlighted` when within 60px
+
+**Delete logic** in `onDragCommitOverride`:
+- If entry is locked: toast "Can't delete -- unlock first", return true
+- If category is `flight` or `airport_processing`: toast "Can't delete flights by dragging", return true
+- Otherwise: delete via `supabase.from('entries').delete().eq('id', entryId)`, refresh data, show toast
+
+**Render the bin** (near bottom, after zoom indicator around line 2437):
+- Fixed `bottom-6 left-6` circle, `h-14 w-14`, with `Trash2` icon
+- `scale-0 opacity-0 pointer-events-none` when no drag active
+- `bg-muted-foreground/80` when drag active but not highlighted
+- `bg-red-500 scale-110` when highlighted (card is near bin)
+- Import `Trash2` from lucide-react
 
 ## Files changed
-1. `index.html` -- viewport meta tag
-2. `src/pages/Timeline.tsx` -- callback ref + scrollContainerReady state + effect deps
-3. `src/components/timeline/TimelineHeader.tsx` -- Account Settings button
+1. `src/components/timeline/ContinuousTimeline.tsx` -- tap-to-create, resize pills, drag-active/commit-override props
+2. `src/pages/Timeline.tsx` -- bin state, proximity detection, delete logic, bin rendering
 
 ## What does NOT change
-- Zoom gesture logic (pinch calculation, scroll anchoring)
-- Desktop Ctrl+scroll logic
-- Sub-hour grid lines, zoom indicator
-- Trip Settings page or its access
-- Any drag/resize mechanics
+- Desktop drag-to-create (mouse events)
+- Existing drag/resize mechanics in useDragResize hook
+- Zoom system, weather, transport, planner sidebar
+- Flight group card resize handles (no pills added)
+- EntrySheet logic
