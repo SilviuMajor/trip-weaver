@@ -24,7 +24,7 @@ interface UseDragResizeOptions {
   scrollContainerRef?: React.RefObject<HTMLElement>;
 }
 
-const SNAP_MINUTES = 15;
+const SNAP_MINUTES = 5;
 const TOUCH_HOLD_MS = 200;
 const TOUCH_MOVE_THRESHOLD = 10;
 

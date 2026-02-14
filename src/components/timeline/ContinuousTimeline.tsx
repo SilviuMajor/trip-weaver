@@ -519,16 +519,17 @@ const ContinuousTimeline = ({
 
     const checkStillness = (clientX: number, clientY: number) => {
       const prev = lastMovePositionRef.current;
-      if (prev && Math.hypot(clientX - prev.x, clientY - prev.y) < 5) {
+      if (prev && Math.hypot(clientX - prev.x, clientY - prev.y) < 20) {
         if (!detachTimerRef.current) {
           detachTimerRef.current = setTimeout(() => {
             const ds = dragState;
             if (!ds) return;
             cancelDrag();
             setDetachedDrag({ entryId: ds.entryId, position: { x: clientX, y: clientY } });
+            if (navigator.vibrate) navigator.vibrate(50);
             onDetachedDragChange?.(true, ds.entryId);
             detachTimerRef.current = null;
-          }, 500);
+          }, 400);
         }
       } else {
         if (detachTimerRef.current) {
@@ -1178,24 +1179,31 @@ const ContinuousTimeline = ({
                           );
                         })()}
                         {/* Magnet on flight group */}
-                        {magnetState.showMagnet && !magnetState.nextLocked && (
+                        {magnetState.showMagnet && (
                           <button
                             data-magnet
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (magnetState.nextLocked) {
+                                toast('Next event is locked', { description: 'Unlock it before snapping' });
+                                return;
+                              }
                               if (!onMagnetSnap) return;
                               setMagnetLoadingId(entry.id);
                               onMagnetSnap(entry.id).finally(() => setMagnetLoadingId(null));
                             }}
                             className={cn(
-                              "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
+                              "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
+                              magnetState.nextLocked
+                                ? "bg-muted cursor-not-allowed"
+                                : "bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
                               magnetLoadingId === entry.id && "animate-pulse"
                             )}
                           >
                             {magnetLoadingId === entry.id ? (
                               <Loader2 className="h-3.5 w-3.5 animate-spin text-green-600" />
                             ) : (
-                              <Magnet className="h-3 w-3 text-green-600 dark:text-green-400" style={{ transform: 'rotate(180deg)' }} />
+                              <Magnet className={cn("h-3 w-3", magnetState.nextLocked ? "text-muted-foreground/40" : "text-green-600 dark:text-green-400")} style={{ transform: 'rotate(180deg)' }} />
                             )}
                           </button>
                         )}
@@ -1242,23 +1250,30 @@ const ContinuousTimeline = ({
                         onDelete={onDeleteTransport ? () => onDeleteTransport(entry.id) : undefined}
                       />
                       {/* Magnet snap icon on transport connector */}
-                      {magnetState.showMagnet && !magnetState.nextLocked && (
+                      {magnetState.showMagnet && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (magnetState.nextLocked) {
+                              toast('Next event is locked', { description: 'Unlock it before snapping' });
+                              return;
+                            }
                             if (!onMagnetSnap) return;
                             setMagnetLoadingId(entry.id);
                             onMagnetSnap(entry.id).finally(() => setMagnetLoadingId(null));
                           }}
                           className={cn(
-                            "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
+                            "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
+                            magnetState.nextLocked
+                              ? "bg-muted cursor-not-allowed"
+                              : "bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
                             magnetLoadingId === entry.id && "animate-pulse"
                           )}
                         >
                           {magnetLoadingId === entry.id ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin text-green-600" />
                           ) : (
-                            <Magnet className="h-3 w-3 text-green-600 dark:text-green-400" style={{ transform: 'rotate(180deg)' }} />
+                            <Magnet className={cn("h-3 w-3", magnetState.nextLocked ? "text-muted-foreground/40" : "text-green-600 dark:text-green-400")} style={{ transform: 'rotate(180deg)' }} />
                           )}
                         </button>
                       )}
@@ -1330,23 +1345,30 @@ const ContinuousTimeline = ({
                         </button>
                       )}
                       {/* Magnet snap icon outside card — bottom right */}
-                      {magnetState.showMagnet && !magnetState.nextLocked && (
+                      {magnetState.showMagnet && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (magnetState.nextLocked) {
+                              toast('Next event is locked', { description: 'Unlock it before snapping' });
+                              return;
+                            }
                             if (!onMagnetSnap) return;
                             setMagnetLoadingId(entry.id);
                             onMagnetSnap(entry.id).finally(() => setMagnetLoadingId(null));
                           }}
                           className={cn(
-                            "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
+                            "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
+                            magnetState.nextLocked
+                              ? "bg-muted cursor-not-allowed"
+                              : "bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
                             magnetLoadingId === entry.id && "animate-pulse"
                           )}
                         >
                           {magnetLoadingId === entry.id ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin text-green-600" />
                           ) : (
-                            <Magnet className="h-3 w-3 text-green-600 dark:text-green-400" style={{ transform: 'rotate(180deg)' }} />
+                            <Magnet className={cn("h-3 w-3", magnetState.nextLocked ? "text-muted-foreground/40" : "text-green-600 dark:text-green-400")} style={{ transform: 'rotate(180deg)' }} />
                           )}
                         </button>
                       )}
@@ -1512,7 +1534,7 @@ const ContinuousTimeline = ({
           const globalFlightMidHour = dayIndex * 24 + (f.flightStartHour + f.flightEndHour) / 2;
           const badgeTop = globalFlightMidHour * pixelsPerHour - 8;
           return (
-            <div key={`tz-${dayIndex}`} className="absolute z-[6]" style={{ top: badgeTop, left: -100, width: 46 }}>
+            <div key={`tz-${dayIndex}`} className="absolute z-[16]" style={{ top: badgeTop, left: -78, width: 58 }}>
               <span className="rounded-full bg-primary/20 border border-primary/30 px-2 py-0.5 text-[10px] font-bold text-primary whitespace-nowrap">
                 TZ {offset > 0 ? '+' : ''}{offset}h
               </span>
