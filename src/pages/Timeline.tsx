@@ -1075,55 +1075,6 @@ const Timeline = () => {
           const newTransportEnd = new Date(new Date(newTransportStart).getTime() + transportDurationMs).toISOString();
           await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
 
-          // Tier 1 auto-snap: if gap to destination < 30 min and not locked, snap it
-          if (transport.to_entry_id) {
-            const { data: destEntry } = await supabase
-              .from('entries')
-              .select('id, start_time, end_time, is_locked')
-              .eq('id', transport.to_entry_id)
-              .single();
-
-            if (destEntry && !destEntry.is_locked) {
-              const transportNewEndMs = new Date(newTransportEnd).getTime();
-              const destStartMs = new Date(destEntry.start_time).getTime();
-              const gapMs = destStartMs - transportNewEndMs;
-              const gapMin = gapMs / 60000;
-
-              if (gapMin > 0 && gapMin < 30) {
-                const origDestStart = destEntry.start_time;
-                const origDestEnd = destEntry.end_time;
-                const destDuration = new Date(destEntry.end_time).getTime() - destStartMs;
-                const snappedStart = newTransportEnd;
-                const snappedEnd = new Date(transportNewEndMs + destDuration).toISOString();
-
-                await supabase.from('entries').update({
-                  start_time: snappedStart,
-                  end_time: snappedEnd,
-                }).eq('id', destEntry.id);
-
-                // Get dest name for toast
-                const { data: destOpt } = await supabase
-                  .from('entry_options')
-                  .select('name')
-                  .eq('entry_id', destEntry.id)
-                  .limit(1)
-                  .single();
-                const destName = destOpt?.name || 'event';
-
-                pushAction({
-                  description: `Snap ${destName}`,
-                  undo: async () => {
-                    await supabase.from('entries').update({ start_time: origDestStart, end_time: origDestEnd }).eq('id', destEntry.id);
-                  },
-                  redo: async () => {
-                    await supabase.from('entries').update({ start_time: snappedStart, end_time: snappedEnd }).eq('id', destEntry.id);
-                  },
-                });
-
-                toast({ title: `Snapped ${destName}` });
-              }
-            }
-          }
         }
       }
     } catch (err) {
