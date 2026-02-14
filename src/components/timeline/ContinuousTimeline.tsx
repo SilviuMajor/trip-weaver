@@ -545,7 +545,7 @@ const ContinuousTimeline = ({
       Math.abs(dragState.currentClientX - gridRect.left),
       Math.abs(dragState.currentClientX - gridRect.right)
     );
-    const threshold = 40;
+    const threshold = 20;
 
     setDragPhase(distFromGrid > threshold ? 'detached' : 'timeline');
   }, [dragState?.currentClientX, dragState?.type]);
