@@ -235,6 +235,13 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     setTimeout(() => { wasDraggedRef.current = false; }, 150);
   }, [onCommit, stopAutoScroll]);
 
+  const cancelDrag = useCallback(() => {
+    setDragState(null);
+    dragStateRef.current = null;
+    isDraggingRef.current = false;
+    stopAutoScroll();
+  }, [stopAutoScroll]);
+
   // Mouse handlers
   const onMouseDown = useCallback((
     e: React.MouseEvent,
@@ -329,5 +336,6 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     onTouchStart,
     onTouchMove,
     onTouchEnd,
+    cancelDrag,
   };
 }
