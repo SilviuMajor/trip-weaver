@@ -60,8 +60,9 @@ interface ContinuousTimelineProps {
   pixelsPerHour: number;
   onResetZoom?: () => void;
   onDragActiveChange?: (active: boolean, entryId: string | null) => void;
-  onDetachedDragChange?: (active: boolean, entryId: string | null) => void;
-  onDetachedDrop?: (entryId: string) => void;
+  onDragCommitOverride?: (entryId: string, clientX: number, clientY: number) => boolean;
+  onDragPositionUpdate?: (clientX: number, clientY: number) => void;
+  onDragEnd?: () => void;
 }
 
 const ContinuousTimeline = ({
@@ -100,8 +101,9 @@ const ContinuousTimeline = ({
   pixelsPerHour,
   onResetZoom,
   onDragActiveChange,
-  onDetachedDragChange,
-  onDetachedDrop,
+  onDragCommitOverride,
+  onDragPositionUpdate,
+  onDragEnd,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
@@ -117,13 +119,8 @@ const ContinuousTimeline = ({
   const tapCreateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slotTouchStartRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Hold-to-detach drag state
-  const [detachedDrag, setDetachedDrag] = useState<{
-    entryId: string;
-    position: { x: number; y: number };
-  } | null>(null);
-  const detachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastMovePositionRef = useRef<{ x: number; y: number } | null>(null);
+  // Previous dragState ref for detecting drag end
+  const prevDragStateRef = useRef<boolean>(false);
 
   // Single scroll listener that measures grid position inline (no stale gridTopPx dependency)
   useEffect(() => {
@@ -253,7 +250,24 @@ const ContinuousTimeline = ({
   }, [scheduledEntries]);
 
   // Drag commit handler: convert global hours back to day/local/UTC
-  const handleDragCommit = useCallback((entryId: string, newStartGH: number, newEndGH: number, tz?: string, _targetDay?: Date, dragType?: DragType) => {
+  const handleDragCommit = useCallback((entryId: string, newStartGH: number, newEndGH: number, tz?: string, _targetDay?: Date, dragType?: DragType, clientX?: number, clientY?: number) => {
+    // For move drags, check override (bin/planner) first
+    if (dragType === 'move' && clientX !== undefined && clientY !== undefined) {
+      if (onDragCommitOverride?.(entryId, clientX, clientY)) return;
+
+      // Check if release was too far from timeline (ghost not visible) — snap back
+      const gridRect = gridRef.current?.getBoundingClientRect();
+      if (gridRect) {
+        const timelineCentreX = gridRect.left + gridRect.width / 2;
+        const distFromTimeline = Math.abs(clientX - timelineCentreX);
+        const maxDist = window.innerWidth * 0.4;
+        if (distFromTimeline >= maxDist) {
+          // Released too far — snap back, don't commit
+          return;
+        }
+      }
+    }
+
     if (!onEntryTimeChange) return;
     const entry = sortedEntries.find(e => e.id === entryId);
     if (!entry) return;
@@ -326,9 +340,9 @@ const ContinuousTimeline = ({
         onEntryTimeChange(linked.id, newLinkedStartIso, newLinkedEndIso);
       });
     }
-  }, [onEntryTimeChange, sortedEntries, days, dayTimezoneMap, homeTimezone, allEntries]);
+  }, [onEntryTimeChange, sortedEntries, days, dayTimezoneMap, homeTimezone, allEntries, onDragCommitOverride]);
 
-  const { dragState, wasDraggedRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd, cancelDrag } = useDragResize({
+  const { dragState, wasDraggedRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
     pixelsPerHour,
     startHour: 0,
     totalHours,
@@ -499,100 +513,28 @@ const ContinuousTimeline = ({
     return localHour >= lastFlight.flightEndHour ? lastFlight.destinationTz : lastFlight.originTz;
   }, [days, dayTimezoneMap, homeTimezone]);
 
-  // Expose drag-active state to parent (includes detached drag)
+  // Expose drag-active state to parent
   useEffect(() => {
-    const active = !!dragState || !!detachedDrag;
-    const entryId = dragState?.entryId ?? detachedDrag?.entryId ?? null;
+    const active = !!dragState;
+    const entryId = dragState?.entryId ?? null;
     onDragActiveChange?.(active, entryId);
-  }, [dragState, detachedDrag, onDragActiveChange]);
+  }, [dragState, onDragActiveChange]);
 
-  // Stillness detection for hold-to-detach
+  // Position update callback during drag
   useEffect(() => {
-    if (!dragState) {
-      if (detachTimerRef.current) {
-        clearTimeout(detachTimerRef.current);
-        detachTimerRef.current = null;
-      }
-      lastMovePositionRef.current = null;
-      return;
+    if (dragState && dragState.type === 'move') {
+      onDragPositionUpdate?.(dragState.currentClientX, dragState.currentClientY);
     }
+  }, [dragState?.currentClientX, dragState?.currentClientY, onDragPositionUpdate]);
 
-    const checkStillness = (clientX: number, clientY: number) => {
-      const prev = lastMovePositionRef.current;
-      if (prev && Math.hypot(clientX - prev.x, clientY - prev.y) < 20) {
-        if (!detachTimerRef.current) {
-          detachTimerRef.current = setTimeout(() => {
-            const ds = dragState;
-            if (!ds) return;
-            cancelDrag();
-            setDetachedDrag({ entryId: ds.entryId, position: { x: clientX, y: clientY } });
-            if (navigator.vibrate) navigator.vibrate(50);
-            onDetachedDragChange?.(true, ds.entryId);
-            detachTimerRef.current = null;
-          }, 400);
-        }
-      } else {
-        if (detachTimerRef.current) {
-          clearTimeout(detachTimerRef.current);
-          detachTimerRef.current = null;
-        }
-      }
-      lastMovePositionRef.current = { x: clientX, y: clientY };
-    };
-
-    const handleMM = (e: MouseEvent) => checkStillness(e.clientX, e.clientY);
-    const handleTM = (e: TouchEvent) => {
-      if (e.touches.length === 1) checkStillness(e.touches[0].clientX, e.touches[0].clientY);
-    };
-
-    document.addEventListener('mousemove', handleMM);
-    document.addEventListener('touchmove', handleTM);
-    return () => {
-      document.removeEventListener('mousemove', handleMM);
-      document.removeEventListener('touchmove', handleTM);
-      if (detachTimerRef.current) {
-        clearTimeout(detachTimerRef.current);
-        detachTimerRef.current = null;
-      }
-    };
-  }, [dragState, cancelDrag, onDetachedDragChange]);
-
-  // Free 2D movement when detached
+  // Drag end callback
   useEffect(() => {
-    if (!detachedDrag) return;
-
-    const handleMove = (clientX: number, clientY: number) => {
-      setDetachedDrag(prev => prev ? { ...prev, position: { x: clientX, y: clientY } } : null);
-    };
-
-    const handleEnd = () => {
-      if (detachedDrag) {
-        onDetachedDrop?.(detachedDrag.entryId);
-      }
-      setDetachedDrag(null);
-      onDetachedDragChange?.(false, null);
-    };
-
-    const onMM = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
-    const onTM = (e: TouchEvent) => {
-      e.preventDefault();
-      if (e.touches.length === 1) handleMove(e.touches[0].clientX, e.touches[0].clientY);
-    };
-    const onMU = () => handleEnd();
-    const onTE = () => handleEnd();
-
-    document.addEventListener('mousemove', onMM);
-    document.addEventListener('touchmove', onTM, { passive: false });
-    document.addEventListener('mouseup', onMU);
-    document.addEventListener('touchend', onTE);
-
-    return () => {
-      document.removeEventListener('mousemove', onMM);
-      document.removeEventListener('touchmove', onTM);
-      document.removeEventListener('mouseup', onMU);
-      document.removeEventListener('touchend', onTE);
-    };
-  }, [detachedDrag?.entryId, onDetachedDrop, onDetachedDragChange]);
+    const isActive = !!dragState;
+    if (prevDragStateRef.current && !isActive) {
+      onDragEnd?.();
+    }
+    prevDragStateRef.current = isActive;
+  }, [dragState, onDragEnd]);
 
   // Single-tap to create / double-tap to reset zoom (mobile)
   const handleSlotTouchEnd = useCallback((e: React.TouchEvent) => {
@@ -1035,7 +977,7 @@ const ContinuousTimeline = ({
             return Math.abs(otherGH.startGH - groupEndGH) * 60 < 2;
           });
 
-          const isDetached = detachedDrag?.entryId === entry.id;
+          const isBeingDragged = dragState?.entryId === entry.id && dragState?.type === 'move';
 
           // Drag hours for init (global coordinates)
           const origGH = getEntryGlobalHours(entry);
@@ -1069,7 +1011,7 @@ const ContinuousTimeline = ({
                     left: '0%',
                     width: '100%',
                     zIndex: isDragged ? 30 : isTransport ? 20 : hasConflict ? 10 + index : 10,
-                    opacity: isDetached ? 0.3 : undefined,
+                    opacity: isBeingDragged ? 0.2 : undefined,
                     touchAction: 'manipulation',
                   }}
                 >
@@ -1558,6 +1500,44 @@ const ContinuousTimeline = ({
               );
             });
           })}
+        {/* Ghost outline during move drag */}
+        {dragState && dragState.type === 'move' && (() => {
+          const entry = sortedEntries.find(e => e.id === dragState.entryId);
+          if (!entry) return null;
+          const origGH = getEntryGlobalHours(entry);
+          const durationGH = origGH.endGH - origGH.startGH;
+
+          const ghostStartGH = dragState.currentStartHour;
+          const ghostTop = ghostStartGH * pixelsPerHour;
+          const ghostHeight = durationGH * pixelsPerHour;
+
+          // Fade based on horizontal distance from timeline
+          const gridRect = gridRef.current?.getBoundingClientRect();
+          const timelineCentreX = gridRect ? gridRect.left + gridRect.width / 2 : window.innerWidth / 2;
+          const distFromTimeline = Math.abs(dragState.currentClientX - timelineCentreX);
+          const maxDist = window.innerWidth * 0.4;
+          const ghostOpacity = Math.max(0, 1 - (distFromTimeline / maxDist));
+
+          if (ghostOpacity <= 0.05) return null;
+
+          // Time label
+          const startH = Math.floor(ghostStartGH % 24);
+          const startM = Math.round((ghostStartGH % 1) * 60);
+          const endGH = ghostStartGH + durationGH;
+          const endH = Math.floor(endGH % 24);
+          const endM = Math.round((endGH % 1) * 60);
+          const timeLabel = `${String(startH).padStart(2,'0')}:${String(startM).padStart(2,'0')} – ${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`;
+
+          return (
+            <div
+              className="absolute left-0 right-0 z-[11] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 pointer-events-none transition-opacity duration-150"
+              style={{ top: ghostTop, height: ghostHeight, opacity: ghostOpacity }}
+            >
+              <span className="absolute left-2 top-1 text-xs font-medium text-primary/70">{timeLabel}</span>
+            </div>
+          );
+        })()}
+
         </div>
       </div>
 
@@ -1566,22 +1546,27 @@ const ContinuousTimeline = ({
         🏁 Trip Ends
       </div>
 
-      {/* Detached drag ghost card */}
-      {detachedDrag && (() => {
-        const entry = sortedEntries.find(e => e.id === detachedDrag.entryId);
+      {/* Floating card during move drag */}
+      {dragState && dragState.type === 'move' && (() => {
+        const entry = sortedEntries.find(e => e.id === dragState.entryId);
         if (!entry) return null;
         const opt = entry.options[0];
         if (!opt) return null;
+
+        // Shrink when near bin (bottom-left)
+        const shrinkFactor = 0.85;
+
         return (
           <div
             className="fixed z-[200] pointer-events-none"
             style={{
-              left: detachedDrag.position.x - 80,
-              top: detachedDrag.position.y - 30,
-              width: 200,
-              opacity: 0.75,
-              transform: 'rotate(-2deg) scale(0.9)',
-              filter: 'drop-shadow(0 12px 24px rgba(0,0,0,0.25))',
+              left: dragState.currentClientX - 100,
+              top: dragState.currentClientY - 30,
+              width: 220,
+              opacity: 0.85,
+              transform: `scale(${shrinkFactor}) rotate(-1deg)`,
+              transition: 'transform 0.1s ease-out',
+              filter: 'drop-shadow(0 12px 24px rgba(0,0,0,0.3))',
             }}
           >
             <EntryCard
