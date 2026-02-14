@@ -13,6 +13,11 @@ interface DragState {
   tz?: string;
   /** Offset in hours between cursor position and card top at grab time */
   grabOffsetHours: number;
+  // 2D tracking for unified lift-and-place
+  startClientX: number;
+  startClientY: number;
+  currentClientX: number;
+  currentClientY: number;
 }
 
 interface UseDragResizeOptions {
@@ -20,7 +25,7 @@ interface UseDragResizeOptions {
   startHour: number;
   totalHours: number;
   gridTopPx: number;
-  onCommit: (entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date, dragType?: DragType) => void;
+  onCommit: (entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date, dragType?: DragType, clientX?: number, clientY?: number) => void;
   scrollContainerRef?: React.RefObject<HTMLElement>;
 }
 
@@ -96,6 +101,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
   const startDrag = useCallback((
     entryId: string,
     type: DragType,
+    clientX: number,
     clientY: number,
     entryStartHour: number,
     entryEndHour: number,
@@ -122,6 +128,10 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
       currentEndHour: entryEndHour,
       tz,
       grabOffsetHours,
+      startClientX: clientX,
+      startClientY: clientY,
+      currentClientX: clientX,
+      currentClientY: clientY,
     };
     setDragState(state);
     dragStateRef.current = state;
@@ -131,17 +141,23 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     startAutoScroll();
   }, [startAutoScroll, scrollContainerRef, startHour, pixelsPerHour, gridTopPx]);
 
-  const handlePointerMove = useCallback((clientY: number) => {
+  const handlePointerMove = useCallback((clientX: number, clientY: number) => {
     const state = dragStateRef.current;
     if (!state) return;
 
     lastClientYRef.current = clientY;
 
-    const deltaPixels = clientY - state.startY;
+    // Update 2D position
+    state.currentClientX = clientX;
+    state.currentClientY = clientY;
 
-    // Only flag as dragged once actual movement exceeds threshold
-    if (!wasDraggedRef.current && Math.abs(deltaPixels) > 5) {
-      wasDraggedRef.current = true;
+    // Flag as dragged if movement exceeds 5px in any direction
+    if (!wasDraggedRef.current) {
+      const dx = clientX - state.startClientX;
+      const dy = clientY - state.startClientY;
+      if (Math.hypot(dx, dy) > 5) {
+        wasDraggedRef.current = true;
+      }
     }
 
     // Single global coordinate space
@@ -196,6 +212,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     }
 
     // Fallback: delta-based (if no scroll container)
+    const deltaPixels = clientY - state.startY;
     const deltaHours = deltaPixels / pixelsPerHour;
 
     let newStart = state.originalStartHour;
@@ -226,7 +243,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
   const commitDrag = useCallback(() => {
     const state = dragStateRef.current;
     if (state && wasDraggedRef.current) {
-      onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz, undefined, state.type);
+      onCommit(state.entryId, state.currentStartHour, state.currentEndHour, state.tz, undefined, state.type, state.currentClientX, state.currentClientY);
     }
     stopAutoScroll();
     setDragState(null);
@@ -234,13 +251,6 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     isDraggingRef.current = false;
     setTimeout(() => { wasDraggedRef.current = false; }, 150);
   }, [onCommit, stopAutoScroll]);
-
-  const cancelDrag = useCallback(() => {
-    setDragState(null);
-    dragStateRef.current = null;
-    isDraggingRef.current = false;
-    stopAutoScroll();
-  }, [stopAutoScroll]);
 
   // Mouse handlers
   const onMouseDown = useCallback((
@@ -253,7 +263,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
   ) => {
     e.preventDefault();
     e.stopPropagation();
-    startDrag(entryId, type, e.clientY, entryStartHour, entryEndHour, tz);
+    startDrag(entryId, type, e.clientX, e.clientY, entryStartHour, entryEndHour, tz);
   }, [startDrag]);
 
   // Touch handlers with hold-to-drag
@@ -269,7 +279,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
     
     touchTimerRef.current = setTimeout(() => {
-      startDrag(entryId, type, touch.clientY, entryStartHour, entryEndHour, tz);
+      startDrag(entryId, type, touch.clientX, touch.clientY, entryStartHour, entryEndHour, tz);
     }, TOUCH_HOLD_MS);
   }, [startDrag]);
 
@@ -289,7 +299,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
 
     if (isDraggingRef.current) {
       e.preventDefault();
-      handlePointerMove(touch.clientY);
+      handlePointerMove(touch.clientX, touch.clientY);
     }
   }, [handlePointerMove]);
 
@@ -309,7 +319,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     if (!dragState) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      handlePointerMove(e.clientY);
+      handlePointerMove(e.clientX, e.clientY);
     };
     const handleMouseUp = () => {
       commitDrag();
@@ -323,7 +333,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     };
   }, [dragState, handlePointerMove, commitDrag]);
 
-  // Native touch listeners for active drag (ensures preventDefault works with { passive: false })
+  // Native touch listeners for active drag (ensures preventDefault works with { passive: false }
   useEffect(() => {
     if (!dragState) return;
 
@@ -331,7 +341,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
       if (isDraggingRef.current) {
         e.preventDefault();
         const touch = e.touches[0];
-        handlePointerMove(touch.clientY);
+        handlePointerMove(touch.clientX, touch.clientY);
       }
     };
 
@@ -370,6 +380,5 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     onTouchStart,
     onTouchMove,
     onTouchEnd,
-    cancelDrag,
   };
 }

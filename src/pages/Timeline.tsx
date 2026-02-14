@@ -1585,35 +1585,7 @@ const Timeline = () => {
     return () => el.removeEventListener('wheel', handleWheel);
   }, [zoomEnabled, scrollContainerReady]);
 
-  // Bin + Planner FAB proximity detection during drag
-  useEffect(() => {
-    if (!dragActiveEntryId) return;
-
-    const checkProximity = (clientX: number, clientY: number) => {
-      if (binRef.current) {
-        const rect = binRef.current.getBoundingClientRect();
-        const dist = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
-        setBinHighlighted(dist < 60);
-      }
-      if (plannerFabRef.current) {
-        const rect = plannerFabRef.current.getBoundingClientRect();
-        const dist = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
-        setPlannerFabHighlighted(dist < 60);
-      }
-    };
-
-    const handleMouseMove = (e: MouseEvent) => checkProximity(e.clientX, e.clientY);
-    const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 1) checkProximity(e.touches[0].clientX, e.touches[0].clientY);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('touchmove', handleTouchMove);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('touchmove', handleTouchMove);
-    };
-  }, [dragActiveEntryId]);
+  // Bin + Planner FAB proximity detection is now handled via onDragPositionUpdate callback
 
 
   const handleApplyRecommendation = async (rec: Recommendation) => {
@@ -2227,50 +2199,73 @@ const Timeline = () => {
                       setPlannerFabHighlighted(false);
                     }
                   }}
-                  onDetachedDragChange={(active, entryId) => {
-                    setDragActiveEntryId(active ? entryId : null);
-                    if (!active) {
-                      setBinHighlighted(false);
-                      setPlannerFabHighlighted(false);
+                  onDragCommitOverride={(entryId, clientX, clientY) => {
+                    // Check bin proximity
+                    if (binRef.current) {
+                      const rect = binRef.current.getBoundingClientRect();
+                      const dist = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
+                      if (dist < 60) {
+                        const entry = entries.find(e => e.id === entryId);
+                        if (!entry) return true;
+                        if (entry.is_locked) {
+                          sonnerToast.error("Can't delete — unlock first");
+                          return true;
+                        }
+                        const cat = entry.options[0]?.category;
+                        if (cat === 'flight' || cat === 'airport_processing') {
+                          sonnerToast.error("Can't delete flights by dragging");
+                          return true;
+                        }
+                        supabase.from('entries').delete().eq('id', entryId).then(() => {
+                          fetchData();
+                          sonnerToast.success(entry.options[0]?.name ? `Deleted ${entry.options[0].name}` : 'Entry deleted');
+                        });
+                        return true;
+                      }
+                    }
+                    // Check planner FAB proximity
+                    if (plannerFabRef.current) {
+                      const rect = plannerFabRef.current.getBoundingClientRect();
+                      const dist = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
+                      if (dist < 60) {
+                        const entry = entries.find(e => e.id === entryId);
+                        if (!entry) return true;
+                        if (entry.is_locked) {
+                          sonnerToast.error("Can't move — unlock first");
+                          return true;
+                        }
+                        const cat = entry.options[0]?.category;
+                        if (cat === 'flight' || cat === 'airport_processing') {
+                          sonnerToast.error("Can't move flights to Planner");
+                          return true;
+                        }
+                        supabase.from('entries')
+                          .update({ is_scheduled: false, scheduled_day: null })
+                          .eq('id', entryId)
+                          .then(() => {
+                            fetchData();
+                            sonnerToast.success(entry.options[0]?.name ? `Moved ${entry.options[0].name} to Planner` : 'Moved to Planner');
+                          });
+                        return true;
+                      }
+                    }
+                    return false;
+                  }}
+                  onDragPositionUpdate={(clientX, clientY) => {
+                    if (binRef.current) {
+                      const rect = binRef.current.getBoundingClientRect();
+                      const dist = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
+                      setBinHighlighted(dist < 60);
+                    }
+                    if (plannerFabRef.current) {
+                      const rect = plannerFabRef.current.getBoundingClientRect();
+                      const dist = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
+                      setPlannerFabHighlighted(dist < 60);
                     }
                   }}
-                  onDetachedDrop={(entryId) => {
-                    if (binHighlighted) {
-                      const entry = entries.find(e => e.id === entryId);
-                      if (!entry) return;
-                      if (entry.is_locked) {
-                        sonnerToast.error("Can't delete — unlock first");
-                        return;
-                      }
-                      const cat = entry.options[0]?.category;
-                      if (cat === 'flight' || cat === 'airport_processing') {
-                        sonnerToast.error("Can't delete flights by dragging");
-                        return;
-                      }
-                      supabase.from('entries').delete().eq('id', entryId).then(() => {
-                        fetchData();
-                        sonnerToast.success(entry.options[0]?.name ? `Deleted ${entry.options[0].name}` : 'Entry deleted');
-                      });
-                    } else if (plannerFabHighlighted) {
-                      const entry = entries.find(e => e.id === entryId);
-                      if (!entry) return;
-                      if (entry.is_locked) {
-                        sonnerToast.error("Can't move — unlock first");
-                        return;
-                      }
-                      const cat = entry.options[0]?.category;
-                      if (cat === 'flight' || cat === 'airport_processing') {
-                        sonnerToast.error("Can't move flights to Planner");
-                        return;
-                      }
-                      supabase.from('entries')
-                        .update({ is_scheduled: false, scheduled_day: null })
-                        .eq('id', entryId)
-                        .then(() => {
-                          fetchData();
-                          sonnerToast.success(entry.options[0]?.name ? `Moved ${entry.options[0].name} to Planner` : 'Moved to Planner');
-                        });
-                    }
+                  onDragEnd={() => {
+                    setDragActiveEntryId(null);
+                    setBinHighlighted(false);
                     setPlannerFabHighlighted(false);
                   }}
                 />
