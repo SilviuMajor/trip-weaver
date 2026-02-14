@@ -126,8 +126,7 @@ const ContinuousTimeline = ({
   // Previous dragState ref for detecting drag end
   const prevDragStateRef = useRef<boolean>(false);
 
-  // Three-stage drag phase
-  const [dragPhase, setDragPhase] = useState<'timeline' | 'detached' | null>(null);
+  // dragPhase is now computed via useMemo below (after dragState is available)
 
   // Single scroll listener that measures grid position inline (no stale gridTopPx dependency)
   useEffect(() => {
@@ -531,14 +530,11 @@ const ContinuousTimeline = ({
     prevDragStateRef.current = isActive;
   }, [dragState, onDragEnd]);
 
-  // Three-stage drag phase computation
-  useEffect(() => {
-    if (!dragState || dragState.type !== 'move') {
-      setDragPhase(null);
-      return;
-    }
+  // Three-stage drag phase computation (synchronous — no one-frame lag)
+  const dragPhase = useMemo((): 'timeline' | 'detached' | null => {
+    if (!dragState || dragState.type !== 'move') return null;
     const gridRect = gridRef.current?.getBoundingClientRect();
-    if (!gridRect) { setDragPhase('timeline'); return; }
+    if (!gridRect) return 'timeline';
 
     const isInsideGrid = dragState.currentClientX >= gridRect.left && dragState.currentClientX <= gridRect.right;
     const distFromGrid = isInsideGrid ? 0 : Math.min(
@@ -547,8 +543,8 @@ const ContinuousTimeline = ({
     );
     const threshold = 20;
 
-    setDragPhase(distFromGrid > threshold ? 'detached' : 'timeline');
-  }, [dragState?.currentClientX, dragState?.type]);
+    return distFromGrid > threshold ? 'detached' : 'timeline';
+  }, [dragState]);
 
   // Notify parent of phase changes
   useEffect(() => {
@@ -1057,7 +1053,7 @@ const ContinuousTimeline = ({
                     width: '100%',
                     zIndex: isDragged ? 30 : isTransport ? 20 : hasConflict ? 10 + index : 10,
                     opacity: isBeingDragged ? 0.2 : undefined,
-                    touchAction: 'manipulation',
+                    touchAction: dragState?.entryId === entry.id ? 'none' : 'manipulation',
                   }}
                 >
                 <div className="relative h-full">
@@ -1617,6 +1613,7 @@ const ContinuousTimeline = ({
           const moveHeight = durationGH * pixelsPerHour;
           const isCompactMove = moveHeight < 40;
           const isMediumMove = moveHeight >= 40 && moveHeight < 80;
+          const isCondensedMove = moveHeight >= 80 && moveHeight < 160;
 
           return (
             <div
@@ -1638,6 +1635,11 @@ const ContinuousTimeline = ({
                   cardSizeClass="h-full"
                   isCompact={isCompactMove}
                   isMedium={isMediumMove}
+                  isCondensed={isCondensedMove}
+                  notes={(entry as any).notes}
+                  isLocked={entry.is_locked}
+                  linkedType={entry.linked_type}
+                  isProcessing={opt.category === 'airport_processing'}
                 />
               </div>
             </div>
@@ -1662,6 +1664,7 @@ const ContinuousTimeline = ({
         const moveHeight = durationGH * pixelsPerHour;
         const isCompactMove = moveHeight < 40;
         const isMediumMove = moveHeight >= 40 && moveHeight < 80;
+        const isCondensedMove = moveHeight >= 80 && moveHeight < 160;
 
         const gridRect = gridRef.current?.getBoundingClientRect();
         const cardWidth = gridRect ? gridRect.width - 4 : 220;
@@ -1703,6 +1706,11 @@ const ContinuousTimeline = ({
                 cardSizeClass="h-full"
                 isCompact={isCompactMove}
                 isMedium={isMediumMove}
+                isCondensed={isCondensedMove}
+                notes={(entry as any).notes}
+                isLocked={entry.is_locked}
+                linkedType={entry.linked_type}
+                isProcessing={opt.category === 'airport_processing'}
               />
             </div>
           </div>

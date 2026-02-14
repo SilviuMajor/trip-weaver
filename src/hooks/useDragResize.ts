@@ -252,6 +252,18 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     setTimeout(() => { wasDraggedRef.current = false; }, 150);
   }, [onCommit, stopAutoScroll]);
 
+  // Refs that always point to latest handlePointerMove and commitDrag
+  const handlePointerMoveRef = useRef(handlePointerMove);
+  const commitDragRef = useRef(commitDrag);
+
+  useEffect(() => {
+    handlePointerMoveRef.current = handlePointerMove;
+  }, [handlePointerMove]);
+
+  useEffect(() => {
+    commitDragRef.current = commitDrag;
+  }, [commitDrag]);
+
   // Mouse handlers
   const onMouseDown = useCallback((
     e: React.MouseEvent,
@@ -266,7 +278,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     startDrag(entryId, type, e.clientX, e.clientY, entryStartHour, entryEndHour, tz);
   }, [startDrag]);
 
-  // Touch: hold-to-drag with scroll prevention during hold window
+  // Touch: hold-to-drag with continuous listener lifecycle
   const onTouchStart = useCallback((
     e: React.TouchEvent,
     entryId: string,
@@ -280,62 +292,67 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     const startY = touch.clientY;
     touchStartPosRef.current = { x: startX, y: startY };
 
-    // Temporary listener to prevent scroll during hold window
-    const holdPreventScroll = (ev: TouchEvent) => {
+    // Single set of listeners for the ENTIRE touch lifecycle
+    const handleTouchMove = (ev: TouchEvent) => {
       const t = ev.touches[0];
-      const dx = t.clientX - startX;
-      const dy = t.clientY - startY;
-      if (Math.sqrt(dx * dx + dy * dy) > TOUCH_MOVE_THRESHOLD) {
-        // Finger moved too much — cancel hold, allow scroll
-        if (touchTimerRef.current) {
+
+      if (isDraggingRef.current) {
+        // Phase 2: Drag is active — prevent scroll, update position
+        ev.preventDefault();
+        handlePointerMoveRef.current(t.clientX, t.clientY);
+      } else if (touchTimerRef.current) {
+        // Phase 1: Still in hold window — check if finger moved too far
+        const dx = t.clientX - startX;
+        const dy = t.clientY - startY;
+        if (Math.sqrt(dx * dx + dy * dy) > TOUCH_MOVE_THRESHOLD) {
+          // Finger moved — cancel hold, allow scroll, remove listeners
           clearTimeout(touchTimerRef.current);
           touchTimerRef.current = null;
+          cleanup();
+        } else {
+          // Finger still — prevent scroll to keep touch alive
+          ev.preventDefault();
         }
-        document.removeEventListener('touchmove', holdPreventScroll);
-        document.removeEventListener('touchend', holdCleanup);
-        document.removeEventListener('touchcancel', holdCleanup);
-      } else {
-        // Finger still — prevent scroll to keep touch alive
-        ev.preventDefault();
       }
     };
 
-    const holdCleanup = () => {
-      document.removeEventListener('touchmove', holdPreventScroll);
-      document.removeEventListener('touchend', holdCleanup);
-      document.removeEventListener('touchcancel', holdCleanup);
+    const handleTouchEnd = () => {
+      if (isDraggingRef.current) {
+        commitDragRef.current();
+      }
       if (touchTimerRef.current) {
         clearTimeout(touchTimerRef.current);
         touchTimerRef.current = null;
       }
       touchStartPosRef.current = null;
+      cleanup();
     };
 
-    document.addEventListener('touchmove', holdPreventScroll, { passive: false });
-    document.addEventListener('touchend', holdCleanup);
-    document.addEventListener('touchcancel', holdCleanup);
+    const cleanup = () => {
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
+      document.removeEventListener('touchcancel', handleTouchEnd);
+    };
 
+    // Attach immediately with { passive: false } — stays for entire lifecycle
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd);
+    document.addEventListener('touchcancel', handleTouchEnd);
+
+    // Hold timer
     touchTimerRef.current = setTimeout(() => {
-      // Hold succeeded — remove hold-window listeners, unified useEffect takes over
-      document.removeEventListener('touchmove', holdPreventScroll);
-      document.removeEventListener('touchend', holdCleanup);
-      document.removeEventListener('touchcancel', holdCleanup);
-
+      touchTimerRef.current = null;
+      // Start drag — listeners above will handle Phase 2 seamlessly
       startDrag(entryId, type, startX, startY, entryStartHour, entryEndHour, tz);
       if (navigator.vibrate) navigator.vibrate(20);
     }, TOUCH_HOLD_MS);
   }, [startDrag]);
 
-  // Safety-net React handlers (unified document listeners do the real work)
-  const onTouchMove = useCallback((_e: React.TouchEvent) => {
-    // Handled by unified document listeners
-  }, []);
+  // Safety-net React handlers
+  const onTouchMove = useCallback((_e: React.TouchEvent) => {}, []);
+  const onTouchEnd = useCallback(() => {}, []);
 
-  const onTouchEnd = useCallback(() => {
-    // Handled by unified document listeners
-  }, []);
-
-  // Unified pointer listeners — handles both mouse AND touch during active drag
+  // Mouse-only listeners during active drag
   useEffect(() => {
     if (!dragState) return;
 
@@ -346,27 +363,11 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
       commitDrag();
     };
 
-    const handleTouchMove = (e: TouchEvent) => {
-      e.preventDefault(); // Prevent scroll
-      const t = e.touches[0];
-      handlePointerMove(t.clientX, t.clientY);
-    };
-    const handleTouchEnd = () => {
-      commitDrag();
-    };
-
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('touchmove', handleTouchMove, { passive: false });
-    document.addEventListener('touchend', handleTouchEnd);
-    document.addEventListener('touchcancel', handleTouchEnd);
-
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('touchmove', handleTouchMove);
-      document.removeEventListener('touchend', handleTouchEnd);
-      document.removeEventListener('touchcancel', handleTouchEnd);
     };
   }, [dragState, handlePointerMove, commitDrag]);
 
