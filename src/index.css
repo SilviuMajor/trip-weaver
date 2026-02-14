@@ -117,3 +117,16 @@
   }
 }
 
+/* Prevent text selection and callout on timeline interactions */
+[data-timeline-area],
+[data-timeline-area] *,
+[data-entry-card],
+[data-entry-card] *,
+[data-resize-handle],
+[data-transport-connector],
+[data-transport-connector] * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
