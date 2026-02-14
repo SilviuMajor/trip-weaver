@@ -63,6 +63,7 @@ interface ContinuousTimelineProps {
   onDragCommitOverride?: (entryId: string, clientX: number, clientY: number) => boolean;
   onDragPositionUpdate?: (clientX: number, clientY: number) => void;
   onDragEnd?: () => void;
+  onDragPhaseChange?: (phase: 'timeline' | 'detached' | null) => void;
 }
 
 const ContinuousTimeline = ({
@@ -104,6 +105,7 @@ const ContinuousTimeline = ({
   onDragCommitOverride,
   onDragPositionUpdate,
   onDragEnd,
+  onDragPhaseChange,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
@@ -121,6 +123,9 @@ const ContinuousTimeline = ({
 
   // Previous dragState ref for detecting drag end
   const prevDragStateRef = useRef<boolean>(false);
+
+  // Three-stage drag phase
+  const [dragPhase, setDragPhase] = useState<'timeline' | 'detached' | null>(null);
 
   // Single scroll listener that measures grid position inline (no stale gridTopPx dependency)
   useEffect(() => {
@@ -251,21 +256,9 @@ const ContinuousTimeline = ({
 
   // Drag commit handler: convert global hours back to day/local/UTC
   const handleDragCommit = useCallback((entryId: string, newStartGH: number, newEndGH: number, tz?: string, _targetDay?: Date, dragType?: DragType, clientX?: number, clientY?: number) => {
-    // For move drags, check override (bin/planner) first
+    // For move drags, check override (bin/planner) first — only when detached
     if (dragType === 'move' && clientX !== undefined && clientY !== undefined) {
       if (onDragCommitOverride?.(entryId, clientX, clientY)) return;
-
-      // Check if release was too far from timeline (ghost not visible) — snap back
-      const gridRect = gridRef.current?.getBoundingClientRect();
-      if (gridRect) {
-        const timelineCentreX = gridRect.left + gridRect.width / 2;
-        const distFromTimeline = Math.abs(clientX - timelineCentreX);
-        const maxDist = window.innerWidth * 0.4;
-        if (distFromTimeline >= maxDist) {
-          // Released too far — snap back, don't commit
-          return;
-        }
-      }
     }
 
     if (!onEntryTimeChange) return;
@@ -535,6 +528,31 @@ const ContinuousTimeline = ({
     }
     prevDragStateRef.current = isActive;
   }, [dragState, onDragEnd]);
+
+  // Three-stage drag phase computation
+  useEffect(() => {
+    if (!dragState || dragState.type !== 'move') {
+      setDragPhase(null);
+      return;
+    }
+    const gridRect = gridRef.current?.getBoundingClientRect();
+    if (!gridRect) { setDragPhase('timeline'); return; }
+
+    const isInsideGrid = dragState.currentClientX >= gridRect.left && dragState.currentClientX <= gridRect.right;
+    const distFromGrid = isInsideGrid ? 0 : Math.min(
+      Math.abs(dragState.currentClientX - gridRect.left),
+      Math.abs(dragState.currentClientX - gridRect.right)
+    );
+    const isMobileDevice = 'ontouchstart' in window;
+    const threshold = isMobileDevice ? 40 : 80;
+
+    setDragPhase(distFromGrid > threshold ? 'detached' : 'timeline');
+  }, [dragState?.currentClientX, dragState?.type]);
+
+  // Notify parent of phase changes
+  useEffect(() => {
+    onDragPhaseChange?.(dragPhase);
+  }, [dragPhase, onDragPhaseChange]);
 
   // Single-tap to create / double-tap to reset zoom (mobile)
   const handleSlotTouchEnd = useCallback((e: React.TouchEvent) => {
@@ -1500,8 +1518,10 @@ const ContinuousTimeline = ({
               );
             });
           })}
-        {/* Ghost outline during move drag */}
-        {dragState && dragState.type === 'move' && (() => {
+        </div>
+
+        {/* Ghost outline during Stage 2 (detached) move drag */}
+        {dragState && dragState.type === 'move' && dragPhase === 'detached' && (() => {
           const entry = sortedEntries.find(e => e.id === dragState.entryId);
           if (!entry) return null;
           const origGH = getEntryGlobalHours(entry);
@@ -1511,16 +1531,6 @@ const ContinuousTimeline = ({
           const ghostTop = ghostStartGH * pixelsPerHour;
           const ghostHeight = durationGH * pixelsPerHour;
 
-          // Fade based on horizontal distance from timeline
-          const gridRect = gridRef.current?.getBoundingClientRect();
-          const timelineCentreX = gridRect ? gridRect.left + gridRect.width / 2 : window.innerWidth / 2;
-          const distFromTimeline = Math.abs(dragState.currentClientX - timelineCentreX);
-          const maxDist = window.innerWidth * 0.4;
-          const ghostOpacity = Math.max(0, 1 - (distFromTimeline / maxDist));
-
-          if (ghostOpacity <= 0.05) return null;
-
-          // Time label
           const startH = Math.floor(ghostStartGH % 24);
           const startM = Math.round((ghostStartGH % 1) * 60);
           const endGH = ghostStartGH + durationGH;
@@ -1530,15 +1540,51 @@ const ContinuousTimeline = ({
 
           return (
             <div
-              className="absolute left-0 right-0 z-[11] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 pointer-events-none transition-opacity duration-150"
-              style={{ top: ghostTop, height: ghostHeight, opacity: ghostOpacity }}
+              className="absolute left-0 right-0 z-[11] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 pointer-events-none"
+              style={{ top: ghostTop, height: ghostHeight }}
             >
               <span className="absolute left-2 top-1 text-xs font-medium text-primary/70">{timeLabel}</span>
             </div>
           );
         })()}
 
-        </div>
+        {/* Stage 1 — In-timeline moving card */}
+        {dragState && dragState.type === 'move' && dragPhase === 'timeline' && (() => {
+          const entry = sortedEntries.find(e => e.id === dragState.entryId);
+          if (!entry) return null;
+          const opt = entry.options[0];
+          if (!opt) return null;
+          const origGH = getEntryGlobalHours(entry);
+          const durationGH = origGH.endGH - origGH.startGH;
+          const moveTop = dragState.currentStartHour * pixelsPerHour;
+          const moveHeight = durationGH * pixelsPerHour;
+          const isCompactMove = moveHeight < 40;
+
+          return (
+            <div
+              className="absolute left-0 right-0 pr-1 z-[50] pointer-events-none"
+              style={{ top: moveTop, height: moveHeight }}
+            >
+              <div className="h-full ring-2 ring-primary/60 shadow-lg shadow-primary/20 rounded-2xl overflow-hidden">
+                <EntryCard
+                  option={opt}
+                  startTime={entry.start_time}
+                  endTime={entry.end_time}
+                  formatTime={(iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                  isPast={false}
+                  optionIndex={0}
+                  totalOptions={1}
+                  votingLocked={votingLocked}
+                  hasVoted={false}
+                  onVoteChange={() => {}}
+                  cardSizeClass="h-full"
+                  isCompact={isCompactMove}
+                />
+              </div>
+            </div>
+          );
+        })()}
+
       </div>
 
       {/* Trip Ends marker */}
@@ -1546,43 +1592,48 @@ const ContinuousTimeline = ({
         🏁 Trip Ends
       </div>
 
-      {/* Floating card during move drag */}
-      {dragState && dragState.type === 'move' && (() => {
+      {/* Stage 2 — Floating card at cursor position (detached) */}
+      {dragState && dragState.type === 'move' && dragPhase === 'detached' && (() => {
         const entry = sortedEntries.find(e => e.id === dragState.entryId);
         if (!entry) return null;
         const opt = entry.options[0];
         if (!opt) return null;
 
-        // Shrink when near bin (bottom-left)
-        const shrinkFactor = 0.85;
+        const gridRect = gridRef.current?.getBoundingClientRect();
+        const cardWidth = gridRect ? gridRect.width - 4 : 220;
+
+        let shrinkFactor = 1;
+        // No bin ref available here, just use scale
+        const baseScale = 0.92;
 
         return (
           <div
-            className="fixed z-[200] pointer-events-none"
+            className="fixed z-[200] pointer-events-none transition-all duration-150 ease-out"
             style={{
-              left: dragState.currentClientX - 100,
+              left: dragState.currentClientX - cardWidth / 2,
               top: dragState.currentClientY - 30,
-              width: 220,
-              opacity: 0.85,
-              transform: `scale(${shrinkFactor}) rotate(-1deg)`,
-              transition: 'transform 0.1s ease-out',
-              filter: 'drop-shadow(0 12px 24px rgba(0,0,0,0.3))',
+              width: cardWidth,
+              opacity: 0.9,
+              transform: `scale(${baseScale}) rotate(-1.5deg)`,
+              filter: 'drop-shadow(0 16px 32px rgba(0,0,0,0.25))',
             }}
           >
-            <EntryCard
-              option={opt}
-              startTime={entry.start_time}
-              endTime={entry.end_time}
-              formatTime={(iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}
-              isPast={false}
-              optionIndex={0}
-              totalOptions={1}
-              votingLocked={votingLocked}
-              hasVoted={false}
-              onVoteChange={() => {}}
-              cardSizeClass="h-full"
-              isCompact
-            />
+            <div className="rounded-2xl overflow-hidden">
+              <EntryCard
+                option={opt}
+                startTime={entry.start_time}
+                endTime={entry.end_time}
+                formatTime={(iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                isPast={false}
+                optionIndex={0}
+                totalOptions={1}
+                votingLocked={votingLocked}
+                hasVoted={false}
+                onVoteChange={() => {}}
+                cardSizeClass="h-full"
+                isCompact
+              />
+            </div>
           </div>
         );
       })()}
