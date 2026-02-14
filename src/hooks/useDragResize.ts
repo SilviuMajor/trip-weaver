@@ -323,6 +323,40 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     };
   }, [dragState, handlePointerMove, commitDrag]);
 
+  // Native touch listeners for active drag (ensures preventDefault works with { passive: false })
+  useEffect(() => {
+    if (!dragState) return;
+
+    const handleNativeTouchMove = (e: TouchEvent) => {
+      if (isDraggingRef.current) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        handlePointerMove(touch.clientY);
+      }
+    };
+
+    const handleNativeTouchEnd = () => {
+      if (isDraggingRef.current) {
+        commitDrag();
+      }
+      touchStartPosRef.current = null;
+      if (touchTimerRef.current) {
+        clearTimeout(touchTimerRef.current);
+        touchTimerRef.current = null;
+      }
+    };
+
+    document.addEventListener('touchmove', handleNativeTouchMove, { passive: false });
+    document.addEventListener('touchend', handleNativeTouchEnd);
+    document.addEventListener('touchcancel', handleNativeTouchEnd);
+
+    return () => {
+      document.removeEventListener('touchmove', handleNativeTouchMove);
+      document.removeEventListener('touchend', handleNativeTouchEnd);
+      document.removeEventListener('touchcancel', handleNativeTouchEnd);
+    };
+  }, [dragState, handlePointerMove, commitDrag]);
+
   // Cleanup auto-scroll on unmount
   useEffect(() => {
     return () => { stopAutoScroll(); };

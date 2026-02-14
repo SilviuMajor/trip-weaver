@@ -2191,7 +2191,7 @@ const Timeline = () => {
               <main ref={(el) => {
                 (mainScrollRef as React.MutableRefObject<HTMLElement | null>).current = el;
                 if (el && !scrollContainerReady) setScrollContainerReady(true);
-              }} className="flex-1 overflow-y-auto pb-20" style={zoomEnabled ? { touchAction: 'pan-y' } : undefined}>
+              }} className="flex-1 overflow-y-auto pb-20" style={zoomEnabled ? { touchAction: 'pan-y' } : undefined} onContextMenu={(e) => { if ('ontouchstart' in window) e.preventDefault(); }}>
                 <ContinuousTimeline
                   days={days}
                   entries={scheduledEntries}

@@ -1059,6 +1059,7 @@ const ContinuousTimeline = ({
                     width: '100%',
                     zIndex: isDragged ? 30 : isTransport ? 20 : hasConflict ? 10 + index : 10,
                     opacity: isDetached ? 0.3 : undefined,
+                    touchAction: 'manipulation',
                   }}
                 >
                 <div className="relative h-full">
@@ -1076,26 +1077,26 @@ const ContinuousTimeline = ({
                   {canDrag && !flightGroup && !isCompact && (
                     <div
                       data-resize-handle
-                      className="absolute left-0 right-0 top-0 z-20 h-3 cursor-ns-resize group/resize"
+                      className="absolute left-0 right-0 -top-1 z-20 h-5 cursor-ns-resize group/resize touch-none"
                       onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartGH, origEndGH, dragTz)}
                       onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartGH, origEndGH, dragTz)}
                       onTouchMove={onTouchMove}
                       onTouchEnd={onTouchEnd}
                     >
                       {!hasEntryDirectlyAbove && (
-                        <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-10 h-1.5 rounded-full bg-muted-foreground/30 group-hover/resize:bg-primary/60 transition-colors" />
+                        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-2 rounded-full bg-muted-foreground/30 group-hover/resize:bg-primary/60 transition-colors" />
                       )}
                     </div>
                   )}
                   {!canDrag && isLocked && !flightGroup && !isCompact && (
                     <div
                       data-resize-handle
-                      className="absolute left-0 right-0 top-0 z-20 h-3 cursor-not-allowed"
+                      className="absolute left-0 right-0 -top-1 z-20 h-5 cursor-not-allowed touch-none"
                       onMouseDown={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                       onTouchStart={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                     >
                       {!hasEntryDirectlyAbove && (
-                        <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-10 h-1.5 rounded-full bg-muted-foreground/10" />
+                        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-2 rounded-full bg-muted-foreground/10" />
                       )}
                     </div>
                   )}
@@ -1344,26 +1345,26 @@ const ContinuousTimeline = ({
                   {canDrag && !flightGroup && !isTransport && !isCompact && (
                     <div
                       data-resize-handle
-                      className="absolute bottom-0 left-0 right-0 z-20 h-3 cursor-ns-resize group/resize"
+                      className="absolute -bottom-1 left-0 right-0 z-20 h-5 cursor-ns-resize group/resize touch-none"
                       onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartGH, origEndGH, dragTz)}
                       onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartGH, origEndGH, dragTz)}
                       onTouchMove={onTouchMove}
                       onTouchEnd={onTouchEnd}
                     >
                       {!hasEntryDirectlyBelow && (
-                        <div className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-10 h-1.5 rounded-full bg-muted-foreground/30 group-hover/resize:bg-primary/60 transition-colors" />
+                        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-2 rounded-full bg-muted-foreground/30 group-hover/resize:bg-primary/60 transition-colors" />
                       )}
                     </div>
                   )}
                   {!canDrag && isLocked && !flightGroup && !isTransport && !isCompact && (
                     <div
                       data-resize-handle
-                      className="absolute bottom-0 left-0 right-0 z-20 h-3 cursor-not-allowed"
+                      className="absolute -bottom-1 left-0 right-0 z-20 h-5 cursor-not-allowed touch-none"
                       onMouseDown={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                       onTouchStart={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                     >
                       {!hasEntryDirectlyBelow && (
-                        <div className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-10 h-1.5 rounded-full bg-muted-foreground/10" />
+                        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-2 rounded-full bg-muted-foreground/10" />
                       )}
                     </div>
                   )}
