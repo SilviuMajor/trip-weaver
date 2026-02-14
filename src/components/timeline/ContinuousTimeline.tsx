@@ -541,7 +541,8 @@ const ContinuousTimeline = ({
       Math.abs(dragState.currentClientX - gridRect.left),
       Math.abs(dragState.currentClientX - gridRect.right)
     );
-    const threshold = 20;
+    const vw = window.innerWidth;
+    const threshold = Math.max(30, vw * 0.12);
 
     return distFromGrid > threshold ? 'detached' : 'timeline';
   }, [dragState]);
@@ -1043,7 +1044,7 @@ const ContinuousTimeline = ({
                   data-entry-card
                   className={cn(
                     'absolute pr-1 group overflow-visible',
-                    isDragged && 'opacity-80 z-30',
+                    isDragged && 'z-30',
                     !isDragged && 'z-10'
                   )}
                   style={{
@@ -1052,7 +1053,10 @@ const ContinuousTimeline = ({
                     left: '0%',
                     width: '100%',
                     zIndex: isDragged ? 30 : isTransport ? 20 : hasConflict ? 10 + index : 10,
-                    opacity: isBeingDragged ? 0.2 : undefined,
+                    opacity: isBeingDragged ? 0.35 : undefined,
+                    outline: isBeingDragged ? '2px dashed hsl(var(--primary) / 0.4)' : undefined,
+                    outlineOffset: isBeingDragged ? '-2px' : undefined,
+                    borderRadius: isBeingDragged ? '16px' : undefined,
                     touchAction: dragState?.entryId === entry.id ? 'none' : 'manipulation',
                   }}
                 >
@@ -1683,8 +1687,8 @@ const ContinuousTimeline = ({
           <div
             className="fixed z-[200] pointer-events-none"
             style={{
-              left: dragState.currentClientX - cardWidth / 2,
-              top: dragState.currentClientY - moveHeight / 2,
+              left: Math.max(4, Math.min(window.innerWidth - cardWidth - 4, dragState.currentClientX - cardWidth / 2)),
+              top: Math.max(4, Math.min(window.innerHeight - moveHeight - 4, dragState.currentClientY - moveHeight / 2)),
               width: cardWidth,
               height: moveHeight,
               transform: shrinkFactor < 1 ? `scale(${shrinkFactor})` : undefined,
