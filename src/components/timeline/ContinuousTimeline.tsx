@@ -5,7 +5,7 @@ import type { EntryWithOptions, EntryOption, WeatherData, TransportMode } from '
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
 import { localToUTC, getHourInTimezone, resolveEntryTz, getDateInTimezone, getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
-import { Plus, Bus, Lock, LockOpen, AlertTriangle, Magnet, Loader2 } from 'lucide-react';
+import { Plus, Bus, Lock, LockOpen, AlertTriangle, Magnet, Loader2, Trash2 } from 'lucide-react';
 import { useDragResize, type DragType } from '@/hooks/useDragResize';
 import EntryCard from './EntryCard';
 import FlightGroupCard from './FlightGroupCard';
@@ -59,6 +59,8 @@ interface ContinuousTimelineProps {
   onMagnetSnap?: (entryId: string) => Promise<void>;
   pixelsPerHour: number;
   onResetZoom?: () => void;
+  onDragActiveChange?: (active: boolean, entryId: string | null) => void;
+  onDragCommitOverride?: (entryId: string) => boolean;
 }
 
 const ContinuousTimeline = ({
@@ -96,6 +98,8 @@ const ContinuousTimeline = ({
   onMagnetSnap,
   pixelsPerHour,
   onResetZoom,
+  onDragActiveChange,
+  onDragCommitOverride,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
@@ -106,6 +110,10 @@ const ContinuousTimeline = ({
 
   // Double-tap to reset zoom
   const lastTapRef = useRef<number>(0);
+
+  // Tap-to-create refs (mobile)
+  const tapCreateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slotTouchStartRef = useRef<{ x: number; y: number } | null>(null);
 
   // Single scroll listener that measures grid position inline (no stale gridTopPx dependency)
   useEffect(() => {
@@ -236,6 +244,7 @@ const ContinuousTimeline = ({
 
   // Drag commit handler: convert global hours back to day/local/UTC
   const handleDragCommit = useCallback((entryId: string, newStartGH: number, newEndGH: number, tz?: string, _targetDay?: Date, dragType?: DragType) => {
+    if (onDragCommitOverride?.(entryId)) return;
     if (!onEntryTimeChange) return;
     const entry = sortedEntries.find(e => e.id === entryId);
     if (!entry) return;
@@ -481,17 +490,55 @@ const ContinuousTimeline = ({
     return localHour >= lastFlight.flightEndHour ? lastFlight.destinationTz : lastFlight.originTz;
   }, [days, dayTimezoneMap, homeTimezone]);
 
-  // Double-tap handler for slot area
+  // Expose drag-active state to parent
+  useEffect(() => {
+    onDragActiveChange?.(!!dragState, dragState?.entryId ?? null);
+  }, [dragState, onDragActiveChange]);
+
+  // Single-tap to create / double-tap to reset zoom (mobile)
   const handleSlotTouchEnd = useCallback((e: React.TouchEvent) => {
     if (e.touches.length > 0) return;
+
+    // Ignore if finger moved (was a scroll, not a tap)
+    if (slotTouchStartRef.current) {
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - slotTouchStartRef.current.x;
+      const dy = touch.clientY - slotTouchStartRef.current.y;
+      if (Math.sqrt(dx * dx + dy * dy) > 15) {
+        slotTouchStartRef.current = null;
+        return;
+      }
+    }
+    slotTouchStartRef.current = null;
+
     const now = Date.now();
+
     if (now - lastTapRef.current < 300) {
+      // Double tap — reset zoom, cancel any pending create
+      if (tapCreateTimeoutRef.current) {
+        clearTimeout(tapCreateTimeoutRef.current);
+        tapCreateTimeoutRef.current = null;
+      }
       onResetZoom?.();
       lastTapRef.current = 0;
-    } else {
-      lastTapRef.current = now;
+      return;
     }
-  }, [onResetZoom]);
+
+    lastTapRef.current = now;
+
+    // Delay to distinguish from double-tap
+    const touch = e.changedTouches[0];
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const y = touch.clientY - rect.top;
+    const minutes = Math.round(y / pixelsPerHour * 60 / 15) * 15;
+
+    tapCreateTimeoutRef.current = setTimeout(() => {
+      if (onDragSlot) {
+        onDragSlot(minutesToIso(minutes), minutesToIso(minutes + 60));
+      }
+      tapCreateTimeoutRef.current = null;
+    }, 320);
+  }, [onResetZoom, pixelsPerHour, onDragSlot, minutesToIso]);
 
   return (
     <div className="mx-auto max-w-2xl px-4 pb-2 pt-[50px]">
@@ -509,6 +556,11 @@ const ContinuousTimeline = ({
             setSlotDragStart(null);
             setSlotDragEnd(null);
             slotDraggingRef.current = false;
+          }
+        }}
+        onTouchStart={(e) => {
+          if (e.touches.length === 1) {
+            slotTouchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
           }
         }}
         onTouchEnd={handleSlotTouchEnd}
@@ -895,21 +947,25 @@ const ContinuousTimeline = ({
                   )}
 
                   {/* Top resize handle */}
-                  {canDrag && !flightGroup && (
+                  {canDrag && !flightGroup && !isCompact && (
                     <div
-                      className="absolute left-0 right-0 top-0 z-20 h-2 cursor-ns-resize"
+                      className="absolute left-0 right-0 top-0 z-20 h-3 cursor-ns-resize group/resize"
                       onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-top', origStartGH, origEndGH, dragTz)}
                       onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-top', origStartGH, origEndGH, dragTz)}
                       onTouchMove={onTouchMove}
                       onTouchEnd={onTouchEnd}
-                    />
+                    >
+                      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full bg-muted-foreground/20 group-hover/resize:bg-primary/50 transition-colors" />
+                    </div>
                   )}
-                  {!canDrag && isLocked && !flightGroup && (
+                  {!canDrag && isLocked && !flightGroup && !isCompact && (
                     <div
-                      className="absolute left-0 right-0 top-0 z-20 h-2 cursor-not-allowed"
+                      className="absolute left-0 right-0 top-0 z-20 h-3 cursor-not-allowed"
                       onMouseDown={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                       onTouchStart={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
-                    />
+                    >
+                      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full bg-muted-foreground/10" />
+                    </div>
                   )}
 
                   {flightGroup ? (() => {
@@ -1153,21 +1209,25 @@ const ContinuousTimeline = ({
                   )}
 
                   {/* Bottom resize handle — not for transport */}
-                  {canDrag && !flightGroup && !isTransport && (
+                  {canDrag && !flightGroup && !isTransport && !isCompact && (
                     <div
-                      className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-ns-resize"
+                      className="absolute bottom-0 left-0 right-0 z-20 h-3 cursor-ns-resize group/resize"
                       onMouseDown={(e) => onMouseDown(e, entry.id, 'resize-bottom', origStartGH, origEndGH, dragTz)}
                       onTouchStart={(e) => onTouchStart(e, entry.id, 'resize-bottom', origStartGH, origEndGH, dragTz)}
                       onTouchMove={onTouchMove}
                       onTouchEnd={onTouchEnd}
-                    />
+                    >
+                      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full bg-muted-foreground/20 group-hover/resize:bg-primary/50 transition-colors" />
+                    </div>
                   )}
-                  {!canDrag && isLocked && !flightGroup && !isTransport && (
+                  {!canDrag && isLocked && !flightGroup && !isTransport && !isCompact && (
                     <div
-                      className="absolute bottom-0 left-0 right-0 z-20 h-2 cursor-not-allowed"
+                      className="absolute bottom-0 left-0 right-0 z-20 h-3 cursor-not-allowed"
                       onMouseDown={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                       onTouchStart={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
-                    />
+                    >
+                      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full bg-muted-foreground/10" />
+                    </div>
                   )}
 
                   {/* + buttons — not for transport, not adjacent to transport */}
