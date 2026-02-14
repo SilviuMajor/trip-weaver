@@ -2528,7 +2528,9 @@ const Timeline = () => {
             ? binHighlighted
               ? "bg-red-500 scale-125"
               : "bg-red-400/80 scale-100"
-            : "scale-0 opacity-0 pointer-events-none"
+            : isMobile
+              ? "scale-0 opacity-0 pointer-events-none"
+              : "bg-muted/60 scale-100 opacity-40 hover:opacity-70"
         )}
       >
         <Trash2 className="h-5 w-5 text-white" />

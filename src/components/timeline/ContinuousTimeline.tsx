@@ -545,8 +545,7 @@ const ContinuousTimeline = ({
       Math.abs(dragState.currentClientX - gridRect.left),
       Math.abs(dragState.currentClientX - gridRect.right)
     );
-    const isMobileDevice = 'ontouchstart' in window;
-    const threshold = isMobileDevice ? 40 : 80;
+    const threshold = 40;
 
     setDragPhase(distFromGrid > threshold ? 'detached' : 'timeline');
   }, [dragState?.currentClientX, dragState?.type]);
@@ -1617,6 +1616,7 @@ const ContinuousTimeline = ({
           const moveTop = dragState.currentStartHour * pixelsPerHour;
           const moveHeight = durationGH * pixelsPerHour;
           const isCompactMove = moveHeight < 40;
+          const isMediumMove = moveHeight >= 40 && moveHeight < 80;
 
           return (
             <div
@@ -1637,6 +1637,7 @@ const ContinuousTimeline = ({
                   onVoteChange={() => {}}
                   cardSizeClass="h-full"
                   isCompact={isCompactMove}
+                  isMedium={isMediumMove}
                 />
               </div>
             </div>
@@ -1660,6 +1661,7 @@ const ContinuousTimeline = ({
         const durationGH = origGH.endGH - origGH.startGH;
         const moveHeight = durationGH * pixelsPerHour;
         const isCompactMove = moveHeight < 40;
+        const isMediumMove = moveHeight >= 40 && moveHeight < 80;
 
         const gridRect = gridRef.current?.getBoundingClientRect();
         const cardWidth = gridRect ? gridRect.width - 4 : 220;
@@ -1700,6 +1702,7 @@ const ContinuousTimeline = ({
                 onVoteChange={() => {}}
                 cardSizeClass="h-full"
                 isCompact={isCompactMove}
+                isMedium={isMediumMove}
               />
             </div>
           </div>

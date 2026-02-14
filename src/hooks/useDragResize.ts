@@ -54,6 +54,9 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
   const lastClientYRef = useRef(0);
   const scrollRafRef = useRef<number>(0);
   const lastFrameRef = useRef<number>(0);
+  const nativeListenersAttachedRef = useRef(false);
+  const nativeTouchMoveRef = useRef<((e: TouchEvent) => void) | undefined>();
+  const nativeTouchEndRef = useRef<(() => void) | undefined>();
 
   // Keep ref in sync
   useEffect(() => {
@@ -279,40 +282,84 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     const startX = touch.clientX;
     const startY = touch.clientY;
     touchStartPosRef.current = { x: startX, y: startY };
-    
+
+    // Attach native listeners IMMEDIATELY with { passive: false }
+    // This prevents iOS from claiming the touch for scroll during the hold window
+    if (!nativeListenersAttachedRef.current) {
+      const cleanupNativeListeners = () => {
+        if (nativeTouchMoveRef.current) {
+          document.removeEventListener('touchmove', nativeTouchMoveRef.current);
+        }
+        if (nativeTouchEndRef.current) {
+          document.removeEventListener('touchend', nativeTouchEndRef.current);
+          document.removeEventListener('touchcancel', nativeTouchEndRef.current);
+        }
+        nativeListenersAttachedRef.current = false;
+      };
+
+      const handleNativeTouchMove = (ev: TouchEvent) => {
+        const t = ev.touches[0];
+        const sp = touchStartPosRef.current;
+
+        if (isDraggingRef.current) {
+          ev.preventDefault();
+          handlePointerMove(t.clientX, t.clientY);
+        } else if (sp && touchTimerRef.current) {
+          const dx = t.clientX - sp.x;
+          const dy = t.clientY - sp.y;
+          if (Math.sqrt(dx * dx + dy * dy) > TOUCH_MOVE_THRESHOLD) {
+            clearTimeout(touchTimerRef.current);
+            touchTimerRef.current = null;
+            cleanupNativeListeners();
+          } else {
+            // Keep touch alive during hold window
+            ev.preventDefault();
+          }
+        }
+      };
+
+      const handleNativeTouchEnd = () => {
+        if (isDraggingRef.current) {
+          commitDrag();
+        }
+        touchStartPosRef.current = null;
+        if (touchTimerRef.current) {
+          clearTimeout(touchTimerRef.current);
+          touchTimerRef.current = null;
+        }
+        cleanupNativeListeners();
+      };
+
+      nativeTouchMoveRef.current = handleNativeTouchMove;
+      nativeTouchEndRef.current = handleNativeTouchEnd;
+
+      document.addEventListener('touchmove', handleNativeTouchMove, { passive: false });
+      document.addEventListener('touchend', handleNativeTouchEnd);
+      document.addEventListener('touchcancel', handleNativeTouchEnd);
+      nativeListenersAttachedRef.current = true;
+    }
+
     touchTimerRef.current = setTimeout(() => {
       startDrag(entryId, type, startX, startY, entryStartHour, entryEndHour, tz);
     }, TOUCH_HOLD_MS);
-  }, [startDrag]);
+  }, [startDrag, handlePointerMove, commitDrag]);
 
   const onTouchMove = useCallback((e: React.TouchEvent) => {
-    const touch = e.touches[0];
-    const startPos = touchStartPosRef.current;
-    
-    if (!isDraggingRef.current && startPos && touchTimerRef.current) {
-      const dx = touch.clientX - startPos.x;
-      const dy = touch.clientY - startPos.y;
-      if (Math.sqrt(dx * dx + dy * dy) > TOUCH_MOVE_THRESHOLD) {
-        clearTimeout(touchTimerRef.current);
-        touchTimerRef.current = null;
-        return;
-      }
-    }
-
+    // Native listeners handle this — safety net
     if (isDraggingRef.current) {
-      e.preventDefault();
+      const touch = e.touches[0];
       handlePointerMove(touch.clientX, touch.clientY);
     }
   }, [handlePointerMove]);
 
   const onTouchEnd = useCallback(() => {
+    if (isDraggingRef.current) {
+      commitDrag();
+    }
+    touchStartPosRef.current = null;
     if (touchTimerRef.current) {
       clearTimeout(touchTimerRef.current);
       touchTimerRef.current = null;
-    }
-    touchStartPosRef.current = null;
-    if (isDraggingRef.current) {
-      commitDrag();
     }
   }, [commitDrag]);
 
@@ -335,43 +382,18 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     };
   }, [dragState, handlePointerMove, commitDrag]);
 
-  // Native touch listeners for active drag (ensures preventDefault works with { passive: false }
+  // Cleanup auto-scroll and native listeners on unmount
   useEffect(() => {
-    if (!dragState) return;
-
-    const handleNativeTouchMove = (e: TouchEvent) => {
-      if (isDraggingRef.current) {
-        e.preventDefault();
-        const touch = e.touches[0];
-        handlePointerMove(touch.clientX, touch.clientY);
-      }
-    };
-
-    const handleNativeTouchEnd = () => {
-      if (isDraggingRef.current) {
-        commitDrag();
-      }
-      touchStartPosRef.current = null;
-      if (touchTimerRef.current) {
-        clearTimeout(touchTimerRef.current);
-        touchTimerRef.current = null;
-      }
-    };
-
-    document.addEventListener('touchmove', handleNativeTouchMove, { passive: false });
-    document.addEventListener('touchend', handleNativeTouchEnd);
-    document.addEventListener('touchcancel', handleNativeTouchEnd);
-
     return () => {
-      document.removeEventListener('touchmove', handleNativeTouchMove);
-      document.removeEventListener('touchend', handleNativeTouchEnd);
-      document.removeEventListener('touchcancel', handleNativeTouchEnd);
+      if (nativeTouchMoveRef.current) {
+        document.removeEventListener('touchmove', nativeTouchMoveRef.current);
+      }
+      if (nativeTouchEndRef.current) {
+        document.removeEventListener('touchend', nativeTouchEndRef.current);
+        document.removeEventListener('touchcancel', nativeTouchEndRef.current);
+      }
+      stopAutoScroll();
     };
-  }, [dragState, handlePointerMove, commitDrag]);
-
-  // Cleanup auto-scroll on unmount
-  useEffect(() => {
-    return () => { stopAutoScroll(); };
   }, [stopAutoScroll]);
 
   return {
