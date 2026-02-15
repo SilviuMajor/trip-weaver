@@ -1,31 +1,33 @@
 
 
-# Add Dashed Line and Dual Buttons to Transport Gap Section
+# Add New Categories, Hide System Categories, Update Emojis
 
-## Problem
-The "+ Add something" button below transport cards (lines 1546-1583) is missing the dashed centre line that appears in the main gap section, and does not use the dual-button logic for gaps exceeding 6 hours.
+## Overview
+Add 4 new picker-visible categories (Nightlife, Coffee Shop, Museum/Gallery, Park), hide 4 system-only categories from pickers (Home, Transport, Transfer, Airport), update emojis for Breakfast/Dinner/Private Transfer, and unify filtering via a new `PICKER_CATEGORIES` export.
 
-## Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
+## Changes
 
-### Replace the transport gap block (lines 1546-1583)
+### 1. `src/lib/categories.ts` -- Core definitions
+- Add `pickerVisible?: boolean` to the `CategoryDef` interface.
+- Replace the `PREDEFINED_CATEGORIES` array with the updated version containing 14 picker-visible and 4 system-only categories, with new emojis and reordered layout.
+- Add `export const PICKER_CATEGORIES = PREDEFINED_CATEGORIES.filter(c => c.pickerVisible !== false);`
 
-Replace the entire `isTransport && (() => { ... })()` block with updated logic that:
+### 2. `src/components/timeline/EntrySheet.tsx` (~line 13, 415-416)
+- Import `PICKER_CATEGORIES` alongside existing imports.
+- Replace `PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing' && c.id !== 'transfer')` with `PICKER_CATEGORIES` in the `allCategories` construction.
 
-1. Keeps the same next-visible-entry lookup (unchanged).
-2. Switches from millisecond-based gap detection to global-hour-based (`gapGH`, `gapMin`), with a 5-minute minimum threshold.
-3. Computes `relGapTop` as `gapTopPx - (entryStartGH * pixelsPerHour)` to position elements relative to the transport card wrapper (since the wrapper div starts at `entryStartGH * pixelsPerHour`).
-4. Adds a dashed centre line (`border-l-2 border-dashed border-primary/20`) spanning the full gap height.
-5. Uses a three-way conditional for buttons:
-   - **Large gaps (> 6 hours)**: Two "+ Add something" buttons, top at `relGapTop + pixelsPerHour - 12`, bottom at `relGapTop + gapPixelHeight - pixelsPerHour - 12`, with prefill times offset by 1 hour from neighboring events using `addMinutes`.
-   - **Normal gaps**: Single centered button at `relGapTop + (gapPixelHeight - 22) / 2`.
+### 3. `src/components/timeline/CategorySidebar.tsx` (~line 6, 58)
+- Import `PICKER_CATEGORIES`.
+- Replace the manual filter `PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing' && c.id !== 'transport' && c.id !== 'transfer')` with `[...PICKER_CATEGORIES]`.
 
-### Variables in scope
-- `entryStartGH` -- defined at line 1029, available throughout the entry rendering block.
-- `height` -- the card's pixel height, defined at line 1063.
-- `pixelsPerHour`, `sortedEntries`, `onAddBetween`, `getEntryGlobalHours`, `isTransportEntry`, `addMinutes` -- all available in the component scope.
+### 4. `src/components/wizard/CategoryStep.tsx` (~line 5, 43)
+- Import `PICKER_CATEGORIES` instead of `PREDEFINED_CATEGORIES`.
+- Replace `PREDEFINED_CATEGORIES.map(...)` in the preview section with `PICKER_CATEGORIES.map(...)`.
 
-### What does not change
-- The main gap button section (visibleEntries loop with its own dashed lines and dual buttons)
-- Transport connector rendering
-- Gap detection logic in the main section
-- Any other timeline rendering
+### 5. `src/components/timeline/OptionForm.tsx` (~line 29)
+- Import `PICKER_CATEGORIES`.
+- Replace `PREDEFINED_CATEGORIES.map(...)` with `PICKER_CATEGORIES.map(...)` in the `allCategories` construction.
+
+## What does NOT change
+- `findCategory`, `categoryLabel`, `categoryColor` still search the full `PREDEFINED_CATEGORIES` array, so existing entries with home/transport/transfer/airport_processing render correctly.
+- Database schema, flight/hotel special handling, transport auto-generation logic, timeline rendering.
