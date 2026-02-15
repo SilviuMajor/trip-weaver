@@ -294,7 +294,7 @@ const EntryCard = ({
           className={cn(
             'group relative flex items-center gap-1.5 overflow-hidden rounded-lg border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
             isEntryPast && 'opacity-50 grayscale-[30%]',
-            isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
             isShaking && 'animate-shake',
             cardSizeClass
           )}
@@ -318,7 +318,7 @@ const EntryCard = ({
           className={cn(
             'group relative flex items-center overflow-hidden rounded-lg border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
             isEntryPast && 'opacity-50 grayscale-[30%]',
-            isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
             isShaking && 'animate-shake',
             cardSizeClass
           )}
@@ -343,7 +343,7 @@ const EntryCard = ({
           className={cn(
             'group relative overflow-hidden rounded-xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
             isEntryPast && 'opacity-50 grayscale-[30%]',
-            isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
             isShaking && 'animate-shake',
             cardSizeClass
           )}
@@ -379,7 +379,7 @@ const EntryCard = ({
           className={cn(
             'group relative overflow-hidden rounded-2xl border-l-[3px] border-dashed shadow-sm transition-all hover:shadow-md bg-orange-50 dark:bg-orange-950/20',
             isEntryPast && 'opacity-50 grayscale-[30%]',
-            isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+            isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
             isLocked && 'border-r border-t border-b border-muted-foreground/20',
             isShaking && 'animate-shake',
             cardSizeClass
@@ -442,7 +442,7 @@ const EntryCard = ({
         className={cn(
           'group relative overflow-hidden rounded-xl border shadow-sm transition-all hover:shadow-md',
           isEntryPast && 'opacity-50 grayscale-[30%]',
-          isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+           isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
           isLocked && 'border-2 border-muted-foreground/20',
           isShaking && 'animate-shake',
           cardSizeClass
@@ -490,7 +490,7 @@ const EntryCard = ({
         className={cn(
           'group relative flex items-center gap-1.5 overflow-hidden rounded-lg border shadow-sm transition-all hover:shadow-md',
           isEntryPast && 'opacity-50 grayscale-[30%]',
-          isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+          isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
           isLocked && 'border-2 border-muted-foreground/20',
           isShaking && 'animate-shake',
           cardSizeClass
@@ -536,7 +536,7 @@ const EntryCard = ({
         className={cn(
           'group relative overflow-hidden rounded-xl border shadow-sm transition-all hover:shadow-md',
           isEntryPast && 'opacity-50 grayscale-[30%]',
-          isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+          isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
           isLocked && 'border-2 border-muted-foreground/20',
           isShaking && 'animate-shake',
           cardSizeClass
@@ -647,7 +647,7 @@ const EntryCard = ({
         className={cn(
           'group relative overflow-hidden rounded-2xl border shadow-md transition-all hover:shadow-lg',
           isEntryPast && 'opacity-50 grayscale-[30%]',
-          isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+          isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
           isLocked && 'border-2 border-muted-foreground/20',
           isProcessing && 'opacity-80',
           isShaking && 'animate-shake',

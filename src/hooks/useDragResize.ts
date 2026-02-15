@@ -196,6 +196,10 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
 
         // Only trigger React re-render when snapped position or phase changes
         if (newStart !== state.currentStartHour || newEnd !== state.currentEndHour || wasDetached !== isDetached) {
+          // Haptic tick on snap position change
+          if (newStart !== state.currentStartHour || newEnd !== state.currentEndHour) {
+            if (navigator.vibrate) navigator.vibrate(1);
+          }
           const updated: DragState = {
             ...state,
             currentStartHour: newStart,
@@ -214,6 +218,9 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
         if (newStart >= newEnd - 0.25) newStart = newEnd - 0.25;
         if (newStart < 0) newStart = 0;
 
+        if (newStart !== state.currentStartHour) {
+          if (navigator.vibrate) navigator.vibrate(1);
+        }
         const updated: DragState = { ...state, currentStartHour: newStart, currentEndHour: newEnd };
         setDragState(updated);
         dragStateRef.current = updated;
@@ -227,6 +234,9 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
         if (newEnd <= newStart + 0.25) newEnd = newStart + 0.25;
         if (newEnd > totalHours) newEnd = totalHours;
 
+        if (newEnd !== state.currentEndHour) {
+          if (navigator.vibrate) navigator.vibrate(1);
+        }
         const updated: DragState = { ...state, currentStartHour: newStart, currentEndHour: newEnd };
         setDragState(updated);
         dragStateRef.current = updated;

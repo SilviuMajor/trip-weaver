@@ -1203,7 +1203,10 @@ const ContinuousTimeline = ({
                     left: '0%',
                     width: '100%',
                     zIndex: isDragged ? 30 : isTransport ? 20 : hasConflict ? 10 + index : 10,
-                    opacity: isBeingDragged ? 0.4 : undefined,
+                    opacity: isBeingDragged ? 0.4
+                      : (dragState && dragState.type === 'move' && dragState.entryId !== entry.id) ? 0.4
+                      : undefined,
+                    transition: 'opacity 0.2s ease',
                     border: isBeingDragged ? '3px dashed hsl(var(--primary) / 0.5)' : undefined,
                     borderRadius: isBeingDragged ? '16px' : undefined,
                     touchAction: 'none',
