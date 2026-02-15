@@ -616,7 +616,7 @@ const ContinuousTimeline = ({
   // DIAGNOSTIC: Document-level native touch listener
   useEffect(() => {
     const handler = () => {
-      toast('Document touch fired', { duration: 1000, id: 'doc-touch' });
+      alert('DOC TOUCH');
     };
     document.addEventListener('touchstart', handler, { passive: true });
     return () => document.removeEventListener('touchstart', handler);
@@ -630,14 +630,7 @@ const ContinuousTimeline = ({
     const handleNativeTouch = (e: TouchEvent) => {
       const target = e.target as HTMLElement;
       const cardEl = target.closest('[data-entry-card]');
-      const entryId = cardEl?.getAttribute('data-entry-id') || 'unknown';
-      toast.info(
-        `Native touch on: ${cardEl ? 'CARD' : target.tagName}` +
-        ` | entry: ${entryId}` +
-        ` | isEditor: ${isEditor}` +
-        ` | onEntryTimeChange: ${!!onEntryTimeChange}`,
-        { duration: 3000, id: 'native-touch' }
-      );
+      alert('GRID TOUCH: ' + (cardEl ? 'CARD' : target.tagName));
     };
 
     grid.addEventListener('touchstart', handleNativeTouch, { passive: true });

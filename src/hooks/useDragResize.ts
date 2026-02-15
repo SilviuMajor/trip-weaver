@@ -1,5 +1,4 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { toast } from 'sonner';
 
 export type DragType = 'move' | 'resize-top' | 'resize-bottom';
 
@@ -108,7 +107,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     entryEndHour: number,
     tz?: string,
   ) => {
-    toast.info(`startDrag called for ${entryId}`, { duration: 2000 });
+    alert('START DRAG');
     // Compute grab offset in the single global coordinate space
     let grabOffsetHours = 0;
     if (scrollContainerRef?.current) {
@@ -289,7 +288,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     entryEndHour: number,
     tz?: string,
   ) => {
-    toast.info('Touch started', { duration: 1500 });
+    alert('TOUCH START');
     const touch = e.touches[0];
     const startX = touch.clientX;
     const startY = touch.clientY;
@@ -318,7 +317,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
             touchTimerRef.current = null;
           }
           holdCancelled = true;
-          toast.warning('Hold cancelled — scrolling', { duration: 1500 });
+          alert('HOLD CANCEL');
           // Don't cleanup listeners — we continue to handle scroll manually
         }
       }
@@ -361,7 +360,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     touchTimerRef.current = setTimeout(() => {
       touchTimerRef.current = null;
       if (!holdCancelled) {
-        toast.success('Hold succeeded — starting drag', { duration: 1500 });
+        alert('HOLD OK');
         startDrag(entryId, type, startX, startY, entryStartHour, entryEndHour, tz);
         if (navigator.vibrate) navigator.vibrate(20);
       }
