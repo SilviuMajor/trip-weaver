@@ -1,33 +1,19 @@
 
-
-# Replace Diagnostic Toasts with Native alert() Calls
-
-## Why
-Sonner toasts may not be rendering on mobile Safari. Native `alert()` creates a blocking browser dialog that is impossible to miss -- it will definitively confirm whether touch events are firing.
+# Remove All Diagnostic Alerts
 
 ## Changes
 
-### File 1: `src/components/timeline/ContinuousTimeline.tsx`
+### File 1: `src/hooks/useDragResize.ts`
+- **Line 110**: Remove `alert('START DRAG');`
+- **Line 291**: Remove `alert('TOUCH START');`
+- **Line 320**: Remove `alert('HOLD CANCEL');`
+- **Line 363**: Remove `alert('HOLD OK');`
 
-**Document-level diagnostic (~line 615-620):**
-Replace `toast('Document touch fired', ...)` with `alert('DOC TOUCH')`.
+No import changes needed (the `toast` import was already removed previously).
 
-**Grid-level diagnostic (~line 625-640):**
-Replace the `toast.info(...)` call with `alert('GRID TOUCH: ' + (cardEl ? 'CARD' : target.tagName))`. Remove the extra details (isEditor, entryId) to keep the alert short.
+### File 2: `src/components/timeline/ContinuousTimeline.tsx`
+- **Lines 616-623**: Delete the entire document-level diagnostic `useEffect` block (`alert('DOC TOUCH')`)
+- **Lines 625-638**: Delete the entire grid-level diagnostic `useEffect` block (`alert('GRID TOUCH')`)
 
-### File 2: `src/hooks/useDragResize.ts`
-
-Replace all 4 diagnostic toast calls with alert:
-- `toast.info('startDrag called...')` at line ~108 becomes `alert('START DRAG')`
-- `toast.info('Touch started', ...)` at line ~212 becomes `alert('TOUCH START')`
-- `toast.success('Hold succeeded...')` at line ~254 becomes `alert('HOLD OK')`
-- `toast.warning('Hold cancelled...', ...)` at line ~243 becomes `alert('HOLD CANCEL')`
-
-Remove `import { toast } from 'sonner';` if no other toast calls remain.
-
-### No other changes
-All existing drag logic, card rendering, touch handlers, and styling remain untouched.
-
-### What to report after applying
-Touch anywhere on the mobile timeline. A native browser alert dialog (blocking popup) will appear. Report exactly what text it shows.
-
+### Nothing else changes
+All drag functionality, touch handlers, card rendering, `touch-action` styles, `data-entry-card` / `data-entry-id` attributes, and everything else remains exactly as-is.
