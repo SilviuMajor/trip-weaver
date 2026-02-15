@@ -1,52 +1,29 @@
 
-# Replace motion.div with plain div in EntryCard + Restore Touch Props
 
-## Problem
-Framer-motion's `motion.div` registers native DOM touch event listeners that call `stopPropagation()` before React's synthetic event system fires. This kills all touch events on EntryCard -- explaining why zero diagnostic toasts appeared despite correct code on both the wrapper div and the card itself.
+# Add Native DOM Touch Diagnostics
 
-## Solution
+## What and Why
+React's `onTouchStart` on the card wrapper div is not firing on mobile. We need to bypass React's synthetic event system entirely and attach native DOM `addEventListener('touchstart', ...)` to determine:
+- Whether native touch events reach the grid at all
+- Whether the touch target is a card element
+- Whether `isEditor` and `onEntryTimeChange` have the expected values
 
-### File 1: `src/components/timeline/EntryCard.tsx`
+## Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
 
-**Remove framer-motion import (line 2):**
-Delete `import { motion } from 'framer-motion';`
+### 1. Add `data-entry-id` to the card wrapper div (line 1048)
+Add `data-entry-id={entry.id}` so the diagnostic listener can identify which card was touched.
 
-**Replace all 8 `<motion.div` with `<div` and remove animation props:**
+### 2. Add document-level native touch diagnostic (before line 616)
+A `useEffect` that attaches a native `touchstart` listener on `document`. This confirms whether ANY touch events fire at all on the page. Shows toast: "Document touch fired".
 
-Each instance loses `initial`, `animate`, `transition` props but keeps all other props (`onClick`, `onMouseDown`, `onTouchStart`, `onTouchMove`, `onTouchEnd`, `className`, `style`). Closing `</motion.div>` becomes `</div>`.
+### 3. Add grid-level native touch diagnostic (before line 616)
+A `useEffect` that attaches a native `touchstart` listener on `gridRef.current`. This reports:
+- Whether the touch target is a CARD element or something else
+- The current value of `isEditor`
+- Whether `onEntryTimeChange` is defined (both are required for `canDrag` to be true)
 
-The 8 locations:
-1. Line 290 -- transport compact
-2. Line 315 -- transport medium
-3. Line 341 -- transport condensed
-4. Line 378 -- transport full
-5. Line 440 -- regular medium
-6. Line 491 -- regular compact
-7. Line 540 -- regular condensed
-8. Line 654 -- regular full
+### No other changes
+All existing code, diagnostic toasts in `useDragResize.ts`, card styling, and touch handlers remain untouched.
 
-Each closing tag also changes: lines 309, 335, 372, 433, 484, 524, 649, 886.
-
-All `style` props already contain `touchAction: 'none'` from the previous fix -- no changes needed there.
-
-### File 2: `src/components/timeline/ContinuousTimeline.tsx`
-
-**Restore touch props on the main EntryCard render (after line 1303):**
-Add back:
-```typescript
-onTouchDragStart={canDrag ? (e) => {
-  onTouchStart(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
-} : isLocked ? (e) => {
-  e.stopPropagation();
-  handleLockedAttempt(entry.id);
-} : undefined}
-onTouchDragMove={onTouchMove}
-onTouchDragEnd={onTouchEnd}
-```
-
-This gives belt-and-suspenders: touch handlers on both the wrapper div (already there) and the EntryCard itself. First one to fire wins.
-
-### No changes to other files
-- `useDragResize.ts` -- keep all diagnostic toasts as-is
-- Card 1 visibility styling -- keep as-is (opacity 0.4, dashed primary border)
-- Card 2/3 rendering, resize handles, bin/planner logic -- unchanged
+### Technical Detail
+Both listeners use `{ passive: true }` since they are read-only diagnostics that do not call `preventDefault()`. They are cleaned up on unmount via the returned cleanup function.
