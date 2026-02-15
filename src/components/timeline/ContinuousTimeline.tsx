@@ -1046,6 +1046,9 @@ const ContinuousTimeline = ({
             <div key={entry.id}>
                 <div
                   data-entry-card
+                  onTouchStart={canDrag ? (e) => {
+                    onTouchStart(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
+                  } : undefined}
                   className={cn(
                     'absolute pr-1 group overflow-visible',
                     isDragged && 'z-30',
@@ -1058,7 +1061,7 @@ const ContinuousTimeline = ({
                     width: '100%',
                     zIndex: isDragged ? 30 : isTransport ? 20 : hasConflict ? 10 + index : 10,
                     opacity: isBeingDragged ? 0.4 : undefined,
-                    border: isBeingDragged ? '3px dashed red' : undefined,
+                    border: isBeingDragged ? '3px dashed hsl(var(--primary) / 0.5)' : undefined,
                     borderRadius: isBeingDragged ? '16px' : undefined,
                     touchAction: 'none',
                   }}
@@ -1135,12 +1138,6 @@ const ContinuousTimeline = ({
                             e.stopPropagation();
                             toast.info('Flight position is fixed — edit times inside the card');
                           }}
-                          onTouchDragStart={(e) => {
-                            e.stopPropagation();
-                            toast.info('Flight position is fixed — edit times inside the card');
-                          }}
-                          onTouchDragMove={onTouchMove}
-                          onTouchDragEnd={onTouchEnd}
                           isShaking={shakeEntryId === entry.id}
                         />
                         {/* Flight group resize handles */}
@@ -1304,14 +1301,6 @@ const ContinuousTimeline = ({
                           e.stopPropagation();
                           handleLockedAttempt(entry.id);
                         } : undefined}
-                        onTouchDragStart={canDrag ? (e) => {
-                          onTouchStart(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
-                        } : isLocked ? (e) => {
-                          e.stopPropagation();
-                          handleLockedAttempt(entry.id);
-                        } : undefined}
-                        onTouchDragMove={onTouchMove}
-                        onTouchDragEnd={onTouchEnd}
                         isShaking={shakeEntryId === entry.id}
                         entryId={entry.id}
                       />
