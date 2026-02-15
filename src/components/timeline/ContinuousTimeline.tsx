@@ -113,6 +113,7 @@ const ContinuousTimeline = ({
   const totalHours = totalDays * 24;
   const containerHeight = totalHours * pixelsPerHour + 30;
   const gridRef = useRef<HTMLDivElement>(null);
+  const floatingCardRef = useRef<HTMLDivElement>(null);
   const [gridTopPx, setGridTopPx] = useState(0);
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
 
@@ -336,7 +337,7 @@ const ContinuousTimeline = ({
     }
   }, [onEntryTimeChange, sortedEntries, days, dayTimezoneMap, homeTimezone, allEntries, onDragCommitOverride]);
 
-  const { dragState, wasDraggedRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
+  const { dragState, wasDraggedRef, clientXRef, clientYRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
     pixelsPerHour,
     startHour: 0,
     totalHours,
@@ -534,18 +535,54 @@ const ContinuousTimeline = ({
   const dragPhase = useMemo((): 'timeline' | 'detached' | null => {
     if (!dragState || dragState.type !== 'move') return null;
     
-    const horizontalDist = Math.abs(dragState.currentClientX - dragState.startClientX);
+    const horizontalDist = Math.abs(clientXRef.current - dragState.startClientX);
     const vw = window.innerWidth;
     const isMobileDevice = vw < 768;
     const threshold = isMobileDevice ? Math.max(15, vw * 0.04) : Math.max(40, vw * 0.04);
     
     return horizontalDist > threshold ? 'detached' : 'timeline';
-  }, [dragState]);
+  }, [dragState, clientXRef]);
 
   // Notify parent of phase changes
   useEffect(() => {
     onDragPhaseChange?.(dragPhase);
   }, [dragPhase, onDragPhaseChange]);
+
+  // RAF loop: update Card 3 (floating) position directly via DOM — no React re-renders
+  useEffect(() => {
+    if (!dragState || dragState.type !== 'move') return;
+
+    let rafId: number;
+    const loop = () => {
+      const el = floatingCardRef.current;
+      if (el) {
+        const gridRect = gridRef.current?.getBoundingClientRect();
+        const cardWidth = gridRect ? gridRect.width - 4 : 220;
+        const origEntry = sortedEntries.find(e => e.id === dragState.entryId);
+        if (origEntry) {
+          const gh = getEntryGlobalHours(origEntry);
+          const moveHeight = (gh.endGH - gh.startGH) * pixelsPerHour;
+
+          const cx = clientXRef.current;
+          const cy = clientYRef.current;
+          const tx = Math.max(4, Math.min(window.innerWidth - cardWidth - 4, cx - cardWidth / 2));
+          const ty = Math.max(4, Math.min(window.innerHeight - moveHeight - 4, cy - moveHeight / 2));
+
+          let shrinkFactor = 1;
+          if (binRef?.current) {
+            const br = binRef.current.getBoundingClientRect();
+            const binDist = Math.hypot(cx - (br.left + br.width / 2), cy - (br.top + br.height / 2));
+            shrinkFactor = binDist < 150 ? Math.max(0.3, binDist / 150) : 1;
+          }
+
+          el.style.transform = `translate(${tx}px, ${ty}px)${shrinkFactor < 1 ? ` scale(${shrinkFactor})` : ''}`;
+        }
+      }
+      rafId = requestAnimationFrame(loop);
+    };
+    rafId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafId);
+  }, [dragState?.entryId, dragState?.type, pixelsPerHour, sortedEntries, binRef, clientXRef, clientYRef]);
 
   // Single-tap to create / double-tap to reset zoom (mobile)
   const handleSlotTouchEnd = useCallback((e: React.TouchEvent) => {
@@ -1694,26 +1731,18 @@ const ContinuousTimeline = ({
         const gridRect = gridRef.current?.getBoundingClientRect();
         const cardWidth = gridRect ? gridRect.width - 4 : 220;
 
-        let shrinkFactor = 1;
-        if (binRef?.current) {
-          const br = binRef.current.getBoundingClientRect();
-          const binDist = Math.hypot(
-            dragState.currentClientX - (br.left + br.width / 2),
-            dragState.currentClientY - (br.top + br.height / 2)
-          );
-          shrinkFactor = binDist < 150 ? Math.max(0.3, binDist / 150) : 1;
-        }
-
         return (
           <div
+            ref={floatingCardRef}
             className="fixed z-[200] pointer-events-none"
             style={{
               left: 0,
               top: 0,
               width: cardWidth,
               height: moveHeight,
-              transform: `translate(${Math.max(4, Math.min(window.innerWidth - cardWidth - 4, dragState.currentClientX - cardWidth / 2))}px, ${Math.max(4, Math.min(window.innerHeight - moveHeight - 4, dragState.currentClientY - moveHeight / 2))}px)${shrinkFactor < 1 ? ` scale(${shrinkFactor})` : ''}`,
               willChange: 'transform',
+              // Initial position — RAF loop takes over immediately
+              transform: `translate(${Math.max(4, Math.min(window.innerWidth - cardWidth - 4, clientXRef.current - cardWidth / 2))}px, ${Math.max(4, Math.min(window.innerHeight - moveHeight - 4, clientYRef.current - moveHeight / 2))}px)`,
             }}
           >
             <div className="h-full ring-2 ring-primary/60 shadow-lg shadow-primary/20 rounded-2xl overflow-hidden">

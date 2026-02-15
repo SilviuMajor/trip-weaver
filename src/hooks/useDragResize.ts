@@ -54,6 +54,8 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
   const lastClientYRef = useRef(0);
   const scrollRafRef = useRef<number>(0);
   const lastFrameRef = useRef<number>(0);
+  const clientXRef = useRef(0);
+  const clientYRef = useRef(0);
 
   // Keep ref in sync
   useEffect(() => {
@@ -138,6 +140,8 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     isDraggingRef.current = true;
     wasDraggedRef.current = false;
     lastClientYRef.current = clientY;
+    clientXRef.current = clientX;
+    clientYRef.current = clientY;
     startAutoScroll();
   }, [startAutoScroll, scrollContainerRef, startHour, pixelsPerHour, gridTopPx]);
 
@@ -178,13 +182,30 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
         newStart = Math.max(0, newStart);
         newEnd = Math.min(totalHours, newEnd);
 
-        const updated: DragState = {
-          ...state,
-          currentStartHour: newStart,
-          currentEndHour: newEnd,
-        };
-        setDragState(updated);
-        dragStateRef.current = updated;
+        // Always update pixel-position refs (read by RAF loop, no re-render)
+        clientXRef.current = clientX;
+        clientYRef.current = clientY;
+
+        // Check if drag phase would change (horizontal threshold crossing)
+        const horizontalDist = Math.abs(clientX - state.startClientX);
+        const vw = window.innerWidth;
+        const isMobileDevice = vw < 768;
+        const phaseThreshold = isMobileDevice ? Math.max(15, vw * 0.04) : Math.max(40, vw * 0.04);
+        const wasDetached = Math.abs(state.currentClientX - state.startClientX) > phaseThreshold;
+        const isDetached = horizontalDist > phaseThreshold;
+
+        // Only trigger React re-render when snapped position or phase changes
+        if (newStart !== state.currentStartHour || newEnd !== state.currentEndHour || wasDetached !== isDetached) {
+          const updated: DragState = {
+            ...state,
+            currentStartHour: newStart,
+            currentEndHour: newEnd,
+            currentClientX: clientX,
+            currentClientY: clientY,
+          };
+          setDragState(updated);
+          dragStateRef.current = updated;
+        }
         return;
       } else if (state.type === 'resize-top') {
         const rawHour = startHour + relativeY / pixelsPerHour;
@@ -196,6 +217,8 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
         const updated: DragState = { ...state, currentStartHour: newStart, currentEndHour: newEnd };
         setDragState(updated);
         dragStateRef.current = updated;
+        clientXRef.current = clientX;
+        clientYRef.current = clientY;
         return;
       } else if (state.type === 'resize-bottom') {
         let newStart = state.originalStartHour;
@@ -207,6 +230,8 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
         const updated: DragState = { ...state, currentStartHour: newStart, currentEndHour: newEnd };
         setDragState(updated);
         dragStateRef.current = updated;
+        clientXRef.current = clientX;
+        clientYRef.current = clientY;
         return;
       }
     }
@@ -395,6 +420,8 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     dragState,
     isDragging: isDraggingRef.current,
     wasDraggedRef,
+    clientXRef,
+    clientYRef,
     onMouseDown,
     onTouchStart,
     onTouchMove,
