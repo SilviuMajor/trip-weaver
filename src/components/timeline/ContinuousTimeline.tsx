@@ -1057,7 +1057,7 @@ const ContinuousTimeline = ({
                     outline: isBeingDragged ? '2px dashed hsl(var(--primary) / 0.4)' : undefined,
                     outlineOffset: isBeingDragged ? '-2px' : undefined,
                     borderRadius: isBeingDragged ? '16px' : undefined,
-                    touchAction: dragState?.entryId === entry.id ? 'none' : 'manipulation',
+                    touchAction: 'none',
                   }}
                 >
                 <div className="relative h-full">

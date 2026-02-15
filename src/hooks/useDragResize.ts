@@ -291,29 +291,43 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     const startX = touch.clientX;
     const startY = touch.clientY;
     touchStartPosRef.current = { x: startX, y: startY };
+    let lastTouchY = startY;
+    let holdCancelled = false;
 
     // Single set of listeners for the ENTIRE touch lifecycle
     const handleTouchMove = (ev: TouchEvent) => {
       const t = ev.touches[0];
+      ev.preventDefault(); // ALWAYS prevent default — we handle everything
 
       if (isDraggingRef.current) {
-        // Phase 2: Drag is active — prevent scroll, update position
-        ev.preventDefault();
+        // Phase 2: Drag is active — update position
         handlePointerMoveRef.current(t.clientX, t.clientY);
-      } else if (touchTimerRef.current) {
+      } else if (!holdCancelled) {
         // Phase 1: Still in hold window — check if finger moved too far
         const dx = t.clientX - startX;
         const dy = t.clientY - startY;
-        if (Math.sqrt(dx * dx + dy * dy) > TOUCH_MOVE_THRESHOLD) {
-          // Finger moved — cancel hold, allow scroll, remove listeners
-          clearTimeout(touchTimerRef.current);
-          touchTimerRef.current = null;
-          cleanup();
-        } else {
-          // Finger still — prevent scroll to keep touch alive
-          ev.preventDefault();
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > TOUCH_MOVE_THRESHOLD) {
+          // Finger moved too much — cancel hold, switch to manual scroll mode
+          if (touchTimerRef.current) {
+            clearTimeout(touchTimerRef.current);
+            touchTimerRef.current = null;
+          }
+          holdCancelled = true;
+          // Don't cleanup listeners — we continue to handle scroll manually
         }
       }
+
+      if (holdCancelled) {
+        // Manual scroll: move the scroll container by the delta
+        const deltaY = lastTouchY - t.clientY; // inverted: finger moves down = scroll down
+        if (scrollContainerRef?.current) {
+          scrollContainerRef.current.scrollTop += deltaY;
+        }
+      }
+
+      lastTouchY = t.clientY;
     };
 
     const handleTouchEnd = () => {
@@ -342,9 +356,10 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     // Hold timer
     touchTimerRef.current = setTimeout(() => {
       touchTimerRef.current = null;
-      // Start drag — listeners above will handle Phase 2 seamlessly
-      startDrag(entryId, type, startX, startY, entryStartHour, entryEndHour, tz);
-      if (navigator.vibrate) navigator.vibrate(20);
+      if (!holdCancelled) {
+        startDrag(entryId, type, startX, startY, entryStartHour, entryEndHour, tz);
+        if (navigator.vibrate) navigator.vibrate(20);
+      }
     }, TOUCH_HOLD_MS);
   }, [startDrag]);
 
