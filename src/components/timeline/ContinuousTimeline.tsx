@@ -643,6 +643,34 @@ const ContinuousTimeline = ({
   }, [onResetZoom, pixelsPerHour, onDragSlot, minutesToIso]);
 
 
+  // Convert a global hour (float) to display time string, accounting for TZ shifts after flights
+  const formatGlobalHourToDisplay = useCallback((gh: number): string => {
+    const dayIndex = Math.floor(gh / 24);
+    const hourInDay = gh % 24;
+    const clampedDayIndex = Math.max(0, Math.min(dayIndex, days.length - 1));
+    const dayDate = days[clampedDayIndex];
+    if (!dayDate) {
+      const h = Math.floor(hourInDay);
+      const m = Math.round((hourInDay % 1) * 60);
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+    const dayStr = format(dayDate, 'yyyy-MM-dd');
+    const tzInfo = dayTimezoneMap.get(dayStr);
+
+    let displayHour = hourInDay;
+    if (tzInfo?.flights && tzInfo.flights.length > 0) {
+      const f = tzInfo.flights[0];
+      if (hourInDay >= f.flightEndHour) {
+        const offset = getUtcOffsetHoursDiff(f.originTz, f.destinationTz);
+        displayHour = ((hourInDay + offset) % 24 + 24) % 24;
+      }
+    }
+
+    const h = Math.floor(displayHour);
+    const m = Math.round((displayHour % 1) * 60);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }, [days, dayTimezoneMap]);
+
   return (
     <div className="mx-auto max-w-2xl px-4 pb-2 pt-[50px]">
       <div
@@ -694,15 +722,7 @@ const ContinuousTimeline = ({
           const dayStr = format(dayDate, 'yyyy-MM-dd');
           const tzInfo = dayTimezoneMap.get(dayStr);
 
-          let displayHourNum = hourInDay;
-          if (tzInfo?.flights && tzInfo.flights.length > 0) {
-            const f = tzInfo.flights[0];
-            if (hourInDay >= f.flightEndHour) {
-              const offset = getUtcOffsetHoursDiff(f.originTz, f.destinationTz);
-              displayHourNum = ((hourInDay + offset) % 24 + 24) % 24;
-            }
-          }
-          const displayHour = `${String(displayHourNum).padStart(2, '0')}:00`;
+          const displayHour = formatGlobalHourToDisplay(globalHour);
           const labelTop = globalHour * pixelsPerHour;
 
           // Hide hour label if a drag time pill is nearby
@@ -1614,20 +1634,15 @@ const ContinuousTimeline = ({
           const durationGH = origGH.endGH - origGH.startGH;
           const startGH = dragState.currentStartHour;
           const endGH = startGH + durationGH;
-          const formatGH = (gh: number) => {
-            const h = Math.floor(gh % 24);
-            const m = Math.round((gh % 1) * 60);
-            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-          };
           const startTop = startGH * pixelsPerHour;
           const endTop = endGH * pixelsPerHour;
           return (
             <>
               <div className="absolute z-[60] pointer-events-none" style={{ top: startTop - 10, left: -72 }}>
-                <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">{formatGH(startGH)}</span>
+                <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">{formatGlobalHourToDisplay(startGH)}</span>
               </div>
               <div className="absolute z-[60] pointer-events-none" style={{ top: endTop - 10, left: -72 }}>
-                <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">{formatGH(endGH)}</span>
+                <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">{formatGlobalHourToDisplay(endGH)}</span>
               </div>
             </>
           );
@@ -1638,9 +1653,7 @@ const ContinuousTimeline = ({
           const isTop = dragState.type === 'resize-top';
           const activeGH = isTop ? dragState.currentStartHour : dragState.currentEndHour;
           const activeTop = activeGH * pixelsPerHour;
-          const h = Math.floor(activeGH % 24);
-          const m = Math.round((activeGH % 1) * 60);
-          const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+          const timeStr = formatGlobalHourToDisplay(activeGH);
           return (
             <div className="absolute z-[60] pointer-events-none" style={{ top: activeTop - 10, left: -72 }}>
               <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">{timeStr}</span>
