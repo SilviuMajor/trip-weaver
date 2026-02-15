@@ -1,57 +1,69 @@
 
-
-# One-Time "Hold to move / Tap to view" Tooltip on First Card
+# Smoother Drag Feel: Haptic Ticks, Visual Lift, and Focus Fade
 
 ## Overview
-Show a small dark tooltip below the first non-transport, non-flight-linked entry card on the timeline. It appears once per device, auto-dismisses after 4 seconds, and is dismissed immediately on any card interaction. Stored in `localStorage` under `tr1p_card_hint_shown`.
+Three targeted changes to make timeline card dragging feel polished and responsive, matching Google Calendar's interaction quality.
 
-## Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
+## Changes
 
-### 1. Add state (~after existing useState declarations)
-Add a `showCardHint` state initialized from localStorage, defaulting to `true` if the flag is absent (with a try/catch for private browsing).
+### 1. Haptic on every snap tick (`src/hooks/useDragResize.ts`)
 
-### 2. Add auto-dismiss effect
-A `useEffect` that sets a 4-second timeout to hide the hint and persist the flag to localStorage. Cleans up on unmount.
+Add 1ms micro-vibrations when the snapped grid position changes during drag/resize.
 
-### 3. Add a dismiss helper
-A small inline helper (or just repeated 3-line snippet) that sets `showCardHint(false)` and writes to localStorage. This will be called:
-- In the `onCardTap` wrapper (the `onClick` on the EntryCard at ~line 1404)
-- In the `onTouchStart` handler on the card wrapper div (line 1164)
-- In the `onDragStart` handler on the EntryCard (line 1413)
-
-### 4. Render the tooltip
-Inside the entry rendering loop, after the `EntryCard` block (inside the `<div className="relative h-full">` at line 1384), add the tooltip conditionally. The condition checks:
-- `showCardHint` is true
-- This is the first qualifying entry: not transport (`!isTransport`), not flight-linked (`!entry.linked_flight_id`), not a flight group (`!flightGroup`)
-- Use a tracking variable (`hintRendered`) set to true after the first render, or simply check `index === firstHintIndex` where `firstHintIndex` is computed via `sortedEntries.findIndex(...)` before the loop
-
-The tooltip markup:
-```
-<div className="absolute z-50 left-1/2 -translate-x-1/2 animate-fade-in pointer-events-none"
-     style={{ top: height + 8 }}>
-  <div className="relative bg-foreground text-background text-xs font-medium px-3 py-1.5 rounded-lg shadow-lg whitespace-nowrap">
-    Hold to move · Tap to view
-    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-foreground rotate-45" />
-  </div>
-</div>
-```
-
-Positioned just below the card (`top: height + 8`), dark background with light text, upward-pointing arrow, `pointer-events-none` so it never blocks touch.
-
-### 5. Compute first hint index
-Before the entry mapping loop, compute:
+**Move handler (~line 198):** Inside the existing `if (newStart !== state.currentStartHour || newEnd !== state.currentEndHour || wasDetached !== isDetached)` block, add before `setDragState(updated)`:
 ```ts
-const firstHintIndex = showCardHint
-  ? sortedEntries.findIndex(e => {
-      const cat = e.options[0]?.category;
-      return !isTransportEntry(e) && !e.linked_flight_id && cat !== 'airport_processing';
-    })
-  : -1;
+if (newStart !== state.currentStartHour || newEnd !== state.currentEndHour) {
+  if (navigator.vibrate) navigator.vibrate(1);
+}
 ```
-Then in the loop, render the tooltip when `index === firstHintIndex`.
+
+**Resize-top handler (~line 217):** Before `setDragState(updated)`, add:
+```ts
+if (newStart !== state.currentStartHour) {
+  if (navigator.vibrate) navigator.vibrate(1);
+}
+```
+
+**Resize-bottom handler (~line 230):** Before `setDragState(updated)`, add:
+```ts
+if (newEnd !== state.currentEndHour) {
+  if (navigator.vibrate) navigator.vibrate(1);
+}
+```
+
+### 2. Visual lift on dragged card (`src/components/timeline/EntryCard.tsx`)
+
+In all 8 layout branches (lines 297, 321, 346, 382, 445, 493, 539, 650), change:
+```
+isDragging ? 'cursor-grabbing ring-2 ring-primary'
+```
+to:
+```
+isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100'
+```
+
+This adds a subtle 3% scale-up, deeper shadow, and elevated z-index with a smooth 100ms transition on pickup.
+
+### 3. Fade non-dragged cards during move drag (`src/components/timeline/ContinuousTimeline.tsx`)
+
+On the card wrapper div (line 1200-1210), modify the `opacity` and add `transition` to the existing style object:
+
+Change line 1206 from:
+```ts
+opacity: isBeingDragged ? 0.4 : undefined,
+```
+to:
+```ts
+opacity: isBeingDragged ? 0.4
+  : (dragState && dragState.type === 'move' && dragState.entryId !== entry.id) ? 0.4
+  : undefined,
+transition: 'opacity 0.2s ease',
+```
+
+This fades all non-dragged cards to 40% during move drags only (not resize), making the dragged card the clear visual focus. The `isBeingDragged` case (the ghost at the original position) keeps its existing 0.4 opacity. The 0.2s transition makes the fade smooth.
 
 ## What does NOT change
-- EntryCard component itself
-- Any drag/resize behavior
-- Any other timeline rendering
-- Card interaction logic (just adds a dismiss call alongside existing handlers)
+- Drag mechanics, touch handling, RAF loop, floating card positioning
+- Auto-scroll behavior
+- Any drag state logic beyond adding haptic calls
+- The existing `ring-2 ring-primary` styling (kept, just extended)
