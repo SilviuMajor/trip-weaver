@@ -533,19 +533,13 @@ const ContinuousTimeline = ({
   // Three-stage drag phase computation (synchronous — no one-frame lag)
   const dragPhase = useMemo((): 'timeline' | 'detached' | null => {
     if (!dragState || dragState.type !== 'move') return null;
-    const gridRect = gridRef.current?.getBoundingClientRect();
-    if (!gridRect) return 'timeline';
-
-    const isInsideGrid = dragState.currentClientX >= gridRect.left && dragState.currentClientX <= gridRect.right;
-    const distFromGrid = isInsideGrid ? 0 : Math.min(
-      Math.abs(dragState.currentClientX - gridRect.left),
-      Math.abs(dragState.currentClientX - gridRect.right)
-    );
+    
+    const horizontalDist = Math.abs(dragState.currentClientX - dragState.startClientX);
     const vw = window.innerWidth;
     const isMobileDevice = vw < 768;
-    const threshold = isMobileDevice ? 5 : 60;
-
-    return distFromGrid > threshold ? 'detached' : 'timeline';
+    const threshold = isMobileDevice ? Math.max(15, vw * 0.04) : Math.max(40, vw * 0.04);
+    
+    return horizontalDist > threshold ? 'detached' : 'timeline';
   }, [dragState]);
 
   // Notify parent of phase changes
