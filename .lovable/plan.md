@@ -1,80 +1,59 @@
 
-# iOS Safari Touch Fix: touch-action: none + Manual Scroll Passthrough
 
-## Problem
-iOS Safari reads `touch-action` at touchstart time. With `manipulation`, Safari claims the touch at the compositor level before our 200ms hold timer fires. No JavaScript `preventDefault()` can override this.
+# Fix: Move Touch Handling from EntryCard to Wrapper Div
+
+## Root Cause
+Framer-motion's `motion.div` internally registers touch event listeners that intercept and consume touch events on iOS Safari before our React `onTouchStart` prop fires. Diagnostic toasts confirmed zero handler execution on mobile.
 
 ## Solution
+Move touch handling to the plain `<div data-entry-card>` wrapper in ContinuousTimeline.tsx, which has no framer-motion interference. Mouse handlers stay on EntryCard (they work fine through framer-motion).
 
-### File 1: `src/components/timeline/ContinuousTimeline.tsx`
+## Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
 
-**Line 1060** -- Change conditional touch-action to always `none`:
+### 1. Add onTouchStart to the wrapper div (line 1047)
+Add touch handler directly on the `data-entry-card` div:
 ```typescript
-// Before:
-touchAction: dragState?.entryId === entry.id ? 'none' : 'manipulation',
-// After:
-touchAction: 'none',
+<div
+  data-entry-card
+  onTouchStart={canDrag ? (e) => {
+    onTouchStart(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
+  } : undefined}
+  className={cn(...)}
+  style={{
+    ...existing styles...,
+    touchAction: 'none',  // already present
+  }}
+>
 ```
 
-### File 2: `src/hooks/useDragResize.ts`
+### 2. Remove touch props from main EntryCard render (lines 1307-1314)
+Remove these three props:
+- `onTouchDragStart={...}`
+- `onTouchDragMove={onTouchMove}`
+- `onTouchDragEnd={onTouchEnd}`
 
-**Lines 293-316** -- Rewrite the hold-window touch handling inside `onTouchStart` to include manual scroll passthrough. Replace the current `touchStartPosRef` assignment through the end of `handleTouchMove` with:
+Keep `onDragStart` (mouse) as-is.
 
+### 3. Remove touch props from FlightGroupCard EntryCard render (lines 1138-1143)
+Remove:
+- `onTouchDragStart={...}`
+- `onTouchDragMove={onTouchMove}`
+- `onTouchDragEnd={onTouchEnd}`
+
+Keep the flight's `onDragStart` and mouse-based stop propagation.
+
+### 4. Update Card 1 border styling (line 1061)
+Change from red debug border to production-quality primary color:
 ```typescript
-    touchStartPosRef.current = { x: startX, y: startY };
-    let lastTouchY = startY;
-    let holdCancelled = false;
-
-    // Single set of listeners for the ENTIRE touch lifecycle
-    const handleTouchMove = (ev: TouchEvent) => {
-      const t = ev.touches[0];
-      ev.preventDefault(); // ALWAYS prevent default — we handle everything
-
-      if (isDraggingRef.current) {
-        // Phase 2: Drag is active — update position
-        handlePointerMoveRef.current(t.clientX, t.clientY);
-      } else if (!holdCancelled) {
-        // Phase 1: Still in hold window — check if finger moved too far
-        const dx = t.clientX - startX;
-        const dy = t.clientY - startY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist > TOUCH_MOVE_THRESHOLD) {
-          // Finger moved too much — cancel hold, switch to manual scroll mode
-          if (touchTimerRef.current) {
-            clearTimeout(touchTimerRef.current);
-            touchTimerRef.current = null;
-          }
-          holdCancelled = true;
-          // Don't cleanup listeners — we continue to handle scroll manually
-        }
-      }
-
-      if (holdCancelled) {
-        // Manual scroll: move the scroll container by the delta
-        const deltaY = lastTouchY - t.clientY; // inverted: finger moves down = scroll down
-        if (scrollContainerRef?.current) {
-          scrollContainerRef.current.scrollTop += deltaY;
-        }
-      }
-
-      lastTouchY = t.clientY;
-    };
+border: isBeingDragged ? '3px dashed hsl(var(--primary) / 0.5)' : undefined,
 ```
 
-**Lines 343-348** -- Update the hold timer callback to check `holdCancelled`:
-```typescript
-    touchTimerRef.current = setTimeout(() => {
-      touchTimerRef.current = null;
-      if (!holdCancelled) {
-        startDrag(entryId, type, startX, startY, entryStartHour, entryEndHour, tz);
-        if (navigator.vibrate) navigator.vibrate(20);
-      }
-    }, TOUCH_HOLD_MS);
-```
+### No changes to other files
+- `useDragResize.ts` -- already has all diagnostic toasts, correct touch lifecycle
+- `EntryCard.tsx` -- no changes needed; props simply won't be passed
 
-Everything else in `useDragResize.ts` stays exactly as-is: `handleTouchEnd`, `cleanup`, listener attachment, mouse-only useEffect, refs, startDrag, handlePointerMove, commitDrag.
+### Expected test result on mobile
+1. Touch a card -> "Touch started" toast appears immediately
+2. Hold 200ms -> "Hold OK" + "startDrag fired" toasts
+3. Card 1 at 40% opacity with dashed border, Card 2 follows finger
 
-## Files changed
-1. `src/components/timeline/ContinuousTimeline.tsx` -- touch-action always `none`
-2. `src/hooks/useDragResize.ts` -- manual scroll passthrough during hold window, holdCancelled guard on timer
