@@ -299,7 +299,7 @@ const EntryCard = ({
             isShaking && 'animate-shake',
             cardSizeClass
           )}
-          style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
+          style={{ touchAction: 'none', borderLeftColor: 'hsl(30, 80%, 55%)' }}
         >
           <div className="flex w-full items-center gap-1.5 px-2 py-0.5 pointer-events-none">
             <span className="text-xs shrink-0">{mode.emoji}</span>
@@ -324,7 +324,7 @@ const EntryCard = ({
             isShaking && 'animate-shake',
             cardSizeClass
           )}
-          style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
+          style={{ touchAction: 'none', borderLeftColor: 'hsl(30, 80%, 55%)' }}
         >
           <div className="flex w-full items-center gap-2 px-2.5 py-1 pointer-events-none">
             <span className="text-base shrink-0">{mode.emoji}</span>
@@ -350,7 +350,7 @@ const EntryCard = ({
             isShaking && 'animate-shake',
             cardSizeClass
           )}
-          style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
+          style={{ touchAction: 'none', borderLeftColor: 'hsl(30, 80%, 55%)' }}
         >
           <div className="flex h-full pointer-events-none">
             <div className="flex items-center justify-center w-12 shrink-0">
@@ -388,7 +388,7 @@ const EntryCard = ({
             isShaking && 'animate-shake',
             cardSizeClass
           )}
-        style={{ borderLeftColor: 'hsl(30, 80%, 55%)' }}
+        style={{ touchAction: 'none', borderLeftColor: 'hsl(30, 80%, 55%)' }}
       >
         <div className="relative z-10 flex h-full pointer-events-none">
           <div className="flex items-center justify-center w-14 shrink-0">
@@ -455,6 +455,7 @@ const EntryCard = ({
           cardSizeClass
         )}
         style={{
+          touchAction: 'none',
           borderColor: isLocked ? undefined : catColor,
           borderLeftWidth: isLocked ? undefined : 3,
           background: tintBg,
@@ -505,6 +506,7 @@ const EntryCard = ({
           cardSizeClass
         )}
         style={{
+          touchAction: 'none',
           borderColor: isLocked ? undefined : catColor,
           borderLeftWidth: isLocked ? undefined : 3,
           background: tintBg,
@@ -553,6 +555,7 @@ const EntryCard = ({
           cardSizeClass
         )}
         style={{
+          touchAction: 'none',
           borderColor: isLocked ? undefined : catColor,
           borderLeftWidth: isLocked ? undefined : 3,
           background: firstImage ? undefined : tintBg,
@@ -666,10 +669,13 @@ const EntryCard = ({
           isShaking && 'animate-shake',
           cardSizeClass
         )}
-      style={!firstImage ? {
-        borderColor: isLocked ? undefined : catColor,
-        borderLeftWidth: isLocked ? undefined : 4,
-      } : undefined}
+      style={{
+        touchAction: 'none',
+        ...(!firstImage ? {
+          borderColor: isLocked ? undefined : catColor,
+          borderLeftWidth: isLocked ? undefined : 4,
+        } : {}),
+      }}
     >
       {/* Background */}
       {firstImage ? (
