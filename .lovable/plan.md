@@ -1,33 +1,23 @@
 
-# Fix Floating Card Grab-Point Alignment
+
+# TZ-Aware Time Pills During Drag/Resize
 
 ## Problem
-The floating card (Card 3) centers on the finger (`cy - moveHeight / 2`), but the ghost outline positions by the card's top edge using `grabOffsetHours`. When you grab near the bottom of a tall card, the floating card jumps up relative to the ghost.
+Hour labels in the gutter correctly shift after a flight (e.g., "10, 11, 13, 14..." for +1hr TZ change). But the drag/resize time pills use raw `gh % 24` with no timezone awareness, showing times 1 hour out of sync with the gutter labels.
 
 ## Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
 
-### Change 1: RAF loop (line 569)
-Replace `cy - moveHeight / 2` with `cy - grabOffsetPx` so the grab point stays under the finger:
+### 1. Add shared helper function (before the return statement, around line 645)
+A `formatGlobalHourToDisplay` callback that converts a global hour float to a TZ-aware time string. It reuses the exact same logic as the hour label rendering: check if the hour falls after a flight on that day, and if so, apply the UTC offset difference.
 
-```typescript
-// Before
-const ty = Math.max(4, Math.min(window.innerHeight - moveHeight - 4, cy - moveHeight / 2));
+### 2. Replace move drag time pills (lines 1617-1621)
+Delete the inline `formatGH` function and replace `formatGH(startGH)` / `formatGH(endGH)` with `formatGlobalHourToDisplay(startGH)` / `formatGlobalHourToDisplay(endGH)`.
 
-// After
-const grabOffsetPx = dragState.grabOffsetHours * pixelsPerHour;
-const ty = Math.max(4, Math.min(window.innerHeight - moveHeight - 4, cy - grabOffsetPx));
-```
+### 3. Replace resize time pill (lines 1641-1643)
+Replace the inline `h`/`m`/`timeStr` calculation with a single call to `formatGlobalHourToDisplay(activeGH)`.
 
-### Change 2: Initial render transform (line 1745)
-Same fix for the initial inline transform -- replace `clientYRef.current - moveHeight / 2` with `clientYRef.current - dragState.grabOffsetHours * pixelsPerHour`:
+### 4. Simplify hour label rendering (lines 697-705)
+Replace the inline TZ offset logic with `formatGlobalHourToDisplay(globalHour)`, consolidating the duplicated logic into the shared helper.
 
-```typescript
-// Before
-...clientYRef.current - moveHeight / 2))}px)`,
-
-// After
-...clientYRef.current - dragState.grabOffsetHours * pixelsPerHour))}px)`,
-```
-
-### Nothing else changes
-Card 1, Card 2, time pills, ghost outline, bin logic, resize -- all untouched.
+### What does not change
+Positioning, visibility logic, hide-for-pill logic, drag behavior, flight markers -- all untouched. Only the displayed time strings become TZ-aware.
