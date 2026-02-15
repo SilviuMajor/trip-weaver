@@ -542,13 +542,10 @@ const ContinuousTimeline = ({
       Math.abs(dragState.currentClientX - gridRect.right)
     );
     const vw = window.innerWidth;
-    const threshold = Math.max(30, vw * 0.12);
+    const isMobileDevice = vw < 768;
+    const threshold = isMobileDevice ? Math.max(12, vw * 0.04) : Math.max(30, vw * 0.06);
 
-    const result = distFromGrid > threshold ? 'detached' : 'timeline';
-    if (typeof window !== 'undefined' && 'ontouchstart' in window) {
-      toast.info(`dragPhase: ${result}, dist: ${Math.round(distFromGrid)}, threshold: ${Math.round(threshold)}`, { duration: 500, id: 'dragphase' });
-    }
-    return result;
+    return distFromGrid > threshold ? 'detached' : 'timeline';
   }, [dragState]);
 
   // Notify parent of phase changes
