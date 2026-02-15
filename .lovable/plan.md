@@ -1,29 +1,31 @@
 
-# Dual "Add Something" Buttons for Large Gaps
+
+# Add Dashed Line and Dual Buttons to Transport Gap Section
 
 ## Problem
-Large gaps (e.g., hotel overnights) show a single centered button that sits in a huge empty space, hard to reach on mobile.
+The "+ Add something" button below transport cards (lines 1546-1583) is missing the dashed centre line that appears in the main gap section, and does not use the dual-button logic for gaps exceeding 6 hours.
 
-## Solution
-When a gap exceeds 6 hours (360 minutes), render two buttons -- one near the top and one near the bottom of the gap. Gaps of 6 hours or less keep the existing single centered button. Transport gaps are unchanged.
+## Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
 
-## Technical Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
+### Replace the transport gap block (lines 1546-1583)
 
-### Replace gap button rendering (lines 956-978)
+Replace the entire `isTransport && (() => { ... })()` block with updated logic that:
 
-The current code uses a single `<button>` with conditional content (transport vs. add). Replace with a three-way conditional:
+1. Keeps the same next-visible-entry lookup (unchanged).
+2. Switches from millisecond-based gap detection to global-hour-based (`gapGH`, `gapMin`), with a 5-minute minimum threshold.
+3. Computes `relGapTop` as `gapTopPx - (entryStartGH * pixelsPerHour)` to position elements relative to the transport card wrapper (since the wrapper div starts at `entryStartGH * pixelsPerHour`).
+4. Adds a dashed centre line (`border-l-2 border-dashed border-primary/20`) spanning the full gap height.
+5. Uses a three-way conditional for buttons:
+   - **Large gaps (> 6 hours)**: Two "+ Add something" buttons, top at `relGapTop + pixelsPerHour - 12`, bottom at `relGapTop + gapPixelHeight - pixelsPerHour - 12`, with prefill times offset by 1 hour from neighboring events using `addMinutes`.
+   - **Normal gaps**: Single centered button at `relGapTop + (gapPixelHeight - 22) / 2`.
 
-1. **Transport gaps** (`isTransportGap`, i.e. < 2 hours): Single centered transport button -- same as today.
-2. **Large gaps** (`gapMin > 360`, i.e. > 6 hours): Two "Add something" buttons:
-   - **Top button** at `gapTopPx + 1 * pixelsPerHour - 12` (1 hour below upper event end), prefill time = 1 hour after upper event ends (`addMinutes(entry.end_time, 60)`)
-   - **Bottom button** at `gapBottomPx - 1 * pixelsPerHour - 12` (1 hour above lower event start), prefill time = 1 hour before lower event starts (`addMinutes(nextEntry.start_time, -60)`)
-3. **Normal gaps** (everything else): Single centered button -- same as today.
-
-`addMinutes` is already imported from `date-fns`. The dashed center line, gap detection logic, and all other rendering remain untouched.
+### Variables in scope
+- `entryStartGH` -- defined at line 1029, available throughout the entry rendering block.
+- `height` -- the card's pixel height, defined at line 1063.
+- `pixelsPerHour`, `sortedEntries`, `onAddBetween`, `getEntryGlobalHours`, `isTransportEntry`, `addMinutes` -- all available in the component scope.
 
 ### What does not change
-- Transport gap button logic
-- The dashed centre line
-- Gap detection (5-min minimum, `hasTransferBetween` check)
-- Transport connector "Add something" buttons (~line 1489)
+- The main gap button section (visibleEntries loop with its own dashed lines and dual buttons)
+- Transport connector rendering
+- Gap detection logic in the main section
 - Any other timeline rendering
