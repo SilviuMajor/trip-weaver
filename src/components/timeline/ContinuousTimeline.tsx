@@ -566,7 +566,8 @@ const ContinuousTimeline = ({
           const cx = clientXRef.current;
           const cy = clientYRef.current;
           const tx = Math.max(4, Math.min(window.innerWidth - cardWidth - 4, cx - cardWidth / 2));
-          const ty = Math.max(4, Math.min(window.innerHeight - moveHeight - 4, cy - moveHeight / 2));
+          const grabOffsetPx = dragState.grabOffsetHours * pixelsPerHour;
+          const ty = Math.max(4, Math.min(window.innerHeight - moveHeight - 4, cy - grabOffsetPx));
 
           let shrinkFactor = 1;
           if (binRef?.current) {
@@ -1742,7 +1743,7 @@ const ContinuousTimeline = ({
               height: moveHeight,
               willChange: 'transform',
               // Initial position — RAF loop takes over immediately
-              transform: `translate(${Math.max(4, Math.min(window.innerWidth - cardWidth - 4, clientXRef.current - cardWidth / 2))}px, ${Math.max(4, Math.min(window.innerHeight - moveHeight - 4, clientYRef.current - moveHeight / 2))}px)`,
+              transform: `translate(${Math.max(4, Math.min(window.innerWidth - cardWidth - 4, clientXRef.current - cardWidth / 2))}px, ${Math.max(4, Math.min(window.innerHeight - moveHeight - 4, clientYRef.current - dragState.grabOffsetHours * pixelsPerHour))}px)`,
             }}
           >
             <div className="h-full ring-2 ring-primary/60 shadow-lg shadow-primary/20 rounded-2xl overflow-hidden">
