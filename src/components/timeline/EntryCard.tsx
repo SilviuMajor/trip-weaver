@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
+
 import { MapPin, Clock, Plane, ArrowRight, Lock, LockOpen, RefreshCw, Loader2, Check } from 'lucide-react';
 import type { EntryOption } from '@/types/trip';
 import { toast } from 'sonner';
@@ -287,8 +287,7 @@ const EntryCard = ({
 
     if (isCompact) {
       return (
-        <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
+        <div
           onClick={onClick}
           onMouseDown={onDragStart}
           onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
@@ -306,14 +305,13 @@ const EntryCard = ({
             <span className="text-[10px] font-semibold text-orange-700 dark:text-orange-300">{durationLabel}</span>
             {distStr && <span className="text-[10px] text-orange-600/70 dark:text-orange-400/70">· {distStr}</span>}
           </div>
-        </motion.div>
+        </div>
       );
     }
 
     if (isMedium) {
       return (
-        <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
+        <div
           onClick={onClick}
           onMouseDown={onDragStart}
           onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
@@ -332,14 +330,13 @@ const EntryCard = ({
             <span className="shrink-0 text-[10px] font-bold text-orange-700 dark:text-orange-300">{durationLabel}</span>
             {distStr && <span className="shrink-0 text-[10px] text-orange-600/70 dark:text-orange-400/70">· {distStr}</span>}
           </div>
-        </motion.div>
+        </div>
       );
     }
 
     if (isCondensed) {
       return (
-        <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
+        <div
           onClick={onClick}
           onMouseDown={onDragStart}
           onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
@@ -369,14 +366,13 @@ const EntryCard = ({
               {refreshPopover}
             </div>
           </div>
-        </motion.div>
+        </div>
       );
     }
 
     // Full transport card
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}
+      <div
         onClick={onClick}
         onMouseDown={onDragStart}
         onTouchStart={onTouchDragStart} onTouchMove={onTouchDragMove} onTouchEnd={onTouchDragEnd}
@@ -430,17 +426,14 @@ const EntryCard = ({
             {refreshPopover}
           </div>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
   // Medium layout for sub-hour entries (40-80px)
   if (isMedium) {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 4 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2 }}
+      <div
         onClick={onClick}
         onMouseDown={onDragStart}
         onTouchStart={onTouchDragStart}
@@ -481,17 +474,14 @@ const EntryCard = ({
             }}
           />
         )}
-      </motion.div>
+      </div>
     );
   }
 
   // Compact single-line layout for very short entries
   if (isCompact) {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 4 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2 }}
+      <div
         onClick={onClick}
         onMouseDown={onDragStart}
         onTouchStart={onTouchDragStart}
@@ -521,7 +511,7 @@ const EntryCard = ({
             {formatTime(startTime)}–{formatTime(endTime)} <span className="font-bold">{durationLabel}</span>
           </span>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
@@ -537,10 +527,7 @@ const EntryCard = ({
 
   if (isCondensed) {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 4 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2 }}
+      <div
         onClick={onClick}
         onMouseDown={onDragStart}
         onTouchStart={onTouchDragStart}
@@ -646,15 +633,12 @@ const EntryCard = ({
             }}
           />
         )}
-      </motion.div>
+    </div>
     );
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: optionIndex * 0.05 }}
+    <div
       onClick={onClick}
       onMouseDown={onDragStart}
       onTouchStart={onTouchDragStart}
@@ -883,7 +867,7 @@ const EntryCard = ({
           }}
         />
       )}
-    </motion.div>
+    </div>
   );
 };
 

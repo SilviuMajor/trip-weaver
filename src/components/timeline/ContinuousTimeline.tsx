@@ -1301,6 +1301,14 @@ const ContinuousTimeline = ({
                           e.stopPropagation();
                           handleLockedAttempt(entry.id);
                         } : undefined}
+                        onTouchDragStart={canDrag ? (e) => {
+                          onTouchStart(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
+                        } : isLocked ? (e) => {
+                          e.stopPropagation();
+                          handleLockedAttempt(entry.id);
+                        } : undefined}
+                        onTouchDragMove={onTouchMove}
+                        onTouchDragEnd={onTouchEnd}
                         isShaking={shakeEntryId === entry.id}
                         entryId={entry.id}
                       />
