@@ -544,7 +544,11 @@ const ContinuousTimeline = ({
     const vw = window.innerWidth;
     const threshold = Math.max(30, vw * 0.12);
 
-    return distFromGrid > threshold ? 'detached' : 'timeline';
+    const result = distFromGrid > threshold ? 'detached' : 'timeline';
+    if (typeof window !== 'undefined' && 'ontouchstart' in window) {
+      toast.info(`dragPhase: ${result}, dist: ${Math.round(distFromGrid)}, threshold: ${Math.round(threshold)}`, { duration: 500, id: 'dragphase' });
+    }
+    return result;
   }, [dragState]);
 
   // Notify parent of phase changes
@@ -1053,9 +1057,8 @@ const ContinuousTimeline = ({
                     left: '0%',
                     width: '100%',
                     zIndex: isDragged ? 30 : isTransport ? 20 : hasConflict ? 10 + index : 10,
-                    opacity: isBeingDragged ? 0.35 : undefined,
-                    outline: isBeingDragged ? '2px dashed hsl(var(--primary) / 0.4)' : undefined,
-                    outlineOffset: isBeingDragged ? '-2px' : undefined,
+                    opacity: isBeingDragged ? 0.4 : undefined,
+                    border: isBeingDragged ? '3px dashed red' : undefined,
                     borderRadius: isBeingDragged ? '16px' : undefined,
                     touchAction: 'none',
                   }}
