@@ -1,23 +1,29 @@
 
-
-# TZ-Aware Time Pills During Drag/Resize
+# Dual "Add Something" Buttons for Large Gaps
 
 ## Problem
-Hour labels in the gutter correctly shift after a flight (e.g., "10, 11, 13, 14..." for +1hr TZ change). But the drag/resize time pills use raw `gh % 24` with no timezone awareness, showing times 1 hour out of sync with the gutter labels.
+Large gaps (e.g., hotel overnights) show a single centered button that sits in a huge empty space, hard to reach on mobile.
 
-## Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
+## Solution
+When a gap exceeds 6 hours (360 minutes), render two buttons -- one near the top and one near the bottom of the gap. Gaps of 6 hours or less keep the existing single centered button. Transport gaps are unchanged.
 
-### 1. Add shared helper function (before the return statement, around line 645)
-A `formatGlobalHourToDisplay` callback that converts a global hour float to a TZ-aware time string. It reuses the exact same logic as the hour label rendering: check if the hour falls after a flight on that day, and if so, apply the UTC offset difference.
+## Technical Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
 
-### 2. Replace move drag time pills (lines 1617-1621)
-Delete the inline `formatGH` function and replace `formatGH(startGH)` / `formatGH(endGH)` with `formatGlobalHourToDisplay(startGH)` / `formatGlobalHourToDisplay(endGH)`.
+### Replace gap button rendering (lines 956-978)
 
-### 3. Replace resize time pill (lines 1641-1643)
-Replace the inline `h`/`m`/`timeStr` calculation with a single call to `formatGlobalHourToDisplay(activeGH)`.
+The current code uses a single `<button>` with conditional content (transport vs. add). Replace with a three-way conditional:
 
-### 4. Simplify hour label rendering (lines 697-705)
-Replace the inline TZ offset logic with `formatGlobalHourToDisplay(globalHour)`, consolidating the duplicated logic into the shared helper.
+1. **Transport gaps** (`isTransportGap`, i.e. < 2 hours): Single centered transport button -- same as today.
+2. **Large gaps** (`gapMin > 360`, i.e. > 6 hours): Two "Add something" buttons:
+   - **Top button** at `gapTopPx + 1 * pixelsPerHour - 12` (1 hour below upper event end), prefill time = 1 hour after upper event ends (`addMinutes(entry.end_time, 60)`)
+   - **Bottom button** at `gapBottomPx - 1 * pixelsPerHour - 12` (1 hour above lower event start), prefill time = 1 hour before lower event starts (`addMinutes(nextEntry.start_time, -60)`)
+3. **Normal gaps** (everything else): Single centered button -- same as today.
+
+`addMinutes` is already imported from `date-fns`. The dashed center line, gap detection logic, and all other rendering remain untouched.
 
 ### What does not change
-Positioning, visibility logic, hide-for-pill logic, drag behavior, flight markers -- all untouched. Only the displayed time strings become TZ-aware.
+- Transport gap button logic
+- The dashed centre line
+- Gap detection (5-min minimum, `hasTransferBetween` check)
+- Transport connector "Add something" buttons (~line 1489)
+- Any other timeline rendering
