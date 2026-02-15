@@ -658,8 +658,22 @@ const ContinuousTimeline = ({
       >
         {/* Hour lines for ALL hours */}
         {Array.from({ length: totalHours }, (_, i) => i).map(globalHour => {
-          const localHour = globalHour % 24;
-          const displayHour = `${String(localHour).padStart(2, '0')}:00`;
+          const dayIndex = Math.floor(globalHour / 24);
+          const hourInDay = globalHour % 24;
+          const dayDate = days[Math.min(dayIndex, days.length - 1)];
+          if (!dayDate) return null;
+          const dayStr = format(dayDate, 'yyyy-MM-dd');
+          const tzInfo = dayTimezoneMap.get(dayStr);
+
+          let displayHourNum = hourInDay;
+          if (tzInfo?.flights && tzInfo.flights.length > 0) {
+            const f = tzInfo.flights[0];
+            if (hourInDay >= f.flightEndHour) {
+              const offset = getUtcOffsetHoursDiff(f.originTz, f.destinationTz);
+              displayHourNum = ((hourInDay + offset) % 24 + 24) % 24;
+            }
+          }
+          const displayHour = `${String(displayHourNum).padStart(2, '0')}:00`;
           const labelTop = globalHour * pixelsPerHour;
 
           // Hide hour label if a drag time pill is nearby
@@ -711,7 +725,21 @@ const ContinuousTimeline = ({
 
         {/* 30-minute gutter labels — show when zoomed >120% */}
         {pixelsPerHour > 96 && Array.from({ length: totalHours }, (_, i) => i).map(globalHour => {
-          const localHour = globalHour % 24;
+          const dayIndex = Math.floor(globalHour / 24);
+          const hourInDay = globalHour % 24;
+          const dayDate = days[Math.min(dayIndex, days.length - 1)];
+          if (!dayDate) return null;
+          const dayStr = format(dayDate, 'yyyy-MM-dd');
+          const tzInfo = dayTimezoneMap.get(dayStr);
+
+          let displayHourNum = hourInDay;
+          if (tzInfo?.flights && tzInfo.flights.length > 0) {
+            const f = tzInfo.flights[0];
+            if (hourInDay >= f.flightEndHour) {
+              const offset = getUtcOffsetHoursDiff(f.originTz, f.destinationTz);
+              displayHourNum = ((hourInDay + offset) % 24 + 24) % 24;
+            }
+          }
           return (
             <div
               key={`half-label-${globalHour}`}
@@ -719,7 +747,7 @@ const ContinuousTimeline = ({
               style={{ top: (globalHour + 0.5) * pixelsPerHour }}
             >
               <span className="absolute -top-2 select-none text-[9px] text-muted-foreground/30" style={{ left: -46, width: 30, textAlign: 'center' }}>
-                {String(localHour).padStart(2, '0')}:30
+                {String(displayHourNum).padStart(2, '0')}:30
               </span>
             </div>
           );
