@@ -10,7 +10,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { addDays, format, parseISO } from 'date-fns';
 import { utcToLocal, localToUTC } from '@/lib/timezoneUtils';
-import { PREDEFINED_CATEGORIES, TRAVEL_MODES, type CategoryDef } from '@/lib/categories';
+import { PREDEFINED_CATEGORIES, PICKER_CATEGORIES, TRAVEL_MODES, type CategoryDef } from '@/lib/categories';
 import type { Trip, EntryWithOptions, EntryOption, CategoryPreset } from '@/types/trip';
 import { haversineKm } from '@/lib/distance';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -413,7 +413,7 @@ const EntrySheet = ({
 
   const customCategories = (trip?.category_presets as CategoryPreset[] | null) ?? [];
   const allCategories: CategoryDef[] = [
-    ...PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing' && c.id !== 'transfer'),
+    ...PICKER_CATEGORIES,
     ...customCategories.map((c, i) => ({
       id: `custom_${i}`,
       name: c.name,

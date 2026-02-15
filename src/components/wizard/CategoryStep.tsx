@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Plus, X } from 'lucide-react';
-import { PREDEFINED_CATEGORIES } from '@/lib/categories';
+import { PICKER_CATEGORIES } from '@/lib/categories';
 import type { CategoryPreset } from '@/types/trip';
 
 interface CategoryStepProps {
@@ -40,7 +40,7 @@ const CategoryStep = ({ categories, onChange }: CategoryStepProps) => {
 
       {/* Predefined categories preview */}
       <div className="mb-6 flex flex-wrap gap-2">
-        {PREDEFINED_CATEGORIES.map((cat) => (
+        {PICKER_CATEGORIES.map((cat) => (
           <span
             key={cat.id}
             className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium text-white"

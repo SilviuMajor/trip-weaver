@@ -3,7 +3,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { ArrowLeft, ClipboardList, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { PREDEFINED_CATEGORIES, type CategoryDef } from '@/lib/categories';
+import { PREDEFINED_CATEGORIES, PICKER_CATEGORIES, type CategoryDef } from '@/lib/categories';
 import type { EntryWithOptions, Trip, CategoryPreset } from '@/types/trip';
 import SidebarEntryCard from './SidebarEntryCard';
 import { cn } from '@/lib/utils';
@@ -55,7 +55,7 @@ const CategorySidebar = ({
 
   // Build full category list
   const allCategories = useMemo(() => {
-    const cats: CategoryDef[] = PREDEFINED_CATEGORIES.filter(c => c.id !== 'airport_processing' && c.id !== 'transport' && c.id !== 'transfer');
+    const cats: CategoryDef[] = [...PICKER_CATEGORIES];
     const custom = (trip?.category_presets as CategoryPreset[] | null) ?? [];
     custom.forEach((c, i) => {
       cats.push({

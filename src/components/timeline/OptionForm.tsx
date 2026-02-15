@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
-import { PREDEFINED_CATEGORIES, TRAVEL_MODES } from '@/lib/categories';
+import { PICKER_CATEGORIES, TRAVEL_MODES } from '@/lib/categories';
 import type { CategoryPreset, EntryOption } from '@/types/trip';
 
 interface OptionFormProps {
@@ -26,7 +26,7 @@ const OptionForm = ({ entryId, onSaved, customCategories = [], editOption }: Opt
   const isEditing = !!editOption;
 
   const allCategories = [
-    ...PREDEFINED_CATEGORIES.map(c => ({ id: c.id, name: c.name, emoji: c.emoji, color: c.color })),
+    ...PICKER_CATEGORIES.map(c => ({ id: c.id, name: c.name, emoji: c.emoji, color: c.color })),
     ...customCategories.map((c, i) => ({ id: `custom_${i}`, name: c.name, emoji: c.emoji || '📌', color: c.color })),
   ];
 
