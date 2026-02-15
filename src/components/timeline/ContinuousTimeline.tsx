@@ -1708,12 +1708,12 @@ const ContinuousTimeline = ({
           <div
             className="fixed z-[200] pointer-events-none"
             style={{
-              left: Math.max(4, Math.min(window.innerWidth - cardWidth - 4, dragState.currentClientX - cardWidth / 2)),
-              top: Math.max(4, Math.min(window.innerHeight - moveHeight - 4, dragState.currentClientY - moveHeight / 2)),
+              left: 0,
+              top: 0,
               width: cardWidth,
               height: moveHeight,
-              transform: shrinkFactor < 1 ? `scale(${shrinkFactor})` : undefined,
-              transition: 'left 0.1s ease-out, top 0.1s ease-out, transform 0.1s ease-out',
+              transform: `translate(${Math.max(4, Math.min(window.innerWidth - cardWidth - 4, dragState.currentClientX - cardWidth / 2))}px, ${Math.max(4, Math.min(window.innerHeight - moveHeight - 4, dragState.currentClientY - moveHeight / 2))}px)${shrinkFactor < 1 ? ` scale(${shrinkFactor})` : ''}`,
+              willChange: 'transform',
             }}
           >
             <div className="h-full ring-2 ring-primary/60 shadow-lg shadow-primary/20 rounded-2xl overflow-hidden">
