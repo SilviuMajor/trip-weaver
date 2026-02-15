@@ -1559,27 +1559,62 @@ const ContinuousTimeline = ({
                     }
                     if (!nextVisible) return null;
 
-                    const transportEnd = new Date(entry.end_time).getTime();
-                    const nextStart = new Date(nextVisible.start_time).getTime();
-                    const gapMs = nextStart - transportEnd;
-                    if (gapMs <= 0) return null;
-
                     const transportEndGH = getEntryGlobalHours(entry).endGH;
                     const nextStartGH = getEntryGlobalHours(nextVisible).startGH;
-                    const gapPixelHeight = (nextStartGH - transportEndGH) * pixelsPerHour;
-                    const BUTTON_HEIGHT = 22;
-                    const addBtnTopOffset = height + Math.max(0, (gapPixelHeight - BUTTON_HEIGHT) / 2);
+                    const gapGH = nextStartGH - transportEndGH;
+                    const gapMin = Math.round(gapGH * 60);
+                    if (gapMin <= 5) return null;
 
-                    return onAddBetween ? (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onAddBetween(entry.end_time); }}
-                        className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-0.5 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                        style={{ top: addBtnTopOffset }}
-                      >
-                        <Plus className="h-3 w-3" />
-                        <span>+ Add something</span>
-                      </button>
-                    ) : null;
+                    const gapTopPx = transportEndGH * pixelsPerHour;
+                    const gapBottomPx = nextStartGH * pixelsPerHour;
+                    const gapPixelHeight = gapBottomPx - gapTopPx;
+                    const relGapTop = gapTopPx - (entryStartGH * pixelsPerHour);
+
+                    return (
+                      <>
+                        {/* Dashed centre line */}
+                        <div
+                          className="absolute left-1/2 border-l-2 border-dashed border-primary/20 pointer-events-none"
+                          style={{ top: relGapTop, height: gapPixelHeight }}
+                        />
+
+                        {gapMin > 360 && onAddBetween ? (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onAddBetween(addMinutes(new Date(entry.end_time), 60).toISOString());
+                              }}
+                              className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-0.5 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                              style={{ top: relGapTop + pixelsPerHour - 12 }}
+                            >
+                              <Plus className="h-3 w-3" />
+                              <span>+ Add something</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onAddBetween(addMinutes(new Date(nextVisible!.start_time), -60).toISOString());
+                              }}
+                              className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-0.5 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                              style={{ top: relGapTop + gapPixelHeight - pixelsPerHour - 12 }}
+                            >
+                              <Plus className="h-3 w-3" />
+                              <span>+ Add something</span>
+                            </button>
+                          </>
+                        ) : onAddBetween ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onAddBetween(entry.end_time); }}
+                            className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-0.5 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                            style={{ top: relGapTop + (gapPixelHeight - 22) / 2 }}
+                          >
+                            <Plus className="h-3 w-3" />
+                            <span>+ Add something</span>
+                          </button>
+                        ) : null}
+                      </>
+                    );
                   })()}
                 </div>
               </div>
