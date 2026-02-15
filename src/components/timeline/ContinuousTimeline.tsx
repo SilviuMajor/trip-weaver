@@ -956,25 +956,61 @@ const ContinuousTimeline = ({
           return (
             <div key={`gap-${entry.id}-${nextEntry.id}`}>
               <div className="absolute left-1/2 border-l-2 border-dashed border-primary/20 pointer-events-none" style={{ top: gapTopPx, height: gapHeight }} />
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (isTransportGap && (onGenerateTransport || onAddTransport)) {
+              {isTransportGap ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
                     const fromResolvedTz = resolveGlobalHourTz(aEndGH);
                     (onGenerateTransport || onAddTransport)!(entry.id, nextEntry.id, entry.end_time, fromResolvedTz);
-                  } else if (onAddBetween) {
-                    onAddBetween(entry.end_time, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
-                  }
-                }}
-                className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                style={{ top: btnTop }}
-              >
-                {isTransportGap ? (
-                  <><Bus className="h-3 w-3" /><span>Transport</span></>
-                ) : (
-                  <><Plus className="h-3 w-3" /><span>+ Add something</span></>
-                )}
-              </button>
+                  }}
+                  className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                  style={{ top: btnTop }}
+                >
+                  <Bus className="h-3 w-3" /><span>Transport</span>
+                </button>
+              ) : gapMin > 360 ? (
+                <>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onAddBetween) {
+                        const prefillTime = addMinutes(new Date(entry.end_time), 60).toISOString();
+                        onAddBetween(prefillTime, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
+                      }
+                    }}
+                    className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                    style={{ top: gapTopPx + 1 * pixelsPerHour - 12 }}
+                  >
+                    <Plus className="h-3 w-3" /><span>+ Add something</span>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onAddBetween) {
+                        const prefillTime = addMinutes(new Date(nextEntry.start_time), -60).toISOString();
+                        onAddBetween(prefillTime, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
+                      }
+                    }}
+                    className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                    style={{ top: gapBottomPx - 1 * pixelsPerHour - 12 }}
+                  >
+                    <Plus className="h-3 w-3" /><span>+ Add something</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onAddBetween) {
+                      onAddBetween(entry.end_time, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
+                    }
+                  }}
+                  className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
+                  style={{ top: btnTop }}
+                >
+                  <Plus className="h-3 w-3" /><span>+ Add something</span>
+                </button>
+              )}
             </div>
           );
         })}
