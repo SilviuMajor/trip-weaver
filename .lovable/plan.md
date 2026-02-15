@@ -1,45 +1,80 @@
 
-# Rendering Fixes: Threshold, Card 1 Visibility, Card 3 Clamping
+# iOS Safari Touch Fix: touch-action: none + Manual Scroll Passthrough
 
-## Fix 1 -- Viewport-relative horizontal threshold
-**File:** `src/components/timeline/ContinuousTimeline.tsx`, line 544
+## Problem
+iOS Safari reads `touch-action` at touchstart time. With `manipulation`, Safari claims the touch at the compositor level before our 200ms hold timer fires. No JavaScript `preventDefault()` can override this.
 
-Replace `const threshold = 20` with viewport-relative calculation:
+## Solution
+
+### File 1: `src/components/timeline/ContinuousTimeline.tsx`
+
+**Line 1060** -- Change conditional touch-action to always `none`:
 ```typescript
-const vw = window.innerWidth;
-const threshold = Math.max(30, vw * 0.12);
-```
-375px phone = 45px threshold. 1920px desktop = 230px threshold.
-
-## Fix 2 -- Card 1 (original position) visibility
-**File:** `src/components/timeline/ContinuousTimeline.tsx`
-
-**Line 1046** -- Remove `opacity-80` from className (it fights with inline opacity):
-```typescript
-// Before: isDragged && 'opacity-80 z-30',
+// Before:
+touchAction: dragState?.entryId === entry.id ? 'none' : 'manipulation',
 // After:
-isDragged && 'z-30',
+touchAction: 'none',
 ```
 
-**Line 1055** -- Increase opacity to 0.35 and add dashed outline:
+### File 2: `src/hooks/useDragResize.ts`
+
+**Lines 293-316** -- Rewrite the hold-window touch handling inside `onTouchStart` to include manual scroll passthrough. Replace the current `touchStartPosRef` assignment through the end of `handleTouchMove` with:
+
 ```typescript
-opacity: isBeingDragged ? 0.35 : undefined,
-outline: isBeingDragged ? '2px dashed hsl(var(--primary) / 0.4)' : undefined,
-outlineOffset: isBeingDragged ? '-2px' : undefined,
-borderRadius: isBeingDragged ? '16px' : undefined,
+    touchStartPosRef.current = { x: startX, y: startY };
+    let lastTouchY = startY;
+    let holdCancelled = false;
+
+    // Single set of listeners for the ENTIRE touch lifecycle
+    const handleTouchMove = (ev: TouchEvent) => {
+      const t = ev.touches[0];
+      ev.preventDefault(); // ALWAYS prevent default — we handle everything
+
+      if (isDraggingRef.current) {
+        // Phase 2: Drag is active — update position
+        handlePointerMoveRef.current(t.clientX, t.clientY);
+      } else if (!holdCancelled) {
+        // Phase 1: Still in hold window — check if finger moved too far
+        const dx = t.clientX - startX;
+        const dy = t.clientY - startY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > TOUCH_MOVE_THRESHOLD) {
+          // Finger moved too much — cancel hold, switch to manual scroll mode
+          if (touchTimerRef.current) {
+            clearTimeout(touchTimerRef.current);
+            touchTimerRef.current = null;
+          }
+          holdCancelled = true;
+          // Don't cleanup listeners — we continue to handle scroll manually
+        }
+      }
+
+      if (holdCancelled) {
+        // Manual scroll: move the scroll container by the delta
+        const deltaY = lastTouchY - t.clientY; // inverted: finger moves down = scroll down
+        if (scrollContainerRef?.current) {
+          scrollContainerRef.current.scrollTop += deltaY;
+        }
+      }
+
+      lastTouchY = t.clientY;
+    };
 ```
 
-## Fix 3 -- Card 3 (floating/detached) clamped to viewport
-**File:** `src/components/timeline/ContinuousTimeline.tsx`, lines 1686-1687
-
-Replace direct positioning with clamped values:
+**Lines 343-348** -- Update the hold timer callback to check `holdCancelled`:
 ```typescript
-const rawLeft = dragState.currentClientX - cardWidth / 2;
-const clampedLeft = Math.max(4, Math.min(window.innerWidth - cardWidth - 4, rawLeft));
-const rawTop = dragState.currentClientY - moveHeight / 2;
-const clampedTop = Math.max(4, Math.min(window.innerHeight - moveHeight - 4, rawTop));
+    touchTimerRef.current = setTimeout(() => {
+      touchTimerRef.current = null;
+      if (!holdCancelled) {
+        startDrag(entryId, type, startX, startY, entryStartHour, entryEndHour, tz);
+        if (navigator.vibrate) navigator.vibrate(20);
+      }
+    }, TOUCH_HOLD_MS);
 ```
-Use `clampedLeft` and `clampedTop` in the style block.
+
+Everything else in `useDragResize.ts` stays exactly as-is: `handleTouchEnd`, `cleanup`, listener attachment, mouse-only useEffect, refs, startDrag, handlePointerMove, commitDrag.
 
 ## Files changed
-1. `src/components/timeline/ContinuousTimeline.tsx` -- all three fixes
+1. `src/components/timeline/ContinuousTimeline.tsx` -- touch-action always `none`
+2. `src/hooks/useDragResize.ts` -- manual scroll passthrough during hold window, holdCancelled guard on timer
