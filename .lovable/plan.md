@@ -1,30 +1,38 @@
 
+# GPU-Composited Floating Card for Smooth Mobile Drag
 
-# Replace dragPhase with Horizontal-Distance-From-Start Logic
+## Change (single file: `src/components/timeline/ContinuousTimeline.tsx`, lines 1710-1717)
 
-## Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
+Replace the current `left`/`top` positioning with `transform: translate()` and remove the CSS transition.
 
-### Replace dragPhase useMemo (lines 534-549)
-
-**Before:** Measures distance from the grid edge, which varies depending on where on the card you grab.
-
-**After:** Measures horizontal distance from the initial touch/click point (`startClientX`), giving consistent behavior regardless of grab position.
-
+**Before:**
 ```typescript
-const dragPhase = useMemo((): 'timeline' | 'detached' | null => {
-  if (!dragState || dragState.type !== 'move') return null;
-  
-  const horizontalDist = Math.abs(dragState.currentClientX - dragState.startClientX);
-  const vw = window.innerWidth;
-  const isMobileDevice = vw < 768;
-  const threshold = isMobileDevice ? Math.max(15, vw * 0.04) : Math.max(40, vw * 0.04);
-  
-  return horizontalDist > threshold ? 'detached' : 'timeline';
-}, [dragState]);
+style={{
+  left: Math.max(4, Math.min(window.innerWidth - cardWidth - 4, dragState.currentClientX - cardWidth / 2)),
+  top: Math.max(4, Math.min(window.innerHeight - moveHeight - 4, dragState.currentClientY - moveHeight / 2)),
+  width: cardWidth,
+  height: moveHeight,
+  transform: shrinkFactor < 1 ? `scale(${shrinkFactor})` : undefined,
+  transition: 'left 0.1s ease-out, top 0.1s ease-out, transform 0.1s ease-out',
+}}
 ```
 
-Thresholds: ~15px on a 375px phone, ~77px on a 1920px desktop.
+**After:**
+```typescript
+style={{
+  left: 0,
+  top: 0,
+  width: cardWidth,
+  height: moveHeight,
+  transform: `translate(${Math.max(4, Math.min(window.innerWidth - cardWidth - 4, dragState.currentClientX - cardWidth / 2))}px, ${Math.max(4, Math.min(window.innerHeight - moveHeight - 4, dragState.currentClientY - moveHeight / 2))}px)${shrinkFactor < 1 ? ` scale(${shrinkFactor})` : ''}`,
+  willChange: 'transform',
+}}
+```
+
+### Why
+- **No transition**: removes the 100ms delay so the card tracks the finger instantly
+- **transform: translate()**: GPU-composited, no layout recalculation, much smoother on mobile
+- **willChange: 'transform'**: promotes element to its own compositing layer
 
 ### Nothing else changes
-All card positioning, TZ-aware labels, drag handlers, and everything else stays as-is.
-
+All drag logic, thresholds, shrink-to-bin animation, EntryCard rendering -- all untouched.
