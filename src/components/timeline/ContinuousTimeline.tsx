@@ -613,29 +613,6 @@ const ContinuousTimeline = ({
     }, 320);
   }, [onResetZoom, pixelsPerHour, onDragSlot, minutesToIso]);
 
-  // DIAGNOSTIC: Document-level native touch listener
-  useEffect(() => {
-    const handler = () => {
-      alert('DOC TOUCH');
-    };
-    document.addEventListener('touchstart', handler, { passive: true });
-    return () => document.removeEventListener('touchstart', handler);
-  }, []);
-
-  // DIAGNOSTIC: Grid-level native touch listener
-  useEffect(() => {
-    const grid = gridRef.current;
-    if (!grid) return;
-
-    const handleNativeTouch = (e: TouchEvent) => {
-      const target = e.target as HTMLElement;
-      const cardEl = target.closest('[data-entry-card]');
-      alert('GRID TOUCH: ' + (cardEl ? 'CARD' : target.tagName));
-    };
-
-    grid.addEventListener('touchstart', handleNativeTouch, { passive: true });
-    return () => grid.removeEventListener('touchstart', handleNativeTouch);
-  }, [isEditor, onEntryTimeChange]);
 
   return (
     <div className="mx-auto max-w-2xl px-4 pb-2 pt-[50px]">
