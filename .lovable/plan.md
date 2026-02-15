@@ -1,30 +1,30 @@
 
 
-# Adjust Detach Threshold and Remove Diagnostic Toast
+# Replace dragPhase with Horizontal-Distance-From-Start Logic
 
 ## Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
 
-### 1. Replace threshold calculation (lines 544-545)
+### Replace dragPhase useMemo (lines 534-549)
 
-**Before:**
+**Before:** Measures distance from the grid edge, which varies depending on where on the card you grab.
+
+**After:** Measures horizontal distance from the initial touch/click point (`startClientX`), giving consistent behavior regardless of grab position.
+
 ```typescript
-const vw = window.innerWidth;
-const threshold = Math.max(30, vw * 0.12);
+const dragPhase = useMemo((): 'timeline' | 'detached' | null => {
+  if (!dragState || dragState.type !== 'move') return null;
+  
+  const horizontalDist = Math.abs(dragState.currentClientX - dragState.startClientX);
+  const vw = window.innerWidth;
+  const isMobileDevice = vw < 768;
+  const threshold = isMobileDevice ? Math.max(15, vw * 0.04) : Math.max(40, vw * 0.04);
+  
+  return horizontalDist > threshold ? 'detached' : 'timeline';
+}, [dragState]);
 ```
 
-**After:**
-```typescript
-const vw = window.innerWidth;
-const isMobileDevice = vw < 768;
-const threshold = isMobileDevice ? Math.max(12, vw * 0.04) : Math.max(30, vw * 0.06);
-```
-
-This makes detaching much easier on mobile (~15px on a 375px phone) while keeping a reasonable threshold on desktop (~115px on 1920px).
-
-### 2. Remove diagnostic toast (lines 548-550)
-
-Delete the `toast.info('dragPhase: ...')` block entirely (the 3-line if-block with `id: 'dragphase'`).
+Thresholds: ~15px on a 375px phone, ~77px on a 1920px desktop.
 
 ### Nothing else changes
-All drag logic, card positioning, TZ-aware labels, and everything else stays as-is.
+All card positioning, TZ-aware labels, drag handlers, and everything else stays as-is.
 
