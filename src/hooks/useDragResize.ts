@@ -107,7 +107,6 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     entryEndHour: number,
     tz?: string,
   ) => {
-    alert('START DRAG');
     // Compute grab offset in the single global coordinate space
     let grabOffsetHours = 0;
     if (scrollContainerRef?.current) {
@@ -288,7 +287,6 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     entryEndHour: number,
     tz?: string,
   ) => {
-    alert('TOUCH START');
     const touch = e.touches[0];
     const startX = touch.clientX;
     const startY = touch.clientY;
@@ -317,7 +315,6 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
             touchTimerRef.current = null;
           }
           holdCancelled = true;
-          alert('HOLD CANCEL');
           // Don't cleanup listeners — we continue to handle scroll manually
         }
       }
@@ -360,7 +357,6 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     touchTimerRef.current = setTimeout(() => {
       touchTimerRef.current = null;
       if (!holdCancelled) {
-        alert('HOLD OK');
         startDrag(entryId, type, startX, startY, entryStartHour, entryEndHour, tz);
         if (navigator.vibrate) navigator.vibrate(20);
       }
