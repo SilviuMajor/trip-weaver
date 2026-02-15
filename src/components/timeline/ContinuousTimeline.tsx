@@ -347,6 +347,24 @@ const ContinuousTimeline = ({
   });
 
   // Locked-entry drag feedback
+  // One-time card hint tooltip
+  const [showCardHint, setShowCardHint] = useState(() => {
+    try { return !localStorage.getItem('tr1p_card_hint_shown'); } catch { return false; }
+  });
+  useEffect(() => {
+    if (!showCardHint) return;
+    const timer = setTimeout(() => {
+      setShowCardHint(false);
+      try { localStorage.setItem('tr1p_card_hint_shown', '1'); } catch {}
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [showCardHint]);
+  const dismissCardHint = useCallback(() => {
+    if (!showCardHint) return;
+    setShowCardHint(false);
+    try { localStorage.setItem('tr1p_card_hint_shown', '1'); } catch {}
+  }, [showCardHint]);
+
   const [shakeEntryId, setShakeEntryId] = useState<string | null>(null);
   const [refreshingTransportId, setRefreshingTransportId] = useState<string | null>(null);
   const [magnetLoadingId, setMagnetLoadingId] = useState<string | null>(null);
@@ -413,6 +431,15 @@ const ContinuousTimeline = ({
       return opt && opt.category !== 'airport_processing' && !isTransportEntry(e) && !e.linked_flight_id;
     });
   }, [sortedEntries, isTransportEntry]);
+
+  // First hint-eligible entry index
+  const firstHintIndex = useMemo(() => {
+    if (!showCardHint) return -1;
+    return sortedEntries.findIndex(e => {
+      const cat = e.options[0]?.category;
+      return !isTransportEntry(e) && !e.linked_flight_id && cat !== 'airport_processing';
+    });
+  }, [showCardHint, sortedEntries, isTransportEntry]);
 
   // Overlap/conflict map (global)
   const overlapMap = useMemo(() => {
@@ -1162,6 +1189,7 @@ const ContinuousTimeline = ({
                   data-entry-card
                   data-entry-id={entry.id}
                   onTouchStart={canDrag ? (e) => {
+                    dismissCardHint();
                     onTouchStart(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
                   } : undefined}
                   className={cn(
@@ -1402,6 +1430,7 @@ const ContinuousTimeline = ({
                         hasVoted={userVotes.includes(primaryOption.id)}
                         onVoteChange={onVoteChange}
                         onClick={() => {
+                          dismissCardHint();
                           if (!wasDraggedRef.current) onCardTap(entry, primaryOption);
                         }}
                         cardSizeClass="h-full"
@@ -1411,6 +1440,7 @@ const ContinuousTimeline = ({
                         linkedType={entry.linked_type}
                         canEdit={isEditor}
                         onDragStart={canDrag ? (e) => {
+                          dismissCardHint();
                           onMouseDown(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
                         } : isLocked ? (e) => {
                           e.stopPropagation();
@@ -1427,6 +1457,18 @@ const ContinuousTimeline = ({
                         isShaking={shakeEntryId === entry.id}
                         entryId={entry.id}
                       />
+                      {/* One-time card hint tooltip */}
+                      {showCardHint && index === firstHintIndex && (
+                        <div
+                          className="absolute z-50 left-1/2 -translate-x-1/2 animate-fade-in pointer-events-none"
+                          style={{ top: height + 8 }}
+                        >
+                          <div className="relative bg-foreground text-background text-xs font-medium px-3 py-1.5 rounded-lg shadow-lg whitespace-nowrap">
+                            Hold to move · Tap to view
+                            <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-foreground rotate-45" />
+                          </div>
+                        </div>
+                      )}
                       {/* Lock icon outside card — right side */}
                       {isEditor && onToggleLock && (
                         <button
