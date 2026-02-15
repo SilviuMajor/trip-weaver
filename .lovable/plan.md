@@ -1,59 +1,52 @@
 
+# Replace motion.div with plain div in EntryCard + Restore Touch Props
 
-# Fix: Move Touch Handling from EntryCard to Wrapper Div
-
-## Root Cause
-Framer-motion's `motion.div` internally registers touch event listeners that intercept and consume touch events on iOS Safari before our React `onTouchStart` prop fires. Diagnostic toasts confirmed zero handler execution on mobile.
+## Problem
+Framer-motion's `motion.div` registers native DOM touch event listeners that call `stopPropagation()` before React's synthetic event system fires. This kills all touch events on EntryCard -- explaining why zero diagnostic toasts appeared despite correct code on both the wrapper div and the card itself.
 
 ## Solution
-Move touch handling to the plain `<div data-entry-card>` wrapper in ContinuousTimeline.tsx, which has no framer-motion interference. Mouse handlers stay on EntryCard (they work fine through framer-motion).
 
-## Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
+### File 1: `src/components/timeline/EntryCard.tsx`
 
-### 1. Add onTouchStart to the wrapper div (line 1047)
-Add touch handler directly on the `data-entry-card` div:
+**Remove framer-motion import (line 2):**
+Delete `import { motion } from 'framer-motion';`
+
+**Replace all 8 `<motion.div` with `<div` and remove animation props:**
+
+Each instance loses `initial`, `animate`, `transition` props but keeps all other props (`onClick`, `onMouseDown`, `onTouchStart`, `onTouchMove`, `onTouchEnd`, `className`, `style`). Closing `</motion.div>` becomes `</div>`.
+
+The 8 locations:
+1. Line 290 -- transport compact
+2. Line 315 -- transport medium
+3. Line 341 -- transport condensed
+4. Line 378 -- transport full
+5. Line 440 -- regular medium
+6. Line 491 -- regular compact
+7. Line 540 -- regular condensed
+8. Line 654 -- regular full
+
+Each closing tag also changes: lines 309, 335, 372, 433, 484, 524, 649, 886.
+
+All `style` props already contain `touchAction: 'none'` from the previous fix -- no changes needed there.
+
+### File 2: `src/components/timeline/ContinuousTimeline.tsx`
+
+**Restore touch props on the main EntryCard render (after line 1303):**
+Add back:
 ```typescript
-<div
-  data-entry-card
-  onTouchStart={canDrag ? (e) => {
-    onTouchStart(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
-  } : undefined}
-  className={cn(...)}
-  style={{
-    ...existing styles...,
-    touchAction: 'none',  // already present
-  }}
->
+onTouchDragStart={canDrag ? (e) => {
+  onTouchStart(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
+} : isLocked ? (e) => {
+  e.stopPropagation();
+  handleLockedAttempt(entry.id);
+} : undefined}
+onTouchDragMove={onTouchMove}
+onTouchDragEnd={onTouchEnd}
 ```
 
-### 2. Remove touch props from main EntryCard render (lines 1307-1314)
-Remove these three props:
-- `onTouchDragStart={...}`
-- `onTouchDragMove={onTouchMove}`
-- `onTouchDragEnd={onTouchEnd}`
-
-Keep `onDragStart` (mouse) as-is.
-
-### 3. Remove touch props from FlightGroupCard EntryCard render (lines 1138-1143)
-Remove:
-- `onTouchDragStart={...}`
-- `onTouchDragMove={onTouchMove}`
-- `onTouchDragEnd={onTouchEnd}`
-
-Keep the flight's `onDragStart` and mouse-based stop propagation.
-
-### 4. Update Card 1 border styling (line 1061)
-Change from red debug border to production-quality primary color:
-```typescript
-border: isBeingDragged ? '3px dashed hsl(var(--primary) / 0.5)' : undefined,
-```
+This gives belt-and-suspenders: touch handlers on both the wrapper div (already there) and the EntryCard itself. First one to fire wins.
 
 ### No changes to other files
-- `useDragResize.ts` -- already has all diagnostic toasts, correct touch lifecycle
-- `EntryCard.tsx` -- no changes needed; props simply won't be passed
-
-### Expected test result on mobile
-1. Touch a card -> "Touch started" toast appears immediately
-2. Hold 200ms -> "Hold OK" + "startDrag fired" toasts
-3. Card 1 at 40% opacity with dashed border, Card 2 follows finger
-
+- `useDragResize.ts` -- keep all diagnostic toasts as-is
+- Card 1 visibility styling -- keep as-is (opacity 0.4, dashed primary border)
+- Card 2/3 rendering, resize handles, bin/planner logic -- unchanged
