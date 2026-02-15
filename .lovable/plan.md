@@ -1,29 +1,33 @@
 
 
-# Add Native DOM Touch Diagnostics
+# Replace Diagnostic Toasts with Native alert() Calls
 
-## What and Why
-React's `onTouchStart` on the card wrapper div is not firing on mobile. We need to bypass React's synthetic event system entirely and attach native DOM `addEventListener('touchstart', ...)` to determine:
-- Whether native touch events reach the grid at all
-- Whether the touch target is a card element
-- Whether `isEditor` and `onEntryTimeChange` have the expected values
+## Why
+Sonner toasts may not be rendering on mobile Safari. Native `alert()` creates a blocking browser dialog that is impossible to miss -- it will definitively confirm whether touch events are firing.
 
-## Changes (single file: `src/components/timeline/ContinuousTimeline.tsx`)
+## Changes
 
-### 1. Add `data-entry-id` to the card wrapper div (line 1048)
-Add `data-entry-id={entry.id}` so the diagnostic listener can identify which card was touched.
+### File 1: `src/components/timeline/ContinuousTimeline.tsx`
 
-### 2. Add document-level native touch diagnostic (before line 616)
-A `useEffect` that attaches a native `touchstart` listener on `document`. This confirms whether ANY touch events fire at all on the page. Shows toast: "Document touch fired".
+**Document-level diagnostic (~line 615-620):**
+Replace `toast('Document touch fired', ...)` with `alert('DOC TOUCH')`.
 
-### 3. Add grid-level native touch diagnostic (before line 616)
-A `useEffect` that attaches a native `touchstart` listener on `gridRef.current`. This reports:
-- Whether the touch target is a CARD element or something else
-- The current value of `isEditor`
-- Whether `onEntryTimeChange` is defined (both are required for `canDrag` to be true)
+**Grid-level diagnostic (~line 625-640):**
+Replace the `toast.info(...)` call with `alert('GRID TOUCH: ' + (cardEl ? 'CARD' : target.tagName))`. Remove the extra details (isEditor, entryId) to keep the alert short.
+
+### File 2: `src/hooks/useDragResize.ts`
+
+Replace all 4 diagnostic toast calls with alert:
+- `toast.info('startDrag called...')` at line ~108 becomes `alert('START DRAG')`
+- `toast.info('Touch started', ...)` at line ~212 becomes `alert('TOUCH START')`
+- `toast.success('Hold succeeded...')` at line ~254 becomes `alert('HOLD OK')`
+- `toast.warning('Hold cancelled...', ...)` at line ~243 becomes `alert('HOLD CANCEL')`
+
+Remove `import { toast } from 'sonner';` if no other toast calls remain.
 
 ### No other changes
-All existing code, diagnostic toasts in `useDragResize.ts`, card styling, and touch handlers remain untouched.
+All existing drag logic, card rendering, touch handlers, and styling remain untouched.
 
-### Technical Detail
-Both listeners use `{ passive: true }` since they are read-only diagnostics that do not call `preventDefault()`. They are cleaned up on unmount via the returned cleanup function.
+### What to report after applying
+Touch anywhere on the mobile timeline. A native browser alert dialog (blocking popup) will appear. Report exactly what text it shows.
+
