@@ -543,7 +543,7 @@ const ContinuousTimeline = ({
     );
     const vw = window.innerWidth;
     const isMobileDevice = vw < 768;
-    const threshold = isMobileDevice ? Math.max(12, vw * 0.04) : Math.max(30, vw * 0.06);
+    const threshold = isMobileDevice ? 5 : 60;
 
     return distFromGrid > threshold ? 'detached' : 'timeline';
   }, [dragState]);
