@@ -1088,9 +1088,7 @@ const ContinuousTimeline = ({
 
           const top = Math.max(0, groupStartGH * pixelsPerHour);
           const height = (groupEndGH - groupStartGH) * pixelsPerHour;
-          const isCompact = height < 40 && !flightGroup;
-          const isMedium = height >= 40 && height < 80 && !flightGroup;
-          const isCondensed = height >= 80 && height < 160 && !flightGroup;
+          // Tier booleans removed — height passed directly to EntryCard
           const hasConflict = overlapMap.has(entry.id);
 
           const distanceKm =
@@ -1224,7 +1222,7 @@ const ContinuousTimeline = ({
                   )}
 
                   {/* Top resize handle */}
-                  {canDrag && !flightGroup && !isCompact && (
+                  {canDrag && !flightGroup && height >= 72 && (
                     <div
                       data-resize-handle
                       className="absolute left-0 right-0 -top-1 z-20 h-5 cursor-ns-resize group/resize touch-none"
@@ -1238,7 +1236,7 @@ const ContinuousTimeline = ({
                       )}
                     </div>
                   )}
-                  {!canDrag && isLocked && !flightGroup && !isCompact && (
+                  {!canDrag && isLocked && !flightGroup && height >= 72 && (
                     <div
                       data-resize-handle
                       className="absolute left-0 right-0 -top-1 z-20 h-5 cursor-not-allowed touch-none"
@@ -1386,9 +1384,7 @@ const ContinuousTimeline = ({
                       <EntryCard
                         overlapMinutes={overlapMap.get(entry.id)?.minutes}
                         overlapPosition={overlapMap.get(entry.id)?.position}
-                        isCompact={isCompact}
-                        isMedium={isMedium}
-                        isCondensed={isCondensed}
+                        height={height}
                         notes={(entry as any).notes}
                         option={primaryOption}
                         startTime={entry.start_time}
@@ -1484,7 +1480,7 @@ const ContinuousTimeline = ({
                       onTouchMove={onTouchMove}
                       onTouchEnd={onTouchEnd}
                     >
-                      {!hasEntryDirectlyBelow && !isCompact && (
+                      {!hasEntryDirectlyBelow && height >= 72 && (
                         <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-2 rounded-full bg-muted-foreground/30 group-hover/resize:bg-primary/60 transition-colors" />
                       )}
                     </div>
@@ -1496,7 +1492,7 @@ const ContinuousTimeline = ({
                       onMouseDown={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                       onTouchStart={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                     >
-                      {!hasEntryDirectlyBelow && !isCompact && (
+                      {!hasEntryDirectlyBelow && height >= 72 && (
                         <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-2 rounded-full bg-muted-foreground/10" />
                       )}
                     </div>
@@ -1755,10 +1751,6 @@ const ContinuousTimeline = ({
           const durationGH = origGH.endGH - origGH.startGH;
           const moveTop = dragState.currentStartHour * pixelsPerHour;
           const moveHeight = durationGH * pixelsPerHour;
-          const isCompactMove = moveHeight < 40;
-          const isMediumMove = moveHeight >= 40 && moveHeight < 80;
-          const isCondensedMove = moveHeight >= 80 && moveHeight < 160;
-
           return (
             <div
               className="absolute left-0 right-0 pr-1 z-[50] pointer-events-none"
@@ -1777,9 +1769,7 @@ const ContinuousTimeline = ({
                   hasVoted={false}
                   onVoteChange={() => {}}
                   cardSizeClass="h-full"
-                  isCompact={isCompactMove}
-                  isMedium={isMediumMove}
-                  isCondensed={isCondensedMove}
+                  height={moveHeight}
                   notes={(entry as any).notes}
                   isLocked={entry.is_locked}
                   linkedType={entry.linked_type}
@@ -1806,10 +1796,6 @@ const ContinuousTimeline = ({
         const origGH = getEntryGlobalHours(entry);
         const durationGH = origGH.endGH - origGH.startGH;
         const moveHeight = durationGH * pixelsPerHour;
-        const isCompactMove = moveHeight < 40;
-        const isMediumMove = moveHeight >= 40 && moveHeight < 80;
-        const isCondensedMove = moveHeight >= 80 && moveHeight < 160;
-
         const gridRect = gridRef.current?.getBoundingClientRect();
         const cardWidth = gridRect ? gridRect.width - 4 : 220;
 
@@ -1823,7 +1809,6 @@ const ContinuousTimeline = ({
               width: cardWidth,
               height: moveHeight,
               willChange: 'transform',
-              // Initial position — RAF loop takes over immediately
               transform: `translate(${Math.max(4, Math.min(window.innerWidth - cardWidth - 4, clientXRef.current - cardWidth / 2))}px, ${Math.max(4, Math.min(window.innerHeight - moveHeight - 4, clientYRef.current - dragState.grabOffsetHours * pixelsPerHour))}px)`,
             }}
           >
@@ -1840,9 +1825,7 @@ const ContinuousTimeline = ({
                 hasVoted={false}
                 onVoteChange={() => {}}
                 cardSizeClass="h-full"
-                isCompact={isCompactMove}
-                isMedium={isMediumMove}
-                isCondensed={isCondensedMove}
+                height={moveHeight}
                 notes={(entry as any).notes}
                 isLocked={entry.is_locked}
                 linkedType={entry.linked_type}
