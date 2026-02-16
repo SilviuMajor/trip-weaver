@@ -1,14 +1,19 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft, MapPin, Plus, Star, List, Map } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { ArrowLeft, MapPin, ClipboardList, List, Map } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { findCategory, type CategoryDef } from '@/lib/categories';
 import { CATEGORY_TO_PLACE_TYPES, getCategorySearchPlaceholder } from '@/lib/placeTypeMapping';
 import { cn } from '@/lib/utils';
-import type { Trip, EntryWithOptions } from '@/types/trip';
+import ExploreCard from './ExploreCard';
+import PlaceOverview from './PlaceOverview';
+import type { Trip, EntryWithOptions, EntryOption } from '@/types/trip';
 
 // ─── Types ───
 
@@ -44,14 +49,6 @@ interface ExploreViewProps {
 
 // ─── Helpers ───
 
-const PRICE_LABELS: Record<string, string> = {
-  PRICE_LEVEL_FREE: 'Free',
-  PRICE_LEVEL_INEXPENSIVE: '€',
-  PRICE_LEVEL_MODERATE: '€€',
-  PRICE_LEVEL_EXPENSIVE: '€€€',
-  PRICE_LEVEL_VERY_EXPENSIVE: '€€€€',
-};
-
 function resolveOrigin(
   entries: EntryWithOptions[],
 ): { name: string; lat: number; lng: number } | null {
@@ -68,6 +65,66 @@ function resolveOrigin(
     }
   }
   return closest ? { name: closest.name, lat: closest.lat, lng: closest.lng } : null;
+}
+
+function buildTempEntry(place: ExploreResult, tripId: string, categoryId: string | null, resolvedPhotoUrl: string | null): { entry: EntryWithOptions; option: EntryOption } {
+  const now = new Date().toISOString();
+  const fakeEntryId = `explore-${place.placeId}`;
+  const fakeOptionId = `explore-opt-${place.placeId}`;
+
+  const option: EntryOption = {
+    id: fakeOptionId,
+    entry_id: fakeEntryId,
+    name: place.name,
+    website: place.website,
+    category: categoryId,
+    category_color: null,
+    latitude: place.lat,
+    longitude: place.lng,
+    location_name: place.address,
+    departure_location: null,
+    arrival_location: null,
+    departure_tz: null,
+    arrival_tz: null,
+    departure_terminal: null,
+    arrival_terminal: null,
+    airport_checkin_hours: null,
+    airport_checkout_min: null,
+    phone: place.phone,
+    address: place.address,
+    rating: place.rating,
+    user_rating_count: place.userRatingCount,
+    opening_hours: place.openingHours,
+    google_maps_uri: place.googleMapsUri,
+    google_place_id: place.placeId,
+    price_level: place.priceLevel,
+    estimated_budget: null,
+    actual_cost: null,
+    created_at: now,
+    updated_at: now,
+    vote_count: 0,
+    images: resolvedPhotoUrl ? [{ id: 'temp', option_id: fakeOptionId, image_url: resolvedPhotoUrl, sort_order: 0, created_at: now }] : [],
+  };
+
+  const entry: EntryWithOptions = {
+    id: fakeEntryId,
+    trip_id: tripId,
+    start_time: now,
+    end_time: now,
+    is_locked: false,
+    is_scheduled: false,
+    scheduled_day: null,
+    option_group_id: null,
+    linked_flight_id: null,
+    linked_type: null,
+    from_entry_id: null,
+    to_entry_id: null,
+    created_at: now,
+    updated_at: now,
+    options: [option],
+  };
+
+  return { entry, option };
 }
 
 // ─── Component ───
@@ -88,11 +145,26 @@ const ExploreView = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [originLocation, setOriginLocation] = useState<{ name: string; lat: number; lng: number } | null>(null);
   const [originResolved, setOriginResolved] = useState(false);
+  const [addedPlaceIds, setAddedPlaceIds] = useState<Set<string>>(new Set());
+  const [selectedPlace, setSelectedPlace] = useState<ExploreResult | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const initialLoadDone = useRef(false);
+  const isMobile = useIsMobile();
 
   const cat: CategoryDef | undefined = categoryId ? findCategory(categoryId) : undefined;
   const destination = trip.destination || null;
+
+  // Existing place IDs in trip
+  const existingPlaceIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const entry of entries) {
+      for (const opt of entry.options) {
+        if (opt.google_place_id) ids.add(opt.google_place_id);
+      }
+    }
+    return ids;
+  }, [entries]);
 
   // Resolve origin
   useEffect(() => {
@@ -103,7 +175,6 @@ const ExploreView = ({
       setOriginResolved(true);
       return;
     }
-    // Fallback: use trip destination via autocomplete
     if (destination) {
       supabase.functions.invoke('google-places', {
         body: { action: 'autocomplete', input: destination },
@@ -123,10 +194,10 @@ const ExploreView = ({
   useEffect(() => {
     if (open) {
       setTimeout(() => inputRef.current?.focus(), 100);
-      // Reset state when opening
       setResults([]);
       setSearchQuery('');
       setLoading(false);
+      setAddedPlaceIds(new Set());
       initialLoadDone.current = false;
       setOriginResolved(false);
     }
@@ -135,7 +206,7 @@ const ExploreView = ({
   // Auto-load nearby search when category is set and origin resolved
   useEffect(() => {
     if (!open || !categoryId || !originResolved || initialLoadDone.current) return;
-    if (searchQuery.trim()) return; // User already typing
+    if (searchQuery.trim()) return;
 
     const types = CATEGORY_TO_PLACE_TYPES[categoryId];
     if (!types || !originLocation) {
@@ -200,7 +271,51 @@ const ExploreView = ({
     if (searchQuery.trim()) performTextSearch(searchQuery.trim());
   };
 
+  const handleAdd = useCallback((place: ExploreResult) => {
+    onAddToPlanner(place);
+    setAddedPlaceIds(prev => new Set(prev).add(place.placeId));
+  }, [onAddToPlanner]);
+
+  const handleCardTap = useCallback((place: ExploreResult) => {
+    setSelectedPlace(place);
+    setDetailOpen(true);
+  }, []);
+
   if (!open) return null;
+
+  // Detail sheet content
+  const detailContent = selectedPlace ? (() => {
+    const { entry: tempEntry, option: tempOption } = buildTempEntry(selectedPlace, trip.id, categoryId ?? null, selectedPlace.photoUrl ?? null);
+    const placeIsInTrip = existingPlaceIds.has(selectedPlace.placeId) || addedPlaceIds.has(selectedPlace.placeId);
+    return (
+      <div className="overflow-y-auto max-h-[85vh]">
+        {/* Add to Planner button */}
+        {isEditor && !placeIsInTrip && (
+          <div className="px-4 pt-3 pb-1">
+            <Button
+              className="w-full gap-2"
+              onClick={() => {
+                handleAdd(selectedPlace);
+                setDetailOpen(false);
+              }}
+            >
+              <ClipboardList className="h-4 w-4" />
+              Add to Planner
+            </Button>
+          </div>
+        )}
+        <PlaceOverview
+          entry={tempEntry}
+          option={tempOption}
+          trip={trip}
+          context="explore"
+          isEditor={false}
+          onSaved={() => {}}
+          onClose={() => setDetailOpen(false)}
+        />
+      </div>
+    );
+  })() : null;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
@@ -265,46 +380,21 @@ const ExploreView = ({
             </div>
           )}
 
-          {!loading && results.map((place) => (
-            <div
-              key={place.placeId}
-              className="flex items-start gap-3 rounded-lg border bg-card p-3 transition-colors"
-            >
-              <div className="flex-1 min-w-0" onClick={() => onCardTap(place)}>
-                <p className="text-sm font-medium truncate">{place.name}</p>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">{place.address}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  {place.rating != null && (
-                    <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-                      <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-                      {place.rating.toFixed(1)}
-                      {place.userRatingCount != null && (
-                        <span className="text-muted-foreground/60">({place.userRatingCount})</span>
-                      )}
-                    </span>
-                  )}
-                  {place.priceLevel && (
-                    <span className="text-xs text-muted-foreground">
-                      {PRICE_LABELS[place.priceLevel] || place.priceLevel}
-                    </span>
-                  )}
-                </div>
-              </div>
-              {isEditor && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0 text-primary hover:bg-primary/10"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAddToPlanner(place);
-                  }}
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          ))}
+          {!loading && results.map((place) => {
+            const inTrip = existingPlaceIds.has(place.placeId) || addedPlaceIds.has(place.placeId);
+            return (
+              <ExploreCard
+                key={place.placeId}
+                place={place}
+                categoryId={categoryId ?? null}
+                onAddToPlanner={() => handleAdd(place)}
+                onTap={() => handleCardTap(place)}
+                isInTrip={inTrip}
+                travelTime={null}
+                compactHours={null}
+              />
+            );
+          })}
 
           {/* Add manually link */}
           {!loading && (results.length > 0 || searchQuery.trim()) && (
@@ -317,6 +407,23 @@ const ExploreView = ({
           )}
         </div>
       </ScrollArea>
+
+      {/* Detail sheet */}
+      {isMobile ? (
+        <Drawer open={detailOpen} onOpenChange={setDetailOpen}>
+          <DrawerContent className="max-h-[92vh]">
+            <DrawerTitle className="sr-only">Place Details</DrawerTitle>
+            {detailContent}
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+          <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto p-0">
+            <DialogTitle className="sr-only">Place Details</DialogTitle>
+            {detailContent}
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 };
