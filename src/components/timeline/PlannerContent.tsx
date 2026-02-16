@@ -205,20 +205,24 @@ const PlannerContent = ({
           <p className="text-xs text-muted-foreground/60 italic pl-6">No hotel added yet</p>
         ) : (
           <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1" style={{ WebkitOverflowScrolling: 'touch' }}>
-            {dedupedEntries.map(({ original, usageCount, isFlight }) => (
-              <div key={original.id} className={cn(cardWidth, 'shrink-0')}>
-                <SidebarEntryCard
-                  entry={original}
-                  onDragStart={onDragStart}
-                  onClick={() => onCardTap(original)}
-                  onDuplicate={isFlight ? undefined : onDuplicate}
-                  onInsert={isFlight ? undefined : onInsert}
-                  onTouchDragStart={onTouchDragStart}
-                  usageCount={usageCount}
-                  isFlight={isFlight}
-                />
-              </div>
-            ))}
+            {dedupedEntries.map(({ original, usageCount, isFlight }) => {
+              const isCompact = original.options[0]?.category === 'flight' || original.options[0]?.category === 'hotel';
+              return (
+                <div key={original.id} className={cn(isCompact ? 'w-[140px]' : cardWidth, 'shrink-0')}>
+                  <SidebarEntryCard
+                    entry={original}
+                    onDragStart={onDragStart}
+                    onClick={() => onCardTap(original)}
+                    onDuplicate={isFlight ? undefined : onDuplicate}
+                    onInsert={isFlight ? undefined : onInsert}
+                    onTouchDragStart={onTouchDragStart}
+                    usageCount={usageCount}
+                    isFlight={isFlight}
+                    compact={isCompact}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
