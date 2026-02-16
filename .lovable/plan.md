@@ -1,64 +1,56 @@
 
 
-# Fix: Text/pill overlap and rounded corners on short cards
+# Fix: Text flush-right on normal cards (> 30min)
 
-## Bug 1: Text overlapping duration pill
+## Problem
 
-After auditing the code, the `right: 54` on content divs (lines 576, 596) and `right: 5` on the pill (line 323) are correctly set in the inline styles. However, the issue may be that the pill's `right: 5` uses a pixel value without `px` suffix in the style object -- this is actually fine in React. The positioning values are correct.
+The content divs for normal (non-short) entries have constraints pushing text away from the right edge:
 
-To be safe, I will verify and ensure the values are explicitly applied and not overridden by any className.
+- **Condensed normal** (line 637): `max-w-[68%] px-3 py-2.5 pr-14` -- the `pr-14` (56px) creates unnecessary clearance
+- **Full normal** (line 680): `max-w-[68%] p-4 pr-16` -- the `pr-16` (64px) is even worse
 
-## Bug 2: Rounded corners disappear (confirmed)
+These large right paddings were likely leftover from when the pill and text shared the same space. On normal cards, the pill is at the top-right and the text is at the bottom-right -- they don't overlap vertically, so no clearance is needed.
 
-This is the main visual bug. In `cardBase` (lines 520-552), the image and fade gradient layers are direct children of the outer wrapper div. When `overflow-visible` is applied for short entries, the image/fade bleed past the rounded corners since nothing clips them.
+## Fix
 
-**Fix**: Add an inner clipping container (`absolute inset-0 overflow-hidden rounded-[14px]`) that wraps ONLY the image and fade layers. The outer wrapper can then be `overflow-visible` without affecting background rendering.
+### 1. Condensed normal content div (line 637)
 
-### Current structure (broken)
-```text
-Outer div (overflow-visible on short cards, rounded-[14px])
-  +-- img (bleeds past corners!)
-  +-- fade gradient (bleeds past corners!)
-  +-- children (text, pill, flag)
+Change:
+```
+max-w-[68%] px-3 py-2.5 pr-14
+```
+To:
+```
+p-3 text-right items-end
 ```
 
-### Fixed structure
-```text
-Outer div (overflow-visible on short cards, rounded-[14px])
-  +-- Inner div (overflow-hidden rounded-[14px], absolute inset-0)
-  |     +-- img (clipped to rounded corners)
-  |     +-- fade gradient (clipped to rounded corners)
-  +-- children (text, pill, flag -- can overflow)
+Remove `max-w-[68%]` and `pr-14`. Keep `absolute bottom-0 right-0 z-10 text-right`.
+
+### 2. Full normal content div (line 680)
+
+Change:
+```
+max-w-[68%] p-4 pr-16
+```
+To:
+```
+p-3 text-right items-end
 ```
 
-## Changes
+Remove `max-w-[68%]` and `pr-16`. Keep `absolute bottom-0 right-0 z-10 text-right`.
 
-### File: `src/components/timeline/EntryCard.tsx`
-
-**1. cardBase function (lines 537-548)** -- Wrap image/fade in inner clipping container
-
-Replace the direct image/fade children with a wrapping div:
-
+Both divs will become:
 ```tsx
-{/* Background clipping container -- always clips to rounded corners */}
-<div className="absolute inset-0 overflow-hidden rounded-[14px]">
-  {firstImage ? (
-    <>
-      <img src={firstImage} alt={option.name} className="absolute inset-0 w-full h-full object-cover" />
-      <div className="absolute inset-0 z-[5]" style={{ background: DIAGONAL_GRADIENTS[tier] }} />
-    </>
-  ) : (
-    <>
-      <div className="absolute inset-0" style={{ background: glossyBg, border: glossyBorder }} />
-      <div className="absolute inset-0 z-[5]" style={{ background: glassBg }} />
-    </>
-  )}
-</div>
+<div className={cn('absolute bottom-0 right-0 z-10 text-right p-3', textColor)} style={{ pointerEvents: 'none' }}>
 ```
 
-This is a single structural change inside the `cardBase` function that fixes all tiers at once.
+This ensures text is flush against the right edge with only 12px (p-3) breathing room.
 
-**2. Verify text positioning** -- Confirm `right: 54` is not overridden
+## File: `src/components/timeline/EntryCard.tsx`
 
-The compact (line 576) and medium short-entry (line 596) content divs both set `right: 54` in the inline style object. This is correct. I will double-check no Tailwind class on those divs adds a conflicting `right` value.
+| Line | Current | Fixed |
+|------|---------|-------|
+| 637 | `'absolute bottom-0 right-0 z-10 text-right max-w-[68%] px-3 py-2.5 pr-14'` | `'absolute bottom-0 right-0 z-10 text-right p-3'` |
+| 680 | `'absolute bottom-0 right-0 z-10 text-right max-w-[68%] p-4 pr-16'` | `'absolute bottom-0 right-0 z-10 text-right p-3'` |
 
+Two single-line class changes. No structural modifications needed.
