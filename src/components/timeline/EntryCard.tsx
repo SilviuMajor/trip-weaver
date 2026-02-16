@@ -570,18 +570,18 @@ const EntryCard = ({
     return cardBase('compact', (
       <>
         {cornerFlag(9, '2px 4px')}
-        <div style={durationPillStyle('xs')}>{durationLabel}</div>
-        <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[75%] px-2 pr-10', textColor)}>
-          <span className="text-[11px] font-semibold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{option.name}</span>
-          <span className={cn('text-[9px] whitespace-nowrap shrink-0', faintTextColor)}>
-            {formatTime(startTime)}
-          </span>
+        <div style={durationPillStyle('xs', isShortEntry)}>{durationLabel}</div>
+        <div
+          className={cn('absolute z-10 text-right', textColor)}
+          style={{ top: '50%', left: isMicroEntry ? 30 : 10, right: 54, transform: 'translateY(-50%)', pointerEvents: 'none' }}
+        >
+          <span className="text-sm font-bold truncate block" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{option.name}</span>
         </div>
         {isCheckOut && (
           <span className={cn('absolute bottom-0.5 left-7 z-10 text-[8px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
         )}
       </>
-    ));
+    ), isShortEntry);
   }
 
   // ═══ MEDIUM (40-79px) ═══
@@ -589,13 +589,22 @@ const EntryCard = ({
     return cardBase('medium', (
       <>
         {cornerFlag(11, '3px 5px')}
-        <div style={durationPillStyle('s')}>{durationLabel}</div>
-        <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[72%] px-2.5 py-1.5 pr-12', textColor)}>
-          <span className="text-xs font-semibold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{displayName}</span>
-          <span className={cn('text-[10px]', faintTextColor)}>
-            {formatTime(startTime)} — {formatTime(endTime)}
-          </span>
-        </div>
+        <div style={durationPillStyle('s', isShortEntry)}>{durationLabel}</div>
+        {isShortEntry ? (
+          <div
+            className={cn('absolute z-10 text-right', textColor)}
+            style={{ top: '50%', left: isMicroEntry ? 30 : 10, right: 54, transform: 'translateY(-50%)', pointerEvents: 'none' }}
+          >
+            <span className="text-sm font-bold truncate block" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{displayName}</span>
+          </div>
+        ) : (
+          <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[72%] px-2.5 py-1.5 pr-12', textColor)}>
+            <span className="text-sm font-bold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{displayName}</span>
+            <span className={cn('text-[10px]', faintTextColor)}>
+              {formatTime(startTime)} — {formatTime(endTime)}
+            </span>
+          </div>
+        )}
         {isCheckIn && (
           <span className={cn('absolute bottom-1 left-8 z-10 text-[8px] uppercase tracking-wider font-semibold', faintTextColor)}>CHECK-IN</span>
         )}
@@ -603,7 +612,7 @@ const EntryCard = ({
           <span className={cn('absolute bottom-1 left-8 z-10 text-[8px] uppercase tracking-wider font-semibold', faintTextColor)}>checkout</span>
         )}
       </>
-    ));
+    ), isShortEntry);
   }
 
   // ═══ CONDENSED (80-159px) ═══
@@ -620,9 +629,7 @@ const EntryCard = ({
             <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
               {displayName}
             </h3>
-            <span className={cn('text-[10px]', faintTextColor)}>
-              {formatTime(startTime)} — {formatTime(endTime)}
-            </span>
+            {/* No time on short entries */}
           </div>
         ) : (
           <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] px-3 py-2.5 pr-14', textColor)} style={{ pointerEvents: 'none' }}>
@@ -663,9 +670,7 @@ const EntryCard = ({
           <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
             {displayName}
           </h3>
-          <span className={cn('text-[10px]', faintTextColor)}>
-            {formatTime(startTime)} — {formatTime(endTime)}
-          </span>
+          {/* No time on short entries */}
         </div>
       ) : (
         <>
