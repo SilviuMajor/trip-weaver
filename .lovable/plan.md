@@ -1,94 +1,164 @@
 
 
-# Reverse Geocode City/Country + Grouped Global Planner View
+# "From Your Places" in Explore + Star/Favourite
 
 ## Overview
-Add reverse geocoding to the sync edge function to populate `city` and `country`, then upgrade the Global Planner from a flat list to a country/city hierarchy with Netflix-style category rows when drilling into a city.
+Two features: (1) show matching global places above Google results in trip Explore, and (2) add a star/favourite toggle to PlaceOverview that upserts into global_places.
 
-## Part 1: Update Sync Edge Function
+## Feature 1: "From Your Places" Section in ExploreView
 
-**File: `supabase/functions/sync-global-places/index.ts`**
+**File: `src/components/timeline/ExploreView.tsx`**
 
-Add a `reverseGeocode` helper that calls the Google Geocoding API using the existing `GOOGLE_MAPS_API_KEY` secret. After upserting each place, if it has coordinates but no city/country already set, reverse geocode it. Cap at 20 geocode calls per sync to avoid API quota issues.
+### New state and imports
+- Import `haversineKm` from `@/lib/distance`
+- Import `useAdminAuth` from `@/hooks/useAdminAuth`
+- Import `GlobalPlace` type from `@/types/trip`
+- Add state: `const [yourPlaces, setYourPlaces] = useState<GlobalPlace[]>([])`
 
-```typescript
-const reverseGeocode = async (lat: number, lng: number, apiKey: string) => {
-  const res = await fetch(
-    `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}&result_type=locality|administrative_area_level_1`
-  );
-  const data = await res.json();
-  if (!data.results?.length) return { city: null, country: null };
-  const components = data.results[0].address_components ?? [];
-  const city = components.find((c: any) => c.types.includes('locality'))?.long_name ?? null;
-  const country = components.find((c: any) => c.types.includes('country'))?.long_name ?? null;
-  return { city, country };
-};
-```
-
-Flow changes:
-- After all upserts complete, query `global_places` for this user where `city IS NULL` and `latitude IS NOT NULL`, limit 20
-- For each, call `reverseGeocode`, then update the row's `city` and `country`
-- Read `GOOGLE_MAPS_API_KEY` from `Deno.env.get()`
-
-## Part 2: Update GlobalPlanner -- Grouped View
-
-**File: `src/pages/GlobalPlanner.tsx`**
-
-Replace the flat list with a two-level view controlled by `selectedCity` state (already declared but unused).
-
-### Top-level view (selectedCity is null)
-
-Group filtered places by `country` then `city`. Places without city/country go into an "Other" section.
+### Fetch user's nearby global places
+Add a `useEffect` that runs when `open`, `originLocation`, and `categoryId` change. It queries `global_places` for the admin user, then client-side filters to places within 10km of `originLocation` using `haversineKm`, optionally filtering by category. Store results in `yourPlaces`.
 
 ```typescript
-const grouped = useMemo(() => {
-  const filtered = statusFilter === 'all' ? places : places.filter(p => p.status === statusFilter);
-  const countryMap = new Map<string, Map<string, GlobalPlace[]>>();
-  const unsorted: GlobalPlace[] = [];
-
-  filtered.forEach(place => {
-    if (!place.country || !place.city) { unsorted.push(place); return; }
-    if (!countryMap.has(place.country)) countryMap.set(place.country, new Map());
-    const cities = countryMap.get(place.country)!;
-    if (!cities.has(place.city)) cities.set(place.city, []);
-    cities.get(place.city)!.push(place);
-  });
-
-  return { countryMap, unsorted };
-}, [places, statusFilter]);
+useEffect(() => {
+  if (!open || !originLocation || !adminUser) { setYourPlaces([]); return; }
+  (async () => {
+    const { data } = await supabase
+      .from('global_places')
+      .select('*')
+      .eq('user_id', adminUser.id);
+    if (!data) return;
+    const nearby = data.filter(p => {
+      if (!p.latitude || !p.longitude) return false;
+      if (haversineKm(originLocation.lat, originLocation.lng, Number(p.latitude), Number(p.longitude)) > 10) return false;
+      if (categoryId && p.category !== categoryId) return false;
+      return true;
+    });
+    setYourPlaces(nearby);
+  })();
+}, [open, originLocation, categoryId, adminUser]);
 ```
 
-Render as country section headers with tappable city rows showing place count and a chevron. Tapping a city sets `selectedCity`.
+### Render "FROM YOUR PLACES" section
+Inside the ScrollArea, before the Google results grid (line ~926), render a horizontal scroll row when `yourPlaces.length > 0`. Each place is converted to an `ExploreResult` to reuse `ExploreCard`:
 
-### City detail view (selectedCity is set)
+```typescript
+const globalToExploreResult = (p: GlobalPlace): ExploreResult => ({
+  placeId: p.google_place_id || p.id,
+  name: p.name,
+  address: p.address || '',
+  lat: p.latitude ? Number(p.latitude) : null,
+  lng: p.longitude ? Number(p.longitude) : null,
+  rating: p.rating ? Number(p.rating) : null,
+  userRatingCount: null,
+  priceLevel: p.price_level,
+  openingHours: p.opening_hours as string[] | null,
+  types: [],
+  googleMapsUri: null,
+  website: p.website,
+  phone: p.phone,
+  photoRef: null,
+});
+```
 
-Header: back arrow + city name. Content: group the city's places by category, render each category as a horizontal scrolling row using `SidebarEntryCard` (build temporary `EntryWithOptions` from `GlobalPlace` using the existing `buildTempEntry`).
-
-Add a visited badge overlay on cards where `status === 'visited'`.
-
-### SidebarEntryCard visited badge
-
-**File: `src/components/timeline/SidebarEntryCard.tsx`**
-
-Add optional `visitedBadge?: boolean` prop. When true, render a small green check badge below the usage count badge position (top-right area, offset down):
-
+Render as:
 ```tsx
-{visitedBadge && (
-  <div className="absolute top-8 right-2 z-20">
-    <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 font-bold bg-green-500/25 text-green-300 border-green-500/20">
-      Visited
-    </Badge>
+{yourPlaces.length > 0 && !loading && (
+  <div className="mb-3">
+    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 px-1">
+      From your places
+    </p>
+    <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+      {yourPlaces.map(place => {
+        const asExplore = globalToExploreResult(place);
+        const inTrip = existingPlaceIds.has(asExplore.placeId) || addedPlaceIds.has(asExplore.placeId);
+        return (
+          <div key={place.id} className="shrink-0" style={{ width: 200 }}>
+            <ExploreCard
+              place={asExplore}
+              categoryId={place.category}
+              onAddToPlanner={() => handleAdd(asExplore)}
+              onTap={() => handleCardTap(asExplore)}
+              isInTrip={inTrip}
+            />
+          </div>
+        );
+      })}
+    </div>
   </div>
 )}
 ```
 
-Adjust the `top` offset if `usageCount` badge is also shown (use `top-14` when both exist).
+## Feature 2: Star/Favourite in PlaceOverview
+
+**File: `src/components/timeline/PlaceOverview.tsx`**
+
+### New imports and state
+- Import `Star` from `lucide-react`
+- Import `useAdminAuth` from `@/hooks/useAdminAuth`
+- Add state: `isStarred` (boolean), initialized by querying `global_places` on mount when `option.google_place_id` exists
+
+### Star status check on mount
+```typescript
+const { adminUser } = useAdminAuth();
+const [isStarred, setIsStarred] = useState(false);
+
+useEffect(() => {
+  if (!option.google_place_id || !adminUser) return;
+  supabase
+    .from('global_places')
+    .select('starred')
+    .eq('google_place_id', option.google_place_id)
+    .eq('user_id', adminUser.id)
+    .maybeSingle()
+    .then(({ data }) => {
+      if (data) setIsStarred(data.starred);
+    });
+}, [option.google_place_id, adminUser]);
+```
+
+### Toggle handler
+```typescript
+const handleToggleStar = async () => {
+  if (!option.google_place_id || !adminUser) return;
+  const newStarred = !isStarred;
+  setIsStarred(newStarred); // Optimistic
+  
+  await supabase
+    .from('global_places')
+    .upsert({
+      user_id: adminUser.id,
+      google_place_id: option.google_place_id,
+      name: option.name,
+      category: option.category,
+      latitude: option.latitude,
+      longitude: option.longitude,
+      status: 'want_to_go',
+      source: 'favourite',
+      starred: newStarred,
+      rating: option.rating,
+      price_level: option.price_level,
+      address: option.address ?? option.location_name,
+    } as any, { onConflict: 'user_id,google_place_id' });
+};
+```
+
+### Render star button
+Add to the action row (line ~459, alongside lock and delete buttons):
+```tsx
+{option.google_place_id && adminUser && (
+  <button
+    className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted/50 transition-colors"
+    onClick={handleToggleStar}
+  >
+    <Star className={cn('h-4 w-4', isStarred ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground')} />
+  </button>
+)}
+```
 
 ## Files Summary
 
 | File | Change |
 |------|--------|
-| `supabase/functions/sync-global-places/index.ts` | Add `reverseGeocode` helper; after upserts, geocode up to 20 places missing city/country |
-| `src/pages/GlobalPlanner.tsx` | Replace flat list with country/city grouped view; add city detail with Netflix category rows using SidebarEntryCard |
-| `src/components/timeline/SidebarEntryCard.tsx` | Add optional `visitedBadge` prop rendering a green "Visited" badge |
+| `src/components/timeline/ExploreView.tsx` | Add `yourPlaces` state, fetch global_places on open, render "From Your Places" horizontal row above results |
+| `src/components/timeline/PlaceOverview.tsx` | Add star button with optimistic toggle that upserts into global_places |
 
