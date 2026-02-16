@@ -11,7 +11,8 @@ import { toast } from '@/hooks/use-toast';
 import { utcToLocal, localToUTC } from '@/lib/timezoneUtils';
 import { haversineKm } from '@/lib/distance';
 import { cn } from '@/lib/utils';
-import { Loader2, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, RefreshCw, Phone, ChevronDown, Navigation, Car, AlertTriangle } from 'lucide-react';
+import { Loader2, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, RefreshCw, Phone, ChevronDown, Navigation, Car, AlertTriangle, Star } from 'lucide-react';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import InlineField from './InlineField';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import ImageGallery from './ImageGallery';
@@ -159,6 +160,45 @@ const PlaceOverview = ({
   const [placeSearchQuery, setPlaceSearchQuery] = useState('');
   const [topReview, setTopReview] = useState<{ text: string; rating: number | null; author: string; relativeTime: string } | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [isStarred, setIsStarred] = useState(false);
+  const { adminUser } = useAdminAuth();
+
+  // Check star status on mount
+  useEffect(() => {
+    if (!option.google_place_id || !adminUser) return;
+    supabase
+      .from('global_places')
+      .select('starred')
+      .eq('google_place_id', option.google_place_id)
+      .eq('user_id', adminUser.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) setIsStarred(data.starred);
+        else setIsStarred(false);
+      });
+  }, [option.google_place_id, adminUser]);
+
+  const handleToggleStar = async () => {
+    if (!option.google_place_id || !adminUser) return;
+    const newStarred = !isStarred;
+    setIsStarred(newStarred);
+    await supabase
+      .from('global_places')
+      .upsert({
+        user_id: adminUser.id,
+        google_place_id: option.google_place_id,
+        name: option.name,
+        category: option.category,
+        latitude: option.latitude,
+        longitude: option.longitude,
+        status: 'want_to_go',
+        source: 'favourite',
+        starred: newStarred,
+        rating: option.rating,
+        price_level: option.price_level,
+        address: option.address ?? option.location_name,
+      } as any, { onConflict: 'user_id,google_place_id' });
+  };
 
   // ─── Effects ───
   useEffect(() => {
@@ -478,6 +518,14 @@ const PlaceOverview = ({
                   onClick={() => setDeleting(true)}
                 >
                   <Trash2 className="h-4 w-4 text-destructive" />
+                </button>
+              )}
+              {option.google_place_id && adminUser && (
+                <button
+                  className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted/50 transition-colors"
+                  onClick={handleToggleStar}
+                >
+                  <Star className={cn('h-4 w-4', isStarred ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground')} />
                 </button>
               )}
             </div>

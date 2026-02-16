@@ -9,13 +9,15 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { findCategory, TRAVEL_MODES, type CategoryDef } from '@/lib/categories';
 import { CATEGORY_TO_PLACE_TYPES, getCategorySearchPlaceholder } from '@/lib/placeTypeMapping';
+import { haversineKm } from '@/lib/distance';
 import { cn } from '@/lib/utils';
 import ExploreCard from './ExploreCard';
 import PlaceOverview from './PlaceOverview';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
-import type { Trip, EntryWithOptions, EntryOption } from '@/types/trip';
+import type { Trip, EntryWithOptions, EntryOption, GlobalPlace } from '@/types/trip';
 
 // ─── Types ───
 
@@ -196,11 +198,13 @@ const ExploreView = ({
   const [manualName, setManualName] = useState('');
   const [manualLocationQuery, setManualLocationQuery] = useState('');
   const [manualPlaceDetails, setManualPlaceDetails] = useState<PlaceDetails | null>(null);
+  const [yourPlaces, setYourPlaces] = useState<GlobalPlace[]>([]);
   const originManuallySet = useRef(false);
   const fetchAbortRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const initialLoadDone = useRef(false);
   const isMobile = useIsMobile();
+  const { adminUser } = useAdminAuth();
 
   const cat: CategoryDef | undefined = categoryId ? findCategory(categoryId) : undefined;
   const destination = trip.destination || null;
@@ -271,6 +275,42 @@ const ExploreView = ({
       setManualPlaceDetails(null);
     }
   }, [open]);
+
+  // Fetch user's nearby global places
+  const globalToExploreResult = useCallback((p: GlobalPlace): ExploreResult => ({
+    placeId: p.google_place_id || p.id,
+    name: p.name,
+    address: p.address || '',
+    lat: p.latitude ? Number(p.latitude) : null,
+    lng: p.longitude ? Number(p.longitude) : null,
+    rating: p.rating ? Number(p.rating) : null,
+    userRatingCount: null,
+    priceLevel: p.price_level,
+    openingHours: p.opening_hours as string[] | null,
+    types: [],
+    googleMapsUri: null,
+    website: p.website,
+    phone: p.phone,
+    photoRef: null,
+  }), []);
+
+  useEffect(() => {
+    if (!open || !originLocation || !adminUser) { setYourPlaces([]); return; }
+    (async () => {
+      const { data } = await supabase
+        .from('global_places')
+        .select('*')
+        .eq('user_id', adminUser.id);
+      if (!data) return;
+      const nearby = data.filter(p => {
+        if (!p.latitude || !p.longitude) return false;
+        if (haversineKm(originLocation.lat, originLocation.lng, Number(p.latitude), Number(p.longitude)) > 10) return false;
+        if (categoryId && p.category !== categoryId) return false;
+        return true;
+      });
+      setYourPlaces(nearby as unknown as GlobalPlace[]);
+    })();
+  }, [open, originLocation, categoryId, adminUser]);
 
   // Auto-load nearby search when category is set and origin resolved
   useEffect(() => {
@@ -920,6 +960,31 @@ const ExploreView = ({
           {!loading && results.length === 0 && !searchQuery.trim() && initialLoadDone.current && (
             <div className="text-center py-12">
               <p className="text-sm text-muted-foreground">No places found nearby</p>
+            </div>
+          )}
+
+          {yourPlaces.length > 0 && !loading && (
+            <div className="mb-3">
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 px-1">
+                From your places
+              </p>
+              <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+                {yourPlaces.map(place => {
+                  const asExplore = globalToExploreResult(place);
+                  const inTrip = existingPlaceIds.has(asExplore.placeId) || addedPlaceIds.has(asExplore.placeId);
+                  return (
+                    <div key={place.id} className="shrink-0" style={{ width: 200 }}>
+                      <ExploreCard
+                        place={asExplore}
+                        categoryId={place.category}
+                        onAddToPlanner={() => handleAdd(asExplore)}
+                        onTap={() => handleCardTap(asExplore)}
+                        isInTrip={inTrip}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
