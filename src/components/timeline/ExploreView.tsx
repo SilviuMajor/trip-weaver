@@ -235,9 +235,9 @@ const ExploreView = ({
     }
     if (destination) {
       supabase.functions.invoke('google-places', {
-        body: { action: 'autocomplete', input: destination },
+        body: { action: 'textSearch', query: destination, maxResults: 1 },
       }).then(({ data }) => {
-        const first = data?.predictions?.[0];
+        const first = data?.results?.[0];
         if (first?.lat && first?.lng) {
           setOriginLocation({ name: destination, lat: first.lat, lng: first.lng });
         }
