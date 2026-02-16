@@ -27,7 +27,7 @@ import PhotoStripPicker from './PhotoStripPicker';
 import ImageGallery from './ImageGallery';
 import ImageUploader from './ImageUploader';
 import MapPreview from './MapPreview';
-import VoteButton from './VoteButton';
+
 import RouteMapPreview from './RouteMapPreview';
 import { cn } from '@/lib/utils';
 
@@ -184,7 +184,7 @@ const PlaceDetailsSection = ({ option, entryStartTime }: { option: EntryOption; 
           <CollapsibleTrigger className="flex items-center gap-1.5 text-sm text-foreground hover:text-primary transition-colors w-full text-left">
             <span className="shrink-0">🕐</span>
             <span className="flex-1 truncate text-muted-foreground text-xs font-semibold">
-              {dayName}: {entryDayHoursText || 'Hours unavailable'}
+              {entryDayHoursText || 'Opening hours'}
             </span>
             <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', hoursOpen && 'rotate-180')} />
           </CollapsibleTrigger>
@@ -1219,7 +1219,7 @@ const EntrySheet = ({
       <>
         {/* Hero image gallery at top — fixed 200px height */}
           {images.length > 0 ? (
-            <div className="relative w-full overflow-hidden" style={{ height: 200 }}>
+            <div className="relative w-full overflow-hidden" style={{ height: 240 }}>
               {(() => {
                 const sorted = [...images].sort((a, b) => a.sort_order - b.sort_order);
                 const idx = heroIndex < sorted.length ? heroIndex : 0;
@@ -1256,7 +1256,7 @@ const EntrySheet = ({
               )}
             </div>
           ) : isEditor && option.category !== 'transfer' ? (
-            <div className="w-full bg-muted/30 flex items-center justify-center" style={{ height: 120 }}>
+            <div className="w-full bg-muted/30 flex items-center justify-center" style={{ height: 160 }}>
               <ImageUploader optionId={option.id} currentCount={0} onUploaded={onSaved} />
             </div>
           ) : null}
@@ -1694,46 +1694,19 @@ const EntrySheet = ({
               <PlaceDetailsSection option={option} entryStartTime={entry.start_time} />
             )}
 
-            {/* Phone + Website side-by-side grid */}
+            {/* Phone + Website — plain inline text */}
             {option.category !== 'transfer' && option.category !== 'flight' && (
-              <div className="grid grid-cols-2 gap-2.5">
-                {/* Phone */}
-                <div className="rounded-xl border border-border bg-muted/30 p-3 flex items-center gap-2">
-                  <span className="text-sm">📞</span>
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Phone</p>
-                    {(option as any).phone ? (
-                      <a href={`tel:${(option as any).phone}`} className="text-xs text-primary hover:underline" onClick={e => e.stopPropagation()}>
-                        {(option as any).phone}
-                      </a>
-                    ) : (
-                      <span className="text-xs text-muted-foreground italic">—</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Website */}
-                <div className="rounded-xl border border-border bg-muted/30 p-3 flex items-center gap-2">
-                  <span className="text-sm">🔗</span>
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Website</p>
-                    {option.website ? (
-                      <a href={option.website} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline truncate block max-w-[120px]" onClick={e => e.stopPropagation()}>
-                        {(() => { try { return new URL(option.website).hostname; } catch { return option.website; } })()}
-                      </a>
-                    ) : isEditor ? (
-                      <InlineField
-                        value=""
-                        canEdit={isEditor}
-                        onSave={async (v) => handleInlineSaveOption('website', v)}
-                        renderDisplay={() => <span className="text-xs text-muted-foreground italic">Add</span>}
-                        placeholder="https://..."
-                      />
-                    ) : (
-                      <span className="text-xs text-muted-foreground italic">—</span>
-                    )}
-                  </div>
-                </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                {(option as any).phone && (
+                  <a href={`tel:${(option as any).phone}`} className="text-sm text-primary hover:underline" onClick={e => e.stopPropagation()}>
+                    📞 {(option as any).phone}
+                  </a>
+                )}
+                {option.website && (
+                  <a href={option.website} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline truncate max-w-[200px]" onClick={e => e.stopPropagation()}>
+                    🔗 {(() => { try { return new URL(option.website).hostname; } catch { return option.website; } })()}
+                  </a>
+                )}
               </div>
             )}
 
@@ -1764,19 +1737,6 @@ const EntrySheet = ({
               </CollapsibleContent>
             </Collapsible>
 
-            {/* Vote (hidden for transport & flights) */}
-            {currentUser && option.category !== 'transfer' && option.category !== 'flight' && (
-              <div className="flex items-center gap-3">
-                <VoteButton
-                  optionId={option.id}
-                  userId={currentUser.id}
-                  voteCount={option.vote_count ?? 0}
-                  hasVoted={hasVoted}
-                  locked={votingLocked ?? false}
-                  onVoteChange={onVoteChange ?? (() => {})}
-                />
-              </div>
-            )}
 
             {/* Budget — collapsible */}
             <Collapsible>
