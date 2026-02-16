@@ -166,6 +166,145 @@ serve(async (req) => {
       });
     }
 
+    if (action === 'nearbySearch') {
+      const { latitude, longitude, types, maxResults = 20 } = body;
+
+      const requestBody: any = {
+        includedTypes: types,
+        maxResultCount: Math.min(maxResults, 20),
+        locationRestriction: {
+          circle: {
+            center: { latitude, longitude },
+            radius: 5000.0,
+          },
+        },
+        rankPreference: 'DISTANCE',
+      };
+
+      const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.photos,places.regularOpeningHours,places.types,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber',
+        },
+        body: JSON.stringify(requestBody),
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        console.error('nearbySearch error:', JSON.stringify(data.error));
+        return new Response(JSON.stringify({ results: [] }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const results = (data.places ?? []).map((place: any) => ({
+        placeId: place.id,
+        name: place.displayName?.text ?? '',
+        address: place.formattedAddress ?? '',
+        lat: place.location?.latitude ?? null,
+        lng: place.location?.longitude ?? null,
+        rating: place.rating ?? null,
+        userRatingCount: place.userRatingCount ?? null,
+        priceLevel: place.priceLevel ?? null,
+        openingHours: place.regularOpeningHours?.weekdayDescriptions ?? null,
+        types: place.types ?? [],
+        googleMapsUri: place.googleMapsUri ?? null,
+        website: place.websiteUri ?? null,
+        phone: place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? null,
+        photoRef: place.photos?.[0]?.name ?? null,
+      }));
+
+      return new Response(JSON.stringify({ results }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (action === 'textSearch') {
+      const { query, latitude, longitude, types } = body;
+
+      const requestBody: any = {
+        textQuery: query,
+        maxResultCount: 20,
+      };
+
+      if (latitude && longitude) {
+        requestBody.locationBias = {
+          circle: {
+            center: { latitude, longitude },
+            radius: 10000.0,
+          },
+        };
+      }
+
+      if (types && types.length > 0) {
+        requestBody.includedType = types[0];
+      }
+
+      const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.photos,places.regularOpeningHours,places.types,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber',
+        },
+        body: JSON.stringify(requestBody),
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        console.error('textSearch error:', JSON.stringify(data.error));
+        return new Response(JSON.stringify({ results: [] }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const results = (data.places ?? []).map((place: any) => ({
+        placeId: place.id,
+        name: place.displayName?.text ?? '',
+        address: place.formattedAddress ?? '',
+        lat: place.location?.latitude ?? null,
+        lng: place.location?.longitude ?? null,
+        rating: place.rating ?? null,
+        userRatingCount: place.userRatingCount ?? null,
+        priceLevel: place.priceLevel ?? null,
+        openingHours: place.regularOpeningHours?.weekdayDescriptions ?? null,
+        types: place.types ?? [],
+        googleMapsUri: place.googleMapsUri ?? null,
+        website: place.websiteUri ?? null,
+        phone: place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? null,
+        photoRef: place.photos?.[0]?.name ?? null,
+      }));
+
+      return new Response(JSON.stringify({ results }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (action === 'photo') {
+      const { photoRef, maxWidth = 400 } = body;
+      if (!photoRef) {
+        return new Response(JSON.stringify({ error: 'photoRef required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const photoUrl = `https://places.googleapis.com/v1/${photoRef}/media?maxWidthPx=${maxWidth}&key=${apiKey}`;
+      const photoRes = await fetch(photoUrl);
+      if (!photoRes.ok) {
+        return new Response(JSON.stringify({ error: 'Photo not found' }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify({ url: photoRes.url }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     return new Response(JSON.stringify({ error: 'Invalid action' }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
