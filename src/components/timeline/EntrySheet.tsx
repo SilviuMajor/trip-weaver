@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Drawer, DrawerContent } from '@/components/ui/drawer';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -1211,36 +1212,29 @@ const EntrySheet = ({
     const flightMins = flightDurationMin % 60;
 
     return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md [&>button:last-child]:h-11 [&>button:last-child]:w-11 [&>button:last-child]:top-3 [&>button:last-child]:right-3 [&>button:last-child]:[&_svg]:h-6 [&>button:last-child]:[&_svg]:w-6">
-          {/* Lock toggle in top-right, beside close button */}
-          {/* Lock toggle in top-right */}
-          {isEditor && option?.category !== 'flight' && option?.category !== 'transfer' && (
-            <button
-              className={cn(
-                "absolute top-3 right-[6.5rem] z-50 flex items-center justify-center h-11 w-11 rounded-sm transition-colors",
-                isLocked ? "bg-primary hover:bg-primary/90" : "hover:bg-muted/50"
-              )}
-              onClick={handleToggleLock}
-              disabled={toggling}
-            >
-              {isLocked
-                ? <Lock className="h-5 w-5 text-primary-foreground" />
-                : <LockOpen className="h-5 w-5 text-muted-foreground" />
-              }
-            </button>
-          )}
-          {/* Delete button in header, next to close */}
-          {isEditor && (
-            <button
-              className="absolute top-3 right-14 z-50 flex items-center justify-center h-11 w-11 rounded-sm hover:bg-destructive/10 transition-colors"
-              onClick={() => setDeleting(true)}
-            >
-              <Trash2 className="h-5 w-5 text-destructive" />
-            </button>
-          )}
-          <div className="space-y-4">
-            <DialogHeader className="text-left">
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        <DrawerContent className="max-h-[90vh] overflow-y-auto">
+          {/* Hero image gallery at top */}
+          <div className="w-full">
+            {images.length > 0 ? (
+              <div className="relative">
+                <ImageGallery images={images} />
+                {isEditor && option.category !== 'transfer' && (
+                  <div className="absolute bottom-3 right-3 z-30">
+                    <ImageUploader optionId={option.id} currentCount={images.length} onUploaded={onSaved} />
+                  </div>
+                )}
+              </div>
+            ) : isEditor && option.category !== 'transfer' ? (
+              <div className="w-full aspect-[16/9] bg-muted/30 flex items-center justify-center">
+                <ImageUploader optionId={option.id} currentCount={0} onUploaded={onSaved} />
+              </div>
+            ) : null}
+          </div>
+
+          <div className="px-4 pb-4 pt-2 space-y-4">
+            {/* Category badge + title */}
+            <div className="space-y-1">
               {option.category && (
                 <Badge
                   className="w-fit gap-1 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
@@ -1250,15 +1244,42 @@ const EntrySheet = ({
                   {option.category}
                 </Badge>
               )}
-              <DialogTitle className="text-xl">
+              <h2 className="text-xl font-bold">
                 <InlineField
                   value={option.name}
                   canEdit={isEditor}
                   onSave={async (v) => handleInlineSaveOption('name', v)}
                   placeholder="Entry name"
                 />
-              </DialogTitle>
-            </DialogHeader>
+              </h2>
+
+              {/* Lock + Delete action row */}
+              <div className="flex items-center gap-2 pt-1">
+                {isEditor && option?.category !== 'flight' && option?.category !== 'transfer' && (
+                  <button
+                    className={cn(
+                      'flex items-center justify-center h-8 w-8 rounded-md transition-colors',
+                      isLocked ? 'bg-primary hover:bg-primary/90' : 'hover:bg-muted/50'
+                    )}
+                    onClick={handleToggleLock}
+                    disabled={toggling}
+                  >
+                    {isLocked
+                      ? <Lock className="h-4 w-4 text-primary-foreground" />
+                      : <LockOpen className="h-4 w-4 text-muted-foreground" />
+                    }
+                  </button>
+                )}
+                {isEditor && (
+                  <button
+                    className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-destructive/10 transition-colors"
+                    onClick={() => setDeleting(true)}
+                  >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </button>
+                )}
+              </div>
+            </div>
 
             {/* Flight layout */}
             {isFlightView ? (
@@ -1704,16 +1725,17 @@ const EntrySheet = ({
               </div>
             )}
 
-            {/* Images */}
-            {images.length > 0 && (
-              <div className="pt-2">
-                <ImageGallery images={images} />
-              </div>
-            )}
-
-            {isEditor && option.category !== 'transfer' && (
-              <ImageUploader optionId={option.id} currentCount={images.length} onUploaded={onSaved} />
-            )}
+            {/* Budget — collapsible */}
+            <Collapsible>
+              <CollapsibleTrigger className="flex items-center gap-1.5 text-sm font-semibold text-foreground w-full text-left py-1">
+                <span>💰</span>
+                <span className="flex-1">Budget</span>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform [&[data-state=open]]:rotate-180" />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <p className="text-sm text-muted-foreground italic pt-1">No budget info yet</p>
+              </CollapsibleContent>
+            </Collapsible>
 
             {/* Editor actions */}
             {isEditor && onMoveToIdeas && option?.category !== 'transfer' && option?.category !== 'flight' && (
@@ -1821,8 +1843,8 @@ const EntrySheet = ({
               </AlertDialog>
             )}
           </div>
-        </DialogContent>
-      </Dialog>
+        </DrawerContent>
+      </Drawer>
     );
   }
 
