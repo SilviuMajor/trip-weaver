@@ -1,40 +1,113 @@
 
 
-# Add nearbySearch, textSearch, and photo Actions to google-places Edge Function
+# ExploreView Component + Planner Integration
 
 ## Overview
-Add three new action handlers to `supabase/functions/google-places/index.ts` without modifying the existing `autocomplete` or `details` actions.
+Create a new ExploreView component that provides search and nearby discovery of places using the Google Places API, and wire it into PlannerContent so tapping the search button or a category "+" button opens Explore instead of the current toast/EntrySheet.
 
-## Changes: `supabase/functions/google-places/index.ts`
+## New Files
 
-Insert three new `if (action === '...')` blocks after the existing `details` handler and before the final "Invalid action" response.
+### 1. `src/lib/placeTypeMapping.ts`
+Category-to-Google-Places-type mapping and search placeholder generator.
+- `CATEGORY_TO_PLACE_TYPES` record mapping category IDs (breakfast, lunch, dinner, etc.) to arrays of Google Places types
+- `getCategorySearchPlaceholder(categoryId, destination)` returns context-aware placeholder text
 
-### 1. `nearbySearch` action
-- Calls `https://places.googleapis.com/v1/places:searchNearby`
-- Accepts `latitude`, `longitude`, `types[]`, optional `maxResults` (default 20, capped at 20)
-- Uses `rankPreference: 'DISTANCE'` and a 5km radius circle
-- Returns array of results mapped to a standard format with `photoRef` (no storage upload)
+### 2. `src/components/timeline/ExploreView.tsx`
+Full-screen overlay component for searching and browsing places.
 
-### 2. `textSearch` action
-- Calls `https://places.googleapis.com/v1/places:searchText`
-- Accepts `query`, optional `latitude`/`longitude` for location bias (10km radius), optional `types` (only first element used since Text Search supports one type)
-- Returns results in the same format as nearbySearch
+**Props**: `open`, `onClose`, `trip`, `entries`, `categoryId?`, `isEditor`, `onAddToPlanner`, `onCardTap`
 
-### 3. `photo` action
-- Accepts `photoRef` and optional `maxWidth` (default 400)
-- Fetches the photo media URL from Google and returns the resolved redirect URL as `{ url: string }`
-- No storage upload -- lightweight on-demand fetch
+**ExploreResult type**: Matches the shape returned by the nearbySearch/textSearch edge function actions, plus an optional `photoUrl` field for lazy-loaded images.
 
-### Shared result mapping
-Both nearbySearch and textSearch map results identically:
+**Layout**:
+- **Header bar**: Back arrow, category emoji+name (or "Explore"), list/map toggle (map disabled with toast)
+- **Search bar**: Auto-focused input with 500ms debounce. On submit calls `textSearch` action. When empty + categoryId provided, auto-loads `nearbySearch` on mount
+- **Origin context line**: "Suggested near [location]" -- finds nearest entry with coordinates to current time, falls back to trip destination via autocomplete lookup
+- **Results list**: Vertical scroll of simple placeholder cards (name, address, rating stars, price level, "Add" button)
+- **Loading state**: Spinner
+- **Empty state**: "No results for [query]"
+- **"Add manually" link**: At bottom, closes Explore and opens EntrySheet in create mode
+
+**State management**:
+- `results: ExploreResult[]`, `loading: boolean`, `searchQuery: string`
+- `originLocation: { name: string; lat: number; lng: number } | null`
+- Debounced search via `useEffect` with 500ms timeout
+- Origin resolution on mount: scan entries for nearest coordinates, fallback to trip destination
+
+**API calls** (via `supabase.functions.invoke('google-places', { body })`):
+- `nearbySearch` on mount when categoryId is set and search is empty
+- `textSearch` when user types a query
+- Both pass origin lat/lng for location bias
+
+### 3. Modified: `src/components/timeline/PlannerContent.tsx`
+
+**New props** added to interface:
+- `onExploreOpen?: (categoryId: string | null) => void` -- called when search button or "+" is tapped
+
+**Changes**:
+- Search button onClick: calls `onExploreOpen?.(null)` instead of showing toast
+- "+" button on each category row: calls `onExploreOpen?.(cat.id)` instead of `onAddEntry?.(cat.id)`, EXCEPT for 'hotel' and 'flight' which still call `onAddEntry?.(cat.id)` as before
+- No internal Explore state in PlannerContent -- it delegates upward
+
+### 4. Modified: `src/pages/Planner.tsx`
+
+**New state**: `exploreOpen`, `exploreCategoryId`
+
+**onAddEntry handler updated**:
+- 'hotel' still opens HotelWizard
+- 'flight' still opens EntrySheet with flight prefill
+- All other categories: `setExploreCategoryId(catId); setExploreOpen(true)`
+
+**New prop passed to PlannerContent**:
+- `onExploreOpen` callback that sets explore state
+
+**ExploreView rendered** when `exploreOpen` is true, with:
+- `onAddToPlanner` handler: creates entry (is_scheduled: false) + entry_option with place data using the same pattern as `handleSaveAsIdea` in EntrySheet, then calls `fetchData()` and shows toast
+- `onClose`: resets explore state
+- Category inference for general search: if no categoryId, infer from place types + time of day (restaurant types at lunch hours -> 'lunch', etc.)
+
+**Quick-add implementation** (in Planner.tsx):
 ```
-{ placeId, name, address, lat, lng, rating, userRatingCount, priceLevel, openingHours, types, googleMapsUri, website, phone, photoRef }
+1. Insert into 'entries': trip_id, start_time/end_time (placeholder), is_scheduled: false
+2. Insert into 'entry_options': entry_id, name, category, category_color, 
+   location_name (address), latitude, longitude, rating, user_rating_count, 
+   phone, address, google_maps_uri, google_place_id, price_level, opening_hours
+3. Toast "Added [name] to Planner"
+4. Call fetchData() to refresh
 ```
 
-## File modified
-- `supabase/functions/google-places/index.ts` -- insert the three action blocks after the `details` block (around line 148), before the "Invalid action" fallback
+## Technical Details
 
-## What stays the same
-- `autocomplete` and `details` handlers untouched
-- CORS headers, error handling structure, Supabase storage upload logic in `details` all unchanged
-- `config.toml` unchanged (function already configured)
+### Origin location resolution
+```
+1. Get current hour, find entries on today's trip day with lat/lng
+2. Sort by proximity to current time
+3. Use closest entry's option location_name + coordinates
+4. If none found, use trip.destination -- call autocomplete action to get coords
+5. Cache origin in state to avoid re-fetching
+```
+
+### Category inference for general search
+When adding from general search (no categoryId), map Google types to app categories:
+- Types include 'restaurant'/'cafe' -> use time-based: before 11am = breakfast, 11-15 = lunch, after 17 = dinner
+- Types include 'bar'/'night_club' -> drinks/nightlife based on hour
+- Types include 'museum'/'art_gallery' -> museum
+- Default: 'activity'
+
+### Debounce pattern
+```typescript
+useEffect(() => {
+  if (!searchQuery.trim()) return;
+  const timer = setTimeout(() => { performTextSearch(searchQuery); }, 500);
+  return () => clearTimeout(timer);
+}, [searchQuery]);
+```
+
+### Files summary
+| File | Action |
+|------|--------|
+| `src/lib/placeTypeMapping.ts` | Create |
+| `src/components/timeline/ExploreView.tsx` | Create |
+| `src/components/timeline/PlannerContent.tsx` | Modify (add onExploreOpen prop, update search + "+" button handlers) |
+| `src/pages/Planner.tsx` | Modify (add Explore state, quick-add logic, render ExploreView) |
+
