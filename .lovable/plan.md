@@ -1,164 +1,149 @@
 
-
-# "From Your Places" in Explore + Star/Favourite
+# Global Planner Fixes: Auto-sync, All Entries, Geocoding, and UI Cleanup
 
 ## Overview
-Two features: (1) show matching global places above Google results in trip Explore, and (2) add a star/favourite toggle to PlaceOverview that upserts into global_places.
+Six fixes to make the Global Planner immediately useful: auto-sync on load, sync all entries (not just Google-linked), remove star feature, remove Explore button, improve geocoding with address fallback, and show instant results while sync runs.
 
-## Feature 1: "From Your Places" Section in ExploreView
+## Fix 1: Auto-sync on Page Load
 
-**File: `src/components/timeline/ExploreView.tsx`**
+**File: `src/pages/GlobalPlanner.tsx`**
 
-### New state and imports
-- Import `haversineKm` from `@/lib/distance`
-- Import `useAdminAuth` from `@/hooks/useAdminAuth`
-- Import `GlobalPlace` type from `@/types/trip`
-- Add state: `const [yourPlaces, setYourPlaces] = useState<GlobalPlace[]>([])`
-
-### Fetch user's nearby global places
-Add a `useEffect` that runs when `open`, `originLocation`, and `categoryId` change. It queries `global_places` for the admin user, then client-side filters to places within 10km of `originLocation` using `haversineKm`, optionally filtering by category. Store results in `yourPlaces`.
+Change the mount `useEffect` (lines 117-125) to always trigger sync on load, not just when the table is empty. Run sync in background while showing a loading/syncing state.
 
 ```typescript
 useEffect(() => {
-  if (!open || !originLocation || !adminUser) { setYourPlaces([]); return; }
-  (async () => {
-    const { data } = await supabase
-      .from('global_places')
-      .select('*')
-      .eq('user_id', adminUser.id);
-    if (!data) return;
-    const nearby = data.filter(p => {
-      if (!p.latitude || !p.longitude) return false;
-      if (haversineKm(originLocation.lat, originLocation.lng, Number(p.latitude), Number(p.longitude)) > 10) return false;
-      if (categoryId && p.category !== categoryId) return false;
-      return true;
-    });
-    setYourPlaces(nearby);
-  })();
-}, [open, originLocation, categoryId, adminUser]);
+  if (!adminUser) return;
+  // Fetch existing places immediately for instant display
+  fetchPlaces();
+  // Always sync in background
+  syncPlaces();
+}, [adminUser]);
 ```
 
-### Render "FROM YOUR PLACES" section
-Inside the ScrollArea, before the Google results grid (line ~926), render a horizontal scroll row when `yourPlaces.length > 0`. Each place is converted to an `ExploreResult` to reuse `ExploreCard`:
+## Fix 2: Sync ALL Entries (Not Just Google-linked)
 
-```typescript
-const globalToExploreResult = (p: GlobalPlace): ExploreResult => ({
-  placeId: p.google_place_id || p.id,
-  name: p.name,
-  address: p.address || '',
-  lat: p.latitude ? Number(p.latitude) : null,
-  lng: p.longitude ? Number(p.longitude) : null,
-  rating: p.rating ? Number(p.rating) : null,
-  userRatingCount: null,
-  priceLevel: p.price_level,
-  openingHours: p.opening_hours as string[] | null,
-  types: [],
-  googleMapsUri: null,
-  website: p.website,
-  phone: p.phone,
-  photoRef: null,
-});
+**File: `supabase/functions/sync-global-places/index.ts`**
+
+- Remove the `.not('google_place_id', 'is', null)` filter (line 89)
+- Instead filter to entries that have a `name` AND either (latitude + longitude) or an address
+- Expand the skip list to include `flight`, `hotel` in addition to `transfer`, `transport`, `airport_processing`
+- For entries without `google_place_id`, use a name+coordinates dedup approach: before inserting, check if a `global_place` already exists for the same user with matching name and coordinates within ~100m
+- For entries WITH `google_place_id`, continue using the existing upsert on `user_id,google_place_id`
+
+Updated flow:
+```
+1. Fetch ALL entry_options (remove google_place_id filter)
+2. For each option:
+   - Skip if category in [flight, hotel, transfer, transport, airport_processing]
+   - Skip if no name
+   - Skip if no coordinates AND no address
+   - If has google_place_id -> upsert on (user_id, google_place_id) conflict
+   - If no google_place_id -> check for existing match by name + nearby coords, insert only if no match
 ```
 
-Render as:
-```tsx
-{yourPlaces.length > 0 && !loading && (
-  <div className="mb-3">
-    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 px-1">
-      From your places
-    </p>
-    <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
-      {yourPlaces.map(place => {
-        const asExplore = globalToExploreResult(place);
-        const inTrip = existingPlaceIds.has(asExplore.placeId) || addedPlaceIds.has(asExplore.placeId);
-        return (
-          <div key={place.id} className="shrink-0" style={{ width: 200 }}>
-            <ExploreCard
-              place={asExplore}
-              categoryId={place.category}
-              onAddToPlanner={() => handleAdd(asExplore)}
-              onTap={() => handleCardTap(asExplore)}
-              isInTrip={inTrip}
-            />
-          </div>
-        );
-      })}
-    </div>
-  </div>
-)}
-```
-
-## Feature 2: Star/Favourite in PlaceOverview
+## Fix 3: Remove Star/Favourite Feature
 
 **File: `src/components/timeline/PlaceOverview.tsx`**
 
-### New imports and state
-- Import `Star` from `lucide-react`
-- Import `useAdminAuth` from `@/hooks/useAdminAuth`
-- Add state: `isStarred` (boolean), initialized by querying `global_places` on mount when `option.google_place_id` exists
+- Remove `isStarred` state (line 163)
+- Remove the star status check `useEffect` (lines 166-179)
+- Remove `handleToggleStar` function (lines 181-201)
+- Remove the star button JSX (lines 523-530)
+- Remove `Star` from the lucide-react import if no longer used elsewhere in the file (check first -- it may be used in PlaceDetailsSection)
 
-### Star status check on mount
+## Fix 4: Remove Explore Button from Dashboard
+
+**File: `src/pages/Dashboard.tsx`**
+
+- Remove the Explore button (lines 176-187)
+- Change grid from `grid-cols-2` to just a single full-width button for "My Places"
+- Remove `Search` from the lucide-react import
+
+## Fix 5: Populate City/Country with Address Fallback
+
+**File: `supabase/functions/sync-global-places/index.ts`**
+
+Add an `extractCityCountry` fallback function that parses the address string:
 ```typescript
-const { adminUser } = useAdminAuth();
-const [isStarred, setIsStarred] = useState(false);
-
-useEffect(() => {
-  if (!option.google_place_id || !adminUser) return;
-  supabase
-    .from('global_places')
-    .select('starred')
-    .eq('google_place_id', option.google_place_id)
-    .eq('user_id', adminUser.id)
-    .maybeSingle()
-    .then(({ data }) => {
-      if (data) setIsStarred(data.starred);
-    });
-}, [option.google_place_id, adminUser]);
-```
-
-### Toggle handler
-```typescript
-const handleToggleStar = async () => {
-  if (!option.google_place_id || !adminUser) return;
-  const newStarred = !isStarred;
-  setIsStarred(newStarred); // Optimistic
-  
-  await supabase
-    .from('global_places')
-    .upsert({
-      user_id: adminUser.id,
-      google_place_id: option.google_place_id,
-      name: option.name,
-      category: option.category,
-      latitude: option.latitude,
-      longitude: option.longitude,
-      status: 'want_to_go',
-      source: 'favourite',
-      starred: newStarred,
-      rating: option.rating,
-      price_level: option.price_level,
-      address: option.address ?? option.location_name,
-    } as any, { onConflict: 'user_id,google_place_id' });
+const extractCityCountry = (address: string | null): { city: string | null; country: string | null } => {
+  if (!address) return { city: null, country: null };
+  const parts = address.split(',').map(s => s.trim());
+  if (parts.length >= 3) {
+    const cityPart = parts[parts.length - 2];
+    const city = cityPart.replace(/^\d{4,6}\s*[A-Z]{0,2}\s*/, '').trim();
+    const country = parts[parts.length - 1].trim();
+    return { city: city || null, country: country || null };
+  }
+  if (parts.length === 2) {
+    return { city: parts[0], country: parts[1] };
+  }
+  return { city: null, country: null };
 };
 ```
 
-### Render star button
-Add to the action row (line ~459, alongside lock and delete buttons):
-```tsx
-{option.google_place_id && adminUser && (
-  <button
-    className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted/50 transition-colors"
-    onClick={handleToggleStar}
-  >
-    <Star className={cn('h-4 w-4', isStarred ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground')} />
-  </button>
-)}
+In the geocoding step:
+- First try Google reverse geocode (existing logic)
+- If Google geocoding returns no result or API key is missing, fall back to `extractCityCountry(address)`
+- Apply this to all places missing city/country
+
+**File: `src/pages/GlobalPlanner.tsx`**
+
+Add the same `extractCityCountry` as a client-side fallback. In the `grouped` memo, for places with null city/country but an address, derive city/country from the address before grouping.
+
+## Fix 6: Show Places Immediately via Direct Query
+
+**File: `src/pages/GlobalPlanner.tsx`**
+
+While sync runs in the background, also do a direct query of `entries` + `entry_options` joined through the user's trips to show results instantly.
+
+On mount:
+1. Fetch existing `global_places` (instant display)
+2. In parallel, query entries directly from user's trips as a fallback
+3. Start background sync
+4. When sync completes, refetch `global_places` (now fully populated)
+
+```typescript
+const fetchDirectPlaces = async (): Promise<GlobalPlace[]> => {
+  if (!adminUser) return [];
+  // Get user's trip IDs
+  const { data: trips } = await supabase
+    .from('trips')
+    .select('id, end_date')
+    .eq('owner_id', adminUser.id);
+  if (!trips?.length) return [];
+
+  const tripIds = trips.map(t => t.id);
+  const { data: entries } = await supabase
+    .from('entries')
+    .select('id, trip_id, is_scheduled')
+    .in('trip_id', tripIds);
+  if (!entries?.length) return [];
+
+  const { data: options } = await supabase
+    .from('entry_options')
+    .select('*')
+    .in('entry_id', entries.map(e => e.id));
+
+  // Convert to GlobalPlace format, skip flights/hotels/transfers
+  // Apply extractCityCountry for grouping
+  // Deduplicate by google_place_id or name+coords
+};
 ```
+
+Merge direct results with `global_places` results, preferring `global_places` entries (which have proper city/country from geocoding).
 
 ## Files Summary
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/ExploreView.tsx` | Add `yourPlaces` state, fetch global_places on open, render "From Your Places" horizontal row above results |
-| `src/components/timeline/PlaceOverview.tsx` | Add star button with optimistic toggle that upserts into global_places |
+| `supabase/functions/sync-global-places/index.ts` | Remove google_place_id filter, add flight/hotel to skip list, add name+coords dedup for non-Google entries, add `extractCityCountry` fallback for geocoding |
+| `src/pages/GlobalPlanner.tsx` | Auto-sync on mount, direct query fallback, client-side `extractCityCountry` for grouping |
+| `src/components/timeline/PlaceOverview.tsx` | Remove star button, star state, star useEffect, and handleToggleStar |
+| `src/pages/Dashboard.tsx` | Remove Explore button, make My Places full-width |
 
+## Technical Notes
+
+- The edge function skip list becomes: `['flight', 'hotel', 'transfer', 'transport', 'airport_processing']`
+- For non-Google entries dedup: compare names case-insensitively and coordinates within ~0.001 degrees (~100m)
+- The `extractCityCountry` regex handles European-style addresses like "Street, 1016 DR Amsterdam, Netherlands"
+- Direct query results are converted to `GlobalPlace` shape with `source: 'trip_auto'` and synthesized IDs
