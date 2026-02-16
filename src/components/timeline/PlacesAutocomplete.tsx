@@ -18,6 +18,7 @@ export interface PlaceDetails {
   priceLevel: string | null;
   placeTypes: string[] | null;
   photos: string[];
+  reviews?: { text: string; rating: number | null; author: string; relativeTime: string }[];
 }
 
 interface Prediction {
@@ -99,6 +100,7 @@ const PlacesAutocomplete = ({ value, onChange, onPlaceSelect, placeholder, tripL
           priceLevel: data.priceLevel ?? null,
           placeTypes: data.placeTypes ?? null,
           photos: data.photos ?? [],
+          reviews: data.reviews ?? [],
         });
       }
     } catch (err) {

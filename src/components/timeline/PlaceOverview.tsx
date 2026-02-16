@@ -143,6 +143,8 @@ const PlaceOverview = ({
   const [heroIndex, setHeroIndex] = useState(0);
   const [showPlaceSearch, setShowPlaceSearch] = useState(false);
   const [placeSearchQuery, setPlaceSearchQuery] = useState('');
+  const [topReview, setTopReview] = useState<{ text: string; rating: number | null; author: string; relativeTime: string } | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
 
   // ─── Effects ───
   useEffect(() => {
@@ -163,6 +165,20 @@ const PlaceOverview = ({
       })();
     }
   }, [deleting, option?.hotel_id]);
+
+  // Fetch review on-demand
+  useEffect(() => {
+    if (!option.google_place_id || option.category === 'flight' || option.category === 'transfer') return;
+    setReviewLoading(true);
+    supabase.functions.invoke('google-places', {
+      body: { action: 'details', placeId: option.google_place_id }
+    }).then(({ data }) => {
+      if (data?.reviews?.length > 0) {
+        const best = [...data.reviews].sort((a: any, b: any) => (b.rating ?? 0) - (a.rating ?? 0))[0];
+        setTopReview(best);
+      }
+    }).catch(() => {}).finally(() => setReviewLoading(false));
+  }, [option.google_place_id, option.category]);
 
   useEffect(() => {
     if (option?.category === 'transfer' && !viewModesPreloaded) {
@@ -839,6 +855,38 @@ const PlaceOverview = ({
           {/* Enriched Place Details (non-flight, non-transport) */}
           {option.category !== 'flight' && option.category !== 'transfer' && (
             <PlaceDetailsSection option={option} entryStartTime={entry.start_time} />
+          )}
+
+          {/* Top Review */}
+          {option.category !== 'flight' && option.category !== 'transfer' && topReview && (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm">💬</span>
+                <span className="text-xs font-semibold text-muted-foreground">Top Review</span>
+              </div>
+              <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <span className="text-xs font-medium">{topReview.author}</span>
+                  {topReview.rating && (
+                    <span className="text-[10px] text-muted-foreground">{'⭐'.repeat(Math.min(topReview.rating, 5))}</span>
+                  )}
+                  {topReview.relativeTime && (
+                    <span className="text-[10px] text-muted-foreground">· {topReview.relativeTime}</span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground line-clamp-3">{topReview.text}</p>
+                {option.google_maps_uri && (
+                  <a
+                    href={option.google_maps_uri}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-primary hover:underline mt-1.5 inline-block"
+                  >
+                    Read more on Google →
+                  </a>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Phone + Website — plain inline text with editable empty states */}

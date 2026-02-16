@@ -89,7 +89,7 @@ serve(async (req) => {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'displayName,formattedAddress,websiteUri,location,photos,nationalPhoneNumber,internationalPhoneNumber,rating,userRatingCount,regularOpeningHours,googleMapsUri,priceLevel,types',
+          'X-Goog-FieldMask': 'displayName,formattedAddress,websiteUri,location,photos,nationalPhoneNumber,internationalPhoneNumber,rating,userRatingCount,regularOpeningHours,googleMapsUri,priceLevel,types,reviews',
         },
       });
       const result = await res.json();
@@ -161,6 +161,12 @@ serve(async (req) => {
         priceLevel: result.priceLevel ?? null,
         placeTypes: result.types ?? null,
         photos: photoUrls,
+        reviews: (result.reviews ?? []).slice(0, 3).map((r: any) => ({
+          text: r.text?.text ?? '',
+          rating: r.rating ?? null,
+          author: r.authorAttribution?.displayName ?? 'Anonymous',
+          relativeTime: r.relativePublishTimeDescription ?? '',
+        })),
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -186,7 +192,7 @@ serve(async (req) => {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.photos,places.regularOpeningHours,places.types,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber',
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.photos,places.regularOpeningHours,places.types,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber,places.reviews',
         },
         body: JSON.stringify(requestBody),
       });
@@ -214,6 +220,12 @@ serve(async (req) => {
         website: place.websiteUri ?? null,
         phone: place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? null,
         photoRef: place.photos?.[0]?.name ?? null,
+        reviews: (place.reviews ?? []).slice(0, 1).map((r: any) => ({
+          text: r.text?.text ?? '',
+          rating: r.rating ?? null,
+          author: r.authorAttribution?.displayName ?? 'Anonymous',
+          relativeTime: r.relativePublishTimeDescription ?? '',
+        })),
       }));
 
       return new Response(JSON.stringify({ results }), {
@@ -247,7 +259,7 @@ serve(async (req) => {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.photos,places.regularOpeningHours,places.types,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber',
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.photos,places.regularOpeningHours,places.types,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber,places.reviews',
         },
         body: JSON.stringify(requestBody),
       });
@@ -275,6 +287,12 @@ serve(async (req) => {
         website: place.websiteUri ?? null,
         phone: place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? null,
         photoRef: place.photos?.[0]?.name ?? null,
+        reviews: (place.reviews ?? []).slice(0, 1).map((r: any) => ({
+          text: r.text?.text ?? '',
+          rating: r.rating ?? null,
+          author: r.authorAttribution?.displayName ?? 'Anonymous',
+          relativeTime: r.relativePublishTimeDescription ?? '',
+        })),
       }));
 
       return new Response(JSON.stringify({ results }), {

@@ -47,6 +47,8 @@ interface ExploreViewProps {
   onAddToPlanner: (place: ExploreResult) => void;
   onCardTap: (place: ExploreResult) => void;
   onAddManually: () => void;
+  createContext?: { startTime?: string; endTime?: string } | null;
+  onAddAtTime?: (place: ExploreResult, startTime: string, endTime: string) => void;
 }
 
 // ─── Helpers ───
@@ -156,6 +158,12 @@ const getCompactHours = (openingHours: string[] | null): { text: string | null; 
 
 // ─── Component ───
 
+const formatCreateTime = (iso?: string) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+};
+
 const ExploreView = ({
   open,
   onClose,
@@ -166,6 +174,8 @@ const ExploreView = ({
   onAddToPlanner,
   onCardTap,
   onAddManually,
+  createContext,
+  onAddAtTime,
 }: ExploreViewProps) => {
   const [results, setResults] = useState<ExploreResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -512,17 +522,42 @@ const ExploreView = ({
     return (
       <div className="overflow-y-auto max-h-[85vh]">
         {isEditor && !placeIsInTrip && (
-          <div className="px-4 pt-3 pb-1">
-            <Button
-              className="w-full gap-2"
-              onClick={() => {
-                handleAdd(selectedPlace);
-                setDetailOpen(false);
-              }}
-            >
-              <ClipboardList className="h-4 w-4" />
-              Add to Planner
-            </Button>
+          <div className="px-4 pt-3 pb-1 space-y-2">
+            {createContext?.startTime ? (
+              <>
+                <Button
+                  className="w-full gap-2"
+                  onClick={() => {
+                    onAddAtTime?.(selectedPlace, createContext.startTime!, createContext.endTime!);
+                    setDetailOpen(false);
+                  }}
+                >
+                  <ClipboardList className="h-4 w-4" />
+                  Add at {formatCreateTime(createContext.startTime)}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full gap-2"
+                  onClick={() => {
+                    handleAdd(selectedPlace);
+                    setDetailOpen(false);
+                  }}
+                >
+                  Add to Planner instead
+                </Button>
+              </>
+            ) : (
+              <Button
+                className="w-full gap-2"
+                onClick={() => {
+                  handleAdd(selectedPlace);
+                  setDetailOpen(false);
+                }}
+              >
+                <ClipboardList className="h-4 w-4" />
+                Add to Planner
+              </Button>
+            )}
           </div>
         )}
         <PlaceOverview

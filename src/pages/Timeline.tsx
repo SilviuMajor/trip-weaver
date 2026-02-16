@@ -307,6 +307,50 @@ const Timeline = () => {
     }
   }, [trip, tripId, exploreCategoryId, homeTimezone, fetchData]);
 
+  // Handle adding an Explore result as a scheduled entry at a specific time
+  const handleAddAtTime = useCallback(async (place: ExploreResult, startTime: string, endTime: string) => {
+    if (!trip || !tripId) return;
+    try {
+      const catId = exploreCategoryId || inferCategoryFromTypes(place.types);
+      const cat = findCategory(catId);
+
+      const { data: d, error } = await supabase
+        .from('entries')
+        .insert({ trip_id: tripId, start_time: startTime, end_time: endTime, is_scheduled: true } as any)
+        .select('id').single();
+      if (error) throw error;
+
+      await supabase.from('entry_options').insert({
+        entry_id: d.id,
+        name: place.name,
+        category: cat?.id ?? catId,
+        category_color: cat?.color ?? null,
+        location_name: place.address || null,
+        latitude: place.lat,
+        longitude: place.lng,
+        rating: place.rating,
+        user_rating_count: place.userRatingCount,
+        phone: place.phone || null,
+        address: place.address || null,
+        google_maps_uri: place.googleMapsUri || null,
+        google_place_id: place.placeId || null,
+        price_level: place.priceLevel || null,
+        opening_hours: place.openingHours || null,
+        website: place.website || null,
+      } as any);
+
+      setExploreOpen(false);
+      setExploreCategoryId(null);
+
+      const timeStr = new Date(startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+      toast({ title: `Added ${place.name} at ${timeStr}` });
+      await fetchData();
+      if (trip) await autoExtendTripIfNeeded(tripId, endTime, trip, fetchData);
+    } catch (err: any) {
+      toast({ title: 'Failed to add', description: err.message, variant: 'destructive' });
+    }
+  }, [trip, tripId, exploreCategoryId, fetchData]);
+
   useEffect(() => {
     if (!loading) {
       const todayEl = document.getElementById('today');
@@ -2511,6 +2555,8 @@ const Timeline = () => {
                 setSheetOption(null);
                 setSheetOpen(true);
               }}
+              createContext={prefillStartTime ? { startTime: prefillStartTime, endTime: prefillEndTime } : null}
+              onAddAtTime={handleAddAtTime}
             />
           )}
 
