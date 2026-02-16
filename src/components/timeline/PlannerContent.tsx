@@ -15,6 +15,7 @@ interface PlannerContentProps {
   isEditor: boolean;
   onCardTap: (entry: EntryWithOptions) => void;
   onAddEntry?: (categoryId: string) => void;
+  onExploreOpen?: (categoryId: string | null) => void;
   onDragStart: (e: React.DragEvent, entry: EntryWithOptions) => void;
   onDuplicate?: (entry: EntryWithOptions) => void;
   onInsert?: (entry: EntryWithOptions) => void;
@@ -36,6 +37,7 @@ const PlannerContent = ({
   isEditor,
   onCardTap,
   onAddEntry,
+  onExploreOpen,
   onDragStart,
   onDuplicate,
   onInsert,
@@ -196,7 +198,14 @@ const PlannerContent = ({
             <span className="text-[10px] text-muted-foreground/60">({dedupedEntries.length})</span>
           </div>
           {onAddEntry && (
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={() => onAddEntry(cat.id)}>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={() => {
+              const bypassCategories = ['hotel', 'flight'];
+              if (bypassCategories.includes(cat.id)) {
+                onAddEntry(cat.id);
+              } else {
+                onExploreOpen?.(cat.id);
+              }
+            }}>
               <Plus className="h-3.5 w-3.5" />
             </Button>
           )}
@@ -268,7 +277,7 @@ const PlannerContent = ({
           variant="ghost"
           size="icon"
           className="h-8 w-8 text-muted-foreground hover:text-foreground"
-          onClick={() => toast({ title: 'Explore coming soon', description: 'Search and discover places nearby.' })}
+          onClick={() => onExploreOpen?.(null)}
         >
           <Search className="h-4 w-4" />
         </Button>
