@@ -1,102 +1,87 @@
 
 
-# Optimistic Quick-Add for Explore Cards
+# Global Places Table, Sync Edge Function, and Global Planner Page
 
 ## Overview
-Make the quick-add flow feel instant by showing the checkmark and toast immediately, then performing the database insert in the background with rollback on failure.
+This is a multi-part feature: create a `global_places` database table, a sync edge function, a `GlobalPlace` TypeScript type, dashboard navigation buttons, routes, and a new Global Planner page showing all saved places.
 
-## Current Behavior
-- `handleAdd` in ExploreView calls `onAddToPlanner(place)` (which does the DB insert and waits) then adds to `addedPlaceIds`
-- The toast only fires after the DB insert completes in `handleAddToPlanner` in Timeline.tsx
-- The card checkmark appears only after the sync `onAddToPlanner` call
+## Part 1: Database Migration
 
-## Changes
+Create the `global_places` table with the exact schema from the prompt: columns for place data, status/source enums via CHECK constraints, RLS policies scoped to `auth.uid() = user_id`, indexes for fast lookups, and a partial unique index on `(user_id, google_place_id)`.
 
-### File: `src/components/timeline/ExploreView.tsx`
+Also add the `updated_at` trigger reusing the existing `update_updated_at_column()` function.
 
-**Update `handleAdd` (line 402-405)** to be optimistic:
+## Part 2: Edge Function `sync-global-places`
 
-```typescript
-const handleAdd = useCallback((place: ExploreResult) => {
-  // Optimistic: mark as added + toast immediately
-  setAddedPlaceIds(prev => new Set(prev).add(place.placeId));
-  toast({ title: `Added ${place.name} to Planner` });
-  
-  // Fire DB insert in background, rollback on failure
-  Promise.resolve(onAddToPlanner(place)).catch(() => {
-    setAddedPlaceIds(prev => {
-      const next = new Set(prev);
-      next.delete(place.placeId);
-      return next;
-    });
-    toast({ title: `Failed to add ${place.name}`, description: 'Please try again', variant: 'destructive' });
-  });
-}, [onAddToPlanner]);
+Create `supabase/functions/sync-global-places/index.ts`.
+
+- Accepts `{ userId, tripId? }` in POST body
+- Uses service role key to query `entries` joined with `trips` (filtering by `owner_id = userId`)
+- Fetches related `entry_options` with non-null `google_place_id`
+- Skips transport/airport categories
+- Determines `status` based on whether the trip's `end_date` is in the past
+- Upserts into `global_places` on the `(user_id, google_place_id)` conflict target
+- Returns `{ synced: N }`
+
+Add to `supabase/config.toml`:
+```toml
+[functions.sync-global-places]
+verify_jwt = false
 ```
 
-### File: `src/pages/Timeline.tsx`
+## Part 3: TypeScript Type
 
-**Update `handleAddToPlanner` (line 270-309)** to remove the success toast (ExploreView now handles it) and re-throw errors so the optimistic rollback catches them:
+Add `GlobalPlace` interface to `src/types/trip.ts` with all columns typed.
 
-```typescript
-const handleAddToPlanner = useCallback(async (place: ExploreResult) => {
-  if (!trip || !tripId) return;
-  // No try/catch toast here -- ExploreView handles optimistic toast + rollback
-  const catId = exploreCategoryId || inferCategoryFromTypes(place.types);
-  const cat = findCategory(catId);
-  const REFERENCE_DATE_STR = '2099-01-01';
-  const startIso = localToUTC(REFERENCE_DATE_STR, '00:00', homeTimezone);
-  const endIso = localToUTC(REFERENCE_DATE_STR, '01:00', homeTimezone);
+## Part 4: Dashboard Navigation
 
-  const { data: d, error } = await supabase
-    .from('entries')
-    .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false } as any)
-    .select('id').single();
-  if (error) throw error;
+In `src/pages/Dashboard.tsx`, add two navigation cards ("My Places" and "Explore") in a horizontal row between the header and the trip list. Import `ClipboardList` and `Search` from lucide-react.
 
-  await supabase.from('entry_options').insert({ ... } as any);
-  fetchData();
-}, [trip, tripId, exploreCategoryId, homeTimezone, fetchData]);
-```
+## Part 5: Routes
 
-Key change: remove `toast(...)` success call and remove `try/catch` so errors propagate to ExploreView's `.catch()`.
+In `src/App.tsx`, add:
+- `/planner` -> `GlobalPlanner`
+- `/explore` -> placeholder `NotFound` (for Phase F)
 
-**Update `handleAddAtTime` (line 312-361)** similarly: move toast and close to happen before the await, with rollback on failure:
+## Part 6: GlobalPlanner Page
 
-```typescript
-const handleAddAtTime = useCallback(async (place: ExploreResult, startTime: string, endTime: string) => {
-  if (!trip || !tripId) return;
-  // Close Explore immediately
-  setExploreOpen(false);
-  setExploreCategoryId(null);
-  const timeStr = new Date(startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-  toast({ title: `Added ${place.name} at ${timeStr}` });
+Create `src/pages/GlobalPlanner.tsx`:
 
-  try {
-    // DB insert in background
-    const catId = exploreCategoryId || inferCategoryFromTypes(place.types);
-    const cat = findCategory(catId);
-    const { data: d, error } = await supabase.from('entries').insert(...).select('id').single();
-    if (error) throw error;
-    await supabase.from('entry_options').insert({ ... } as any);
-    await fetchData();
-    if (trip) await autoExtendTripIfNeeded(tripId, endTime, trip, fetchData);
-    // Opening hours conflict check
-    if (place.openingHours) {
-      const { isConflict, message } = checkOpeningHoursConflict(place.openingHours as string[], startTime);
-      if (isConflict) {
-        toast({ title: 'Venue may be closed', description: message, variant: 'destructive' });
-      }
-    }
-  } catch (err: any) {
-    toast({ title: `Failed to add ${place.name}`, description: err.message, variant: 'destructive' });
-  }
-}, [trip, tripId, exploreCategoryId, fetchData]);
+- **Auth guard**: Uses `useAdminAuth`, redirects to `/auth` if not logged in
+- **Data fetch**: On mount, fetches `global_places` for current user. If empty, auto-invokes `sync-global-places` edge function, then refetches
+- **Filter tabs**: "All", "Visited", "Want to Go" -- styled as rounded pills matching existing patterns
+- **Sync button**: RefreshCw icon in header, triggers the sync function with loading spinner
+- **Place cards**: Each card shows category emoji (looked up from `findCategory`), name, address (truncated), rating stars, and status badge (green for visited, blue for want_to_go)
+- **Tapping a card**: Opens a Drawer with PlaceOverview using a temporary `EntryWithOptions` built from GlobalPlace data (same pattern as Explore's `buildTempEntry`)
+- **Back button**: Navigates to `/`
+
+### Layout
+```text
++------------------------------------------+
+| <- Back              My Places    [Sync] |
+|                                          |
+| [All] [Visited] [Want to Go]            |
+|                                          |
+| restaurant De Kas            Visited     |
+| Amsterdam, NL  * 4.5                     |
+|                                          |
+| museum Rijksmuseum           Visited     |
+| Amsterdam, NL  * 4.7                     |
+|                                          |
+| coffee Lot Sixty One        Want to Go   |
+| Amsterdam  * 4.3                         |
++------------------------------------------+
 ```
 
 ## Files Summary
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/ExploreView.tsx` | Make `handleAdd` optimistic with immediate toast + rollback on error |
-| `src/pages/Timeline.tsx` | Remove success toast from `handleAddToPlanner` (let errors propagate); move toast/close before await in `handleAddAtTime` |
+| Database migration | Create `global_places` table, indexes, RLS policies, updated_at trigger |
+| `supabase/config.toml` | Add `sync-global-places` function config |
+| `supabase/functions/sync-global-places/index.ts` | New edge function |
+| `src/types/trip.ts` | Add `GlobalPlace` interface |
+| `src/App.tsx` | Add `/planner` and `/explore` routes |
+| `src/pages/Dashboard.tsx` | Add "My Places" and "Explore" navigation cards |
+| `src/pages/GlobalPlanner.tsx` | New page with place list, filters, sync, and PlaceOverview drawer |
+
