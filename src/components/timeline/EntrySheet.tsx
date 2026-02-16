@@ -30,120 +30,11 @@ import MapPreview from './MapPreview';
 
 import RouteMapPreview from './RouteMapPreview';
 import { cn } from '@/lib/utils';
-
-function decodePolylineEndpoint(encoded: string): { lat: number; lng: number } | null {
-  let index = 0, lat = 0, lng = 0;
-  while (index < encoded.length) {
-    let shift = 0, result = 0, byte;
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
-    shift = 0; result = 0;
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-    lng += (result & 1) ? ~(result >> 1) : (result >> 1);
-  }
-  return { lat: lat / 1e5, lng: lng / 1e5 };
-}
+import InlineField from './InlineField';
+import { decodePolylineEndpoint, formatPriceLevel, getEntryDayHours, formatTimeInTz, getTzAbbr } from '@/lib/entryHelpers';
 
 const REFERENCE_DATE = '2099-01-01';
 
-// ─── Inline Field (click-to-edit for view mode) ───
-
-interface InlineFieldProps {
-  value: string;
-  canEdit: boolean;
-  onSave: (newValue: string) => Promise<void>;
-  renderDisplay?: (val: string) => React.ReactNode;
-  renderInput?: (val: string, onChange: (v: string) => void, onDone: () => void) => React.ReactNode;
-  className?: string;
-  inputType?: string;
-  placeholder?: string;
-}
-
-const InlineField = ({ value, canEdit, onSave, renderDisplay, renderInput, className, inputType = 'text', placeholder }: InlineFieldProps) => {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const [saving, setSaving] = useState(false);
-  const [displayValue, setDisplayValue] = useState(value);
-
-  // Sync displayValue when the prop actually updates (after refetch)
-  useEffect(() => {
-    setDisplayValue(value);
-  }, [value]);
-
-  const handleDone = async () => {
-    if (draft !== displayValue) {
-      setSaving(true);
-      await onSave(draft);
-      // Optimistically show the saved value immediately
-      setDisplayValue(draft);
-      setSaving(false);
-    }
-    setEditing(false);
-  };
-
-  if (editing && canEdit) {
-    if (renderInput) {
-      return <>{renderInput(draft, setDraft, handleDone)}</>;
-    }
-    return (
-      <Input
-        type={inputType}
-        value={draft}
-        onChange={e => setDraft(e.target.value)}
-        onBlur={handleDone}
-        onKeyDown={e => { if (e.key === 'Enter') handleDone(); if (e.key === 'Escape') { setDraft(displayValue); setEditing(false); } }}
-        autoFocus
-        disabled={saving}
-        placeholder={placeholder}
-        className={cn('h-8', className)}
-      />
-    );
-  }
-
-  const shown = renderDisplay ? renderDisplay(displayValue) : <span>{displayValue || <span className="text-muted-foreground italic">{placeholder || 'Empty'}</span>}</span>;
-
-  return (
-    <div
-      className={cn('group inline-flex items-center gap-1.5', canEdit && 'cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1 transition-colors', className)}
-      onClick={() => { if (canEdit) { setDraft(displayValue); setEditing(true); } }}
-    >
-      {shown}
-      {canEdit && <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />}
-    </div>
-  );
-};
-
-// ─── Price Level Helper ───
-const formatPriceLevel = (level: string | null): string | null => {
-  if (!level) return null;
-  const map: Record<string, string> = {
-    PRICE_LEVEL_FREE: 'Free',
-    PRICE_LEVEL_INEXPENSIVE: '💰',
-    PRICE_LEVEL_MODERATE: '💰💰',
-    PRICE_LEVEL_EXPENSIVE: '💰💰💰',
-    PRICE_LEVEL_VERY_EXPENSIVE: '💰💰💰💰',
-  };
-  return map[level] ?? null;
-};
-
-// ─── Opening Hours Helper (entry day, not today) ───
-const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const getEntryDayHours = (hours: string[] | null, entryStartTime?: string): { text: string | null; dayName: string; googleIndex: number } => {
-  const d = entryStartTime ? new Date(entryStartTime) : new Date();
-  const jsDay = d.getDay();
-  const googleIndex = jsDay === 0 ? 6 : jsDay - 1;
-  const dayName = DAY_NAMES[googleIndex] ?? '';
-  if (!hours || hours.length === 0) return { text: null, dayName, googleIndex };
-  return { text: hours[googleIndex] ?? null, dayName, googleIndex };
-};
 
 // ─── Place Details Section (view mode) ───
 const PlaceDetailsSection = ({ option, entryStartTime }: { option: EntryOption; entryStartTime?: string }) => {
@@ -204,20 +95,6 @@ const PlaceDetailsSection = ({ option, entryStartTime }: { option: EntryOption; 
     </div>
   );
 };
-
-// ─── Helpers ───
-
-function formatTimeInTz(isoString: string, tz: string): string {
-  const d = new Date(isoString);
-  return d.toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
-}
-
-function getTzAbbr(tz: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date());
-    return parts.find(p => p.type === 'timeZoneName')?.value ?? tz.split('/').pop() ?? tz;
-  } catch { return tz.split('/').pop() ?? tz; }
-}
 
 // ─── Types ───
 
