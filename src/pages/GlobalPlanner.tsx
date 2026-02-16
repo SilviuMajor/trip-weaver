@@ -16,6 +16,23 @@ import type { GlobalPlace, EntryWithOptions, EntryOption } from '@/types/trip';
 
 type StatusFilter = 'all' | 'visited' | 'want_to_go';
 
+const SKIP_CATEGORIES = ['flight', 'hotel', 'transfer', 'transport', 'airport_processing'];
+
+const extractCityCountry = (address: string | null): { city: string | null; country: string | null } => {
+  if (!address) return { city: null, country: null };
+  const parts = address.split(',').map(s => s.trim());
+  if (parts.length >= 3) {
+    const cityPart = parts[parts.length - 2];
+    const city = cityPart.replace(/^\d{4,6}\s*[A-Z]{0,2}\s*/, '').trim();
+    const country = parts[parts.length - 1].trim();
+    return { city: city || null, country: country || null };
+  }
+  if (parts.length === 2) {
+    return { city: parts[0], country: parts[1] };
+  }
+  return { city: null, country: null };
+};
+
 const buildTempEntry = (place: GlobalPlace): { entry: EntryWithOptions; option: EntryOption } => {
   const option: EntryOption = {
     id: place.id,
@@ -97,6 +114,83 @@ const GlobalPlanner = () => {
     return data ?? [];
   }, [adminUser]);
 
+  // Direct query fallback: get places from entries immediately
+  const fetchDirectPlaces = useCallback(async (): Promise<GlobalPlace[]> => {
+    if (!adminUser) return [];
+    const { data: trips } = await supabase
+      .from('trips')
+      .select('id, end_date')
+      .eq('owner_id', adminUser.id);
+    if (!trips?.length) return [];
+
+    const tripIds = trips.map(t => t.id);
+    const tripEndMap = new Map<string, string | null>();
+    trips.forEach(t => tripEndMap.set(t.id, t.end_date));
+
+    const { data: entries } = await supabase
+      .from('entries')
+      .select('id, trip_id, is_scheduled')
+      .in('trip_id', tripIds);
+    if (!entries?.length) return [];
+
+    const entryMap = new Map<string, any>();
+    entries.forEach(e => entryMap.set(e.id, e));
+
+    const { data: options } = await supabase
+      .from('entry_options')
+      .select('*')
+      .in('entry_id', entries.map(e => e.id));
+    if (!options?.length) return [];
+
+    const seen = new Set<string>();
+    const result: GlobalPlace[] = [];
+
+    for (const opt of options) {
+      if (SKIP_CATEGORIES.includes(opt.category ?? '')) continue;
+      if (!opt.name) continue;
+      const hasCoords = opt.latitude != null && opt.longitude != null;
+      const hasAddress = !!opt.address || !!opt.location_name;
+      if (!hasCoords && !hasAddress) continue;
+
+      // Dedup key
+      const dedupKey = opt.google_place_id || `${opt.name.toLowerCase()}|${opt.latitude?.toFixed(3)}|${opt.longitude?.toFixed(3)}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+
+      const entry = entryMap.get(opt.entry_id);
+      const tripEndDate = entry ? tripEndMap.get(entry.trip_id) : null;
+      const isVisited = tripEndDate && new Date(tripEndDate) < new Date();
+      const address = opt.address ?? opt.location_name ?? null;
+      const { city, country } = extractCityCountry(address);
+
+      result.push({
+        id: opt.id,
+        user_id: adminUser.id,
+        google_place_id: opt.google_place_id,
+        name: opt.name,
+        category: opt.category,
+        latitude: opt.latitude,
+        longitude: opt.longitude,
+        opening_hours: opt.opening_hours as unknown as string[] | null,
+        city,
+        country,
+        status: isVisited ? 'visited' : 'want_to_go',
+        source: 'trip_auto',
+        source_trip_id: entry?.trip_id ?? null,
+        rating: opt.rating,
+        price_level: opt.price_level,
+        website: opt.website,
+        phone: opt.phone,
+        address,
+        notes: null,
+        starred: false,
+        created_at: opt.created_at,
+        updated_at: opt.updated_at,
+      });
+    }
+    return result;
+  }, [adminUser]);
+
   const syncPlaces = useCallback(async () => {
     if (!adminUser) return;
     setSyncing(true);
@@ -114,13 +208,24 @@ const GlobalPlanner = () => {
     }
   }, [adminUser, fetchPlaces]);
 
+  // Fix 1: Auto-sync on mount + Fix 6: Direct query fallback
   useEffect(() => {
     if (!adminUser) return;
     (async () => {
-      const result = await fetchPlaces();
-      if (result && result.length === 0) {
-        await syncPlaces();
+      // Fetch existing global_places + direct query in parallel
+      const [globalResult, directResult] = await Promise.all([
+        fetchPlaces(),
+        fetchDirectPlaces(),
+      ]);
+
+      // If global_places is empty but direct query has results, show those immediately
+      if ((!globalResult || globalResult.length === 0) && directResult.length > 0) {
+        setPlaces(directResult);
+        setLoading(false);
       }
+
+      // Always sync in background
+      syncPlaces();
     })();
   }, [adminUser]);
 
@@ -129,16 +234,27 @@ const GlobalPlanner = () => {
     [places, statusFilter]
   );
 
+  // Fix 5 client-side: apply extractCityCountry fallback for grouping
   const grouped = useMemo(() => {
     const countryMap = new Map<string, Map<string, GlobalPlace[]>>();
     const unsorted: GlobalPlace[] = [];
 
     filtered.forEach(place => {
-      if (!place.country || !place.city) { unsorted.push(place); return; }
-      if (!countryMap.has(place.country)) countryMap.set(place.country, new Map());
-      const cities = countryMap.get(place.country)!;
-      if (!cities.has(place.city)) cities.set(place.city, []);
-      cities.get(place.city)!.push(place);
+      let city = place.city;
+      let country = place.country;
+
+      // Fallback: derive from address if city/country missing
+      if (!city || !country) {
+        const parsed = extractCityCountry(place.address);
+        city = city || parsed.city;
+        country = country || parsed.country;
+      }
+
+      if (!country || !city) { unsorted.push(place); return; }
+      if (!countryMap.has(country)) countryMap.set(country, new Map());
+      const cities = countryMap.get(country)!;
+      if (!cities.has(city)) cities.set(city, []);
+      cities.get(city)!.push(place);
     });
 
     return { countryMap, unsorted };
@@ -147,7 +263,12 @@ const GlobalPlanner = () => {
   // Get places for the selected city
   const cityPlaces = useMemo(() => {
     if (!selectedCity) return [];
-    return filtered.filter(p => p.city === selectedCity);
+    // Match against both stored city and address-derived city
+    return filtered.filter(p => {
+      if (p.city === selectedCity) return true;
+      const parsed = extractCityCountry(p.address);
+      return parsed.city === selectedCity;
+    });
   }, [filtered, selectedCity]);
 
   // Group city places by category for Netflix rows
@@ -196,11 +317,14 @@ const GlobalPlanner = () => {
               ) : 'My Places'}
             </h1>
           </div>
-          {!selectedCity && (
-            <Button variant="ghost" size="icon" onClick={syncPlaces} disabled={syncing}>
-              <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {syncing && <span className="text-xs text-muted-foreground">Syncing…</span>}
+            {!selectedCity && (
+              <Button variant="ghost" size="icon" onClick={syncPlaces} disabled={syncing}>
+                <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+              </Button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -269,7 +393,7 @@ const GlobalPlanner = () => {
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-muted text-3xl">📍</div>
             <p className="text-sm text-muted-foreground">
-              {statusFilter === 'all' ? 'No places synced yet. Tap sync to import from your trips.' : `No ${statusFilter === 'visited' ? 'visited' : 'planned'} places.`}
+              {syncing ? 'Syncing places from your trips…' : statusFilter === 'all' ? 'No places synced yet. Tap sync to import from your trips.' : `No ${statusFilter === 'visited' ? 'visited' : 'planned'} places.`}
             </p>
           </div>
         ) : (
