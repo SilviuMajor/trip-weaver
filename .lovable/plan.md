@@ -1,75 +1,95 @@
 
 
-# Changes: Flight Card Right-Align, Timeline Dots, Overview Editable Empty States, Opening Hours Fix
+# Fixes: Day Indicator, Image Swipe, Consistent Fonts, Map Cleanup, Duration Pill
 
-## Overview
-Four changes across FlightGroupCard.tsx and EntrySheet.tsx: right-align flight content, replace check-in/checkout bars with timeline dots, add editable empty states in the overview, and confirm opening hours fix.
+## Change 1: Day indicator in overview
 
-## Change 1: FlightGroupCard.tsx -- Right-align + Timeline Dots
+Add a day label ("Day 3 · Wed 19 Feb") between the category badge and the title in EntrySheet.tsx view mode.
 
-### 1a. Right-align flight content (lines 156-175)
-Change the content div from left-aligned to right-aligned:
-- Add `text-right` to the content wrapper div
-- Add `justify-end` to the route flex row
-- Add text shadow to the title for readability
-
-### 1b. Replace check-in bar with timeline dot (lines 91-112)
-Remove the flat bar layout and replace with a timeline dot + dashed line design:
-- Left side: circle dot at top with dashed line extending down
-- Right side: "Check-in" label, terminal info, and time range
-- Delete the check-in divider line (lines 109-111)
-
-### 1c. Replace checkout bar with timeline dot (lines 178-199)
-Same pattern but inverted -- dashed line on top, dot at bottom:
-- Left side: dashed line coming from above with circle dot at bottom
-- Right side: "Checkout" label, terminal info, and time range
-- Delete the checkout divider line (lines 178-180)
-
-## Change 2: Opening Hours -- Already Fixed
-
-The opening hours fix from the previous batch is already in place (line 187 shows `{entryDayHoursText || 'Opening hours'}` without a day prefix). The `getEntryDayHours` function (line 139) already accepts `entryStartTime` and `PlaceDetailsSection` (line 149) already has the `entryStartTime` prop. No changes needed here.
-
-## Change 3: Hero Image Height -- Already 240px
-
-The hero is already at 240px (line 1222) and empty state at 160px (line 1259). No changes needed.
-
-## Change 4: EntrySheet.tsx -- Editable Empty States
-
-### 4a. Map cell empty state (lines 1676-1680)
-Replace the plain pin emoji placeholder with a tappable button that triggers place search:
-- Dashed border, "Tap to add location" text
-- On click: opens PlacesAutocomplete inline or triggers a search flow
-- Add state: `showPlaceSearch` and `placeSearchQuery`
-
-### 4b. Phone -- editable when empty (lines 1698-1710)
-When phone is empty and user is editor, show an `InlineField` with "Add phone" placeholder. On save, update `entry_options.phone` via supabase and call `onSaved()`.
-
-### 4c. Website -- editable when empty (lines 1705-1709)
-Same pattern: when website is empty and user is editor, show `InlineField` with "Add website" placeholder. On save, call `handleInlineSaveOption('website', v)`.
-
-### 4d. Notes -- always visible for editors (lines 1713-1738)
-Remove the Collapsible wrapper for notes. Show the textarea directly with dashed border and "Add a note..." placeholder. For non-editors with no notes, show nothing.
-
-### 4e. Title triggers place search on rename (lines 1276-1283)
-When InlineField for the title saves a new name that differs from the original, add state to show a PlacesAutocomplete dropdown below the title. When a place is selected, auto-fill location, phone, website, hours, rating, photos. Add `showPlaceSearch`, `placeSearchQuery` state variables and render PlacesAutocomplete conditionally.
-
-## Technical Details
-
-### New state variables in EntrySheet (view mode section)
+### EntrySheet.tsx (~line 1242-1244)
+Compute `entryDayLabel` from `trip.start_date` and `entry.start_time`:
 ```typescript
-const [showPlaceSearch, setShowPlaceSearch] = useState(false);
-const [placeSearchQuery, setPlaceSearchQuery] = useState('');
+const entryDayLabel = (() => {
+  if (!trip?.start_date || !entry?.start_time) return null;
+  const tripStart = new Date(trip.start_date + 'T00:00:00');
+  const entryDate = new Date(entry.start_time);
+  const diffDays = Math.floor((entryDate.getTime() - tripStart.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return null;
+  const dayName = entryDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  return `Day ${diffDays + 1} · ${dayName}`;
+})();
 ```
 
-### PlacesAutocomplete reuse
-The existing `PlacesAutocomplete` component (already imported) will be rendered below the title when `showPlaceSearch` is true. When a place is selected, update the option fields via supabase and call `onSaved()`.
+Insert between category badge and title (after line 1311, before line 1313):
+```tsx
+{entryDayLabel && (
+  <p className="text-xs font-medium text-muted-foreground">{entryDayLabel}</p>
+)}
+```
 
-### handlePlaceSelectInView function
-New handler that takes a PlaceDetails result and updates the entry_option with all enriched data (name, location, phone, website, opening_hours, rating, photos, etc.) via a single supabase update call.
+## Change 2: ImageGallery -- touch swipe + fixed height
+
+Replace `src/components/timeline/ImageGallery.tsx` entirely:
+- Add `height` prop (default 220)
+- Use `useRef` for touch tracking instead of state
+- Replace `aspect-[16/9]` with fixed `height` style
+- Swipe threshold: 50px
+
+Then in EntrySheet.tsx, replace the inline hero image carousel (lines 1259-1294) with `<ImageGallery images={images} height={240} />` plus the existing ImageUploader overlay and swipe dots. The hero section becomes:
+```tsx
+{images.length > 0 ? (
+  <div className="relative w-full overflow-hidden" style={{ height: 240 }}>
+    <ImageGallery images={images} height={240} />
+    {isEditor && option.category !== 'transfer' && (
+      <div className="absolute bottom-3 right-3 z-30">
+        <ImageUploader optionId={option.id} currentCount={images.length} onUploaded={onSaved} />
+      </div>
+    )}
+  </div>
+) : isEditor && option.category !== 'transfer' ? (
+  <div className="w-full bg-muted/30 flex items-center justify-center" style={{ height: 160 }}>
+    <ImageUploader optionId={option.id} currentCount={0} onUploaded={onSaved} />
+  </div>
+) : null}
+```
+
+Note: The ImageGallery already has its own dots and arrows internally, so we remove the duplicate inline arrows/dots from EntrySheet.
+
+## Change 3: Consistent font sizes across card tiers
+
+In EntryCard.tsx, the Full tier (lines 635-637) uses `text-lg` for the title while Condensed uses `text-sm`. Change Full tier title from `text-lg` to `text-sm font-bold` to match Condensed. Both image-card tiers should use:
+- Title: `text-sm font-bold`
+- Rating/location/notes/time: `text-[10px]`
+
+Only change needed: line 636 -- change `text-lg` to `text-sm`.
+
+## Change 4: MapPreview -- just the map image with popover
+
+Replace `src/components/timeline/MapPreview.tsx` with a simplified version:
+- Remove `locationName` text above the map
+- Remove the 3-button stack below the map
+- Map image is wrapped in a Popover trigger
+- Tapping opens a popover with 3 nav choices (Apple Maps, Google Maps, Uber) using emoji prefixes
+- If image fails to load, return null
+
+## Change 5: Duration as styled pill in time box
+
+In EntrySheet.tsx view mode, the time card (lines 1694-1704) shows duration as `text-lg font-extrabold text-primary`. Replace with a pill:
+
+```tsx
+<span className="inline-block rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-bold text-primary mt-1">
+  {durationString}
+</span>
+```
+
+Also remove the Lock icon from inside the time box (line 1704) -- it's already shown elsewhere.
 
 ## Files Modified
+
 | File | Scope |
 |------|-------|
-| `src/components/timeline/FlightGroupCard.tsx` | Right-align content, timeline dot check-in/checkout, remove dividers |
-| `src/components/timeline/EntrySheet.tsx` | Editable empty states (map, phone, website, notes, title-search) |
+| `src/components/timeline/EntrySheet.tsx` | Day label, hero uses ImageGallery, duration pill in time box |
+| `src/components/timeline/EntryCard.tsx` | Full tier title text-lg to text-sm |
+| `src/components/timeline/ImageGallery.tsx` | Full rewrite: touch swipe, fixed height prop |
+| `src/components/timeline/MapPreview.tsx` | Full rewrite: map-only with popover nav |
 
