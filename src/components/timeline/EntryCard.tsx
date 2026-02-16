@@ -534,18 +534,20 @@ const EntryCard = ({
       )}
       style={{ touchAction: 'none' }}
     >
-      {/* Background: Image + diagonal fade OR glossy */}
-      {firstImage ? (
-        <>
-          <img src={firstImage} alt={option.name} className="absolute inset-0 w-full h-full object-cover" />
-          <div className="absolute inset-0 z-[5]" style={{ background: DIAGONAL_GRADIENTS[tier] }} />
-        </>
-      ) : (
-        <>
-          <div className="absolute inset-0" style={{ background: glossyBg, border: glossyBorder }} />
-          <div className="absolute inset-0 z-[5]" style={{ background: glassBg }} />
-        </>
-      )}
+      {/* Background clipping container — always clips to rounded corners */}
+      <div className="absolute inset-0 overflow-hidden rounded-[14px]">
+        {firstImage ? (
+          <>
+            <img src={firstImage} alt={option.name} className="absolute inset-0 w-full h-full object-cover" />
+            <div className="absolute inset-0 z-[5]" style={{ background: DIAGONAL_GRADIENTS[tier] }} />
+          </>
+        ) : (
+          <>
+            <div className="absolute inset-0" style={{ background: glossyBg, border: glossyBorder }} />
+            <div className="absolute inset-0 z-[5]" style={{ background: glassBg }} />
+          </>
+        )}
+      </div>
       {children}
       {overlapOverlay}
     </div>
