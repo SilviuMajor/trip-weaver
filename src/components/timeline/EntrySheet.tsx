@@ -1252,40 +1252,22 @@ const EntrySheet = ({
     const flightHours = Math.floor(flightDurationMin / 60);
     const flightMins = flightDurationMin % 60;
 
+    const entryDayLabel = (() => {
+      if (!trip?.start_date || !entry?.start_time) return null;
+      const tripStart = new Date(trip.start_date + 'T00:00:00');
+      const entryDate = new Date(entry.start_time);
+      const diffDays = Math.floor((entryDate.getTime() - tripStart.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays < 0) return null;
+      const dayName = entryDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      return `Day ${diffDays + 1} · ${dayName}`;
+    })();
+
     const viewContent = (
       <>
-        {/* Hero image gallery at top — fixed 200px height */}
+        {/* Hero image gallery at top — fixed height, touch swipe */}
           {images.length > 0 ? (
             <div className="relative w-full overflow-hidden" style={{ height: 240 }}>
-              {(() => {
-                const sorted = [...images].sort((a, b) => a.sort_order - b.sort_order);
-                const idx = heroIndex < sorted.length ? heroIndex : 0;
-                return (
-                  <img
-                    src={sorted[idx]?.image_url}
-                    alt="Hero"
-                    className="h-full w-full object-cover"
-                  />
-                );
-              })()}
-              {images.length > 1 && (
-                <>
-                  <button onClick={() => setHeroIndex(prev => prev > 0 ? prev - 1 : images.length - 1)}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-foreground/40 p-1 text-background backdrop-blur-sm">
-                    <ChevronLeft className="h-4 w-4" />
-                  </button>
-                  <button onClick={() => setHeroIndex(prev => prev < images.length - 1 ? prev + 1 : 0)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-foreground/40 p-1 text-background backdrop-blur-sm">
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                  <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1">
-                    {images.map((_, i) => (
-                      <button key={i} onClick={() => setHeroIndex(i)}
-                        className={cn('h-1.5 rounded-full transition-all', i === heroIndex ? 'w-4 bg-white' : 'w-1.5 bg-white/50')} />
-                    ))}
-                  </div>
-                </>
-              )}
+              <ImageGallery images={images} height={240} />
               {isEditor && option.category !== 'transfer' && (
                 <div className="absolute bottom-3 right-3 z-30">
                   <ImageUploader optionId={option.id} currentCount={images.length} onUploaded={onSaved} />
@@ -1309,6 +1291,9 @@ const EntrySheet = ({
                   {isFlightView && <Plane className="h-3 w-3" />}
                   {option.category}
                 </Badge>
+              )}
+              {entryDayLabel && (
+                <p className="text-xs font-medium text-muted-foreground">{entryDayLabel}</p>
               )}
               <h2 className="text-xl font-bold">
                 <InlineField
@@ -1691,7 +1676,7 @@ const EntrySheet = ({
                         renderDisplay={(val) => <span className="text-sm font-medium">{val}</span>}
                       />
                     </div>
-                    <p className="text-lg font-extrabold text-primary mt-1">
+                    <span className="inline-block rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-bold text-primary mt-1">
                       {(() => {
                         const diffMs = new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime();
                         const totalMin = Math.round(diffMs / 60000);
@@ -1700,8 +1685,7 @@ const EntrySheet = ({
                         const m = totalMin % 60;
                         return h > 0 ? `${h}h${m ? ` ${m}m` : ''}` : `${m}m`;
                       })()}
-                    </p>
-                    {isLocked && <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary mt-1"><Lock className="h-2.5 w-2.5 text-primary-foreground" /></span>}
+                    </span>
                   </div>
 
                   {/* Right: Map preview with navigation popover */}

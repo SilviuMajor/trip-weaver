@@ -1,32 +1,49 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { OptionImage } from '@/types/trip';
 
 interface ImageGalleryProps {
   images: OptionImage[];
+  height?: number;
 }
 
-const ImageGallery = ({ images }: ImageGalleryProps) => {
+const ImageGallery = ({ images, height = 220 }: ImageGalleryProps) => {
   const [current, setCurrent] = useState(0);
-  const [touchStart, setTouchStart] = useState<number | null>(null);
+  const touchStartX = useRef<number | null>(null);
+  const touchDeltaX = useRef(0);
 
   if (images.length === 0) return null;
 
   const sorted = [...images].sort((a, b) => a.sort_order - b.sort_order);
 
+  const goNext = () => setCurrent(prev => (prev < sorted.length - 1 ? prev + 1 : 0));
+  const goPrev = () => setCurrent(prev => (prev > 0 ? prev - 1 : sorted.length - 1));
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchDeltaX.current = 0;
+  };
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartX.current == null) return;
+    touchDeltaX.current = e.touches[0].clientX - touchStartX.current;
+  };
+  const handleTouchEnd = () => {
+    if (Math.abs(touchDeltaX.current) > 50) {
+      if (touchDeltaX.current < 0) goNext();
+      else goPrev();
+    }
+    touchStartX.current = null;
+    touchDeltaX.current = 0;
+  };
+
   return (
-    <div className="relative overflow-hidden rounded-xl">
+    <div className="relative overflow-hidden rounded-xl" style={{ height }}>
       <div
-        className="aspect-[16/9] w-full"
-        onTouchStart={(e) => setTouchStart(e.touches[0].clientX)}
-        onTouchEnd={(e) => {
-          if (touchStart === null) return;
-          const diff = touchStart - e.changedTouches[0].clientX;
-          if (diff > 50) setCurrent(prev => Math.min(prev + 1, sorted.length - 1));
-          if (diff < -50) setCurrent(prev => Math.max(prev - 1, 0));
-          setTouchStart(null);
-        }}
+        className="w-full h-full"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
         <img
           src={sorted[current].image_url}
@@ -38,13 +55,13 @@ const ImageGallery = ({ images }: ImageGalleryProps) => {
       {sorted.length > 1 && (
         <>
           <button
-            onClick={() => setCurrent(prev => (prev > 0 ? prev - 1 : sorted.length - 1))}
+            onClick={goPrev}
             className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-foreground/40 p-1 text-background backdrop-blur-sm transition-colors hover:bg-foreground/60"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
           <button
-            onClick={() => setCurrent(prev => (prev < sorted.length - 1 ? prev + 1 : 0))}
+            onClick={goNext}
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-foreground/40 p-1 text-background backdrop-blur-sm transition-colors hover:bg-foreground/60"
           >
             <ChevronRight className="h-4 w-4" />
