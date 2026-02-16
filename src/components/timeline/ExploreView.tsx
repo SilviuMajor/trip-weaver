@@ -190,6 +190,9 @@ const ExploreView = ({
   const [originPopoverOpen, setOriginPopoverOpen] = useState(false);
   const [originSearchQuery, setOriginSearchQuery] = useState('');
   const [crossTripMatches, setCrossTripMatches] = useState<Map<string, string>>(new Map());
+  const [selectedPriceLevels, setSelectedPriceLevels] = useState<string[]>([]);
+  const [minRating, setMinRating] = useState<number | null>(null);
+  const [maxTravelMinutes, setMaxTravelMinutes] = useState<number | null>(null);
   const [manualName, setManualName] = useState('');
   const [manualLocationQuery, setManualLocationQuery] = useState('');
   const [manualPlaceDetails, setManualPlaceDetails] = useState<PlaceDetails | null>(null);
@@ -256,6 +259,9 @@ const ExploreView = ({
       setSearchQuery('');
       setLoading(false);
       setAddedPlaceIds(new Set());
+      setSelectedPriceLevels([]);
+      setMinRating(null);
+      setMaxTravelMinutes(null);
       initialLoadDone.current = false;
       
       originManuallySet.current = false;
@@ -490,8 +496,24 @@ const ExploreView = ({
   }, [results, travelMode, originLocation, fetchTravelTimes]);
 
   // Sort results by travel time + push closed to bottom
+  const filteredResults = useMemo(() => {
+    return results.filter(place => {
+      if (selectedPriceLevels.length > 0 && selectedPriceLevels.length < 4) {
+        if (!place.priceLevel || !selectedPriceLevels.includes(place.priceLevel)) return false;
+      }
+      if (minRating !== null) {
+        if (!place.rating || place.rating < minRating) return false;
+      }
+      if (maxTravelMinutes !== null) {
+        const time = travelTimes.get(place.placeId);
+        if (time == null || time > maxTravelMinutes) return false;
+      }
+      return true;
+    });
+  }, [results, selectedPriceLevels, minRating, maxTravelMinutes, travelTimes]);
+
   const sortedResults = useMemo(() => {
-    let sorted = [...results];
+    let sorted = [...filteredResults];
 
     if (travelTimes.size > 0) {
       sorted.sort((a, b) => {
@@ -511,7 +533,7 @@ const ExploreView = ({
     });
 
     return sorted;
-  }, [results, travelTimes]);
+  }, [filteredResults, travelTimes]);
 
   if (!open) return null;
 
@@ -677,6 +699,153 @@ const ExploreView = ({
               {mode.emoji} {MODE_SHORT_LABELS[mode.id] ?? mode.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Filter chips */}
+      {results.length > 0 && (
+        <div className="flex items-center gap-1.5 px-4 py-1 overflow-x-auto">
+          {/* Price filter */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                className={cn(
+                  'rounded-full px-3 py-1 text-[11px] font-medium border transition-colors whitespace-nowrap',
+                  selectedPriceLevels.length > 0 && selectedPriceLevels.length < 4
+                    ? 'bg-primary/10 text-primary border-primary/20'
+                    : 'text-muted-foreground border-border/50'
+                )}
+              >
+                {selectedPriceLevels.length > 0 && selectedPriceLevels.length < 4
+                  ? selectedPriceLevels.map(p => {
+                      if (p === 'PRICE_LEVEL_INEXPENSIVE') return '€';
+                      if (p === 'PRICE_LEVEL_MODERATE') return '€€';
+                      if (p === 'PRICE_LEVEL_EXPENSIVE') return '€€€';
+                      return '€€€€';
+                    }).join('–')
+                  : 'Price'}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-2" align="start">
+              <div className="flex gap-1">
+                {([
+                  { value: 'PRICE_LEVEL_INEXPENSIVE', label: '€' },
+                  { value: 'PRICE_LEVEL_MODERATE', label: '€€' },
+                  { value: 'PRICE_LEVEL_EXPENSIVE', label: '€€€' },
+                  { value: 'PRICE_LEVEL_VERY_EXPENSIVE', label: '€€€€' },
+                ] as const).map(({ value, label }) => {
+                  const isSelected = selectedPriceLevels.includes(value);
+                  return (
+                    <button
+                      key={value}
+                      className={cn(
+                        'rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors',
+                        isSelected
+                          ? 'bg-primary/10 text-primary border-primary/20'
+                          : 'text-muted-foreground border-border/50 hover:bg-muted'
+                      )}
+                      onClick={() => {
+                        setSelectedPriceLevels(prev =>
+                          isSelected ? prev.filter(v => v !== value) : [...prev, value]
+                        );
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Rating filter */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                className={cn(
+                  'rounded-full px-3 py-1 text-[11px] font-medium border transition-colors whitespace-nowrap',
+                  minRating !== null
+                    ? 'bg-primary/10 text-primary border-primary/20'
+                    : 'text-muted-foreground border-border/50'
+                )}
+              >
+                {minRating !== null ? `${minRating}+` : 'Rating'}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-2" align="start">
+              <div className="flex gap-1">
+                {([
+                  { value: 4.5, label: '4.5+' },
+                  { value: 4.0, label: '4.0+' },
+                  { value: 3.5, label: '3.5+' },
+                  { value: null as number | null, label: 'Any' },
+                ]).map(({ value, label }) => (
+                  <button
+                    key={label}
+                    className={cn(
+                      'rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors',
+                      minRating === value
+                        ? 'bg-primary/10 text-primary border-primary/20'
+                        : 'text-muted-foreground border-border/50 hover:bg-muted'
+                    )}
+                    onClick={() => setMinRating(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Distance filter */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                className={cn(
+                  'rounded-full px-3 py-1 text-[11px] font-medium border transition-colors whitespace-nowrap',
+                  maxTravelMinutes !== null
+                    ? 'bg-primary/10 text-primary border-primary/20'
+                    : 'text-muted-foreground border-border/50'
+                )}
+              >
+                {maxTravelMinutes !== null ? `Under ${maxTravelMinutes}m` : 'Distance'}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-2" align="start">
+              <div className="flex gap-1">
+                {([
+                  { value: 10, label: 'Under 10m' },
+                  { value: 15, label: 'Under 15m' },
+                  { value: 30, label: 'Under 30m' },
+                  { value: null as number | null, label: 'Any' },
+                ]).map(({ value, label }) => (
+                  <button
+                    key={label}
+                    className={cn(
+                      'rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors',
+                      maxTravelMinutes === value
+                        ? 'bg-primary/10 text-primary border-primary/20'
+                        : 'text-muted-foreground border-border/50 hover:bg-muted'
+                    )}
+                    onClick={() => setMaxTravelMinutes(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+      )}
+
+      {/* Result count */}
+      {!loading && results.length > 0 && (
+        <div className="px-4 pb-1">
+          <span className="text-[11px] text-muted-foreground">
+            {filteredResults.length === results.length
+              ? `${results.length} results`
+              : `${filteredResults.length} of ${results.length} results`}
+          </span>
         </div>
       )}
 
