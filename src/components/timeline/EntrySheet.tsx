@@ -131,29 +131,30 @@ const formatPriceLevel = (level: string | null): string | null => {
   return map[level] ?? null;
 };
 
-// ─── Opening Hours Helper ───
-const getTodayHours = (hours: string[] | null): string | null => {
-  if (!hours || hours.length === 0) return null;
-  // JS: 0=Sun, Google array: 0=Mon
-  const jsDay = new Date().getDay();
+// ─── Opening Hours Helper (entry day, not today) ───
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const getEntryDayHours = (hours: string[] | null, entryStartTime?: string): { text: string | null; dayName: string; googleIndex: number } => {
+  const d = entryStartTime ? new Date(entryStartTime) : new Date();
+  const jsDay = d.getDay();
   const googleIndex = jsDay === 0 ? 6 : jsDay - 1;
-  return hours[googleIndex] ?? null;
+  const dayName = DAY_NAMES[googleIndex] ?? '';
+  if (!hours || hours.length === 0) return { text: null, dayName, googleIndex };
+  return { text: hours[googleIndex] ?? null, dayName, googleIndex };
 };
 
 // ─── Place Details Section (view mode) ───
-const PlaceDetailsSection = ({ option }: { option: EntryOption }) => {
+const PlaceDetailsSection = ({ option, entryStartTime }: { option: EntryOption; entryStartTime?: string }) => {
   const rating = (option as any).rating as number | null;
   const userRatingCount = (option as any).user_rating_count as number | null;
-  const phone = (option as any).phone as string | null;
   const openingHours = (option as any).opening_hours as string[] | null;
   const priceLevel = (option as any).price_level as string | null;
   const [hoursOpen, setHoursOpen] = useState(false);
 
-  const hasAnyData = rating != null || phone || (openingHours && openingHours.length > 0) || priceLevel;
+  const hasAnyData = rating != null || (openingHours && openingHours.length > 0) || priceLevel;
   if (!hasAnyData) return null;
 
   const priceLevelDisplay = formatPriceLevel(priceLevel);
-  const todayHours = getTodayHours(openingHours);
+  const { text: entryDayHoursText, dayName, googleIndex } = getEntryDayHours(openingHours, entryStartTime);
 
   return (
     <div className="space-y-2">
@@ -174,31 +175,25 @@ const PlaceDetailsSection = ({ option }: { option: EntryOption }) => {
         </div>
       )}
 
-      {/* Phone */}
-      {phone && (
-        <a
-          href={`tel:${phone}`}
-          className="flex items-center gap-1.5 text-sm text-primary hover:underline"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Phone className="h-3.5 w-3.5" />
-          {phone}
-        </a>
-      )}
-
-      {/* Opening Hours */}
+      {/* Opening Hours — collapsed, shows entry day */}
       {openingHours && openingHours.length > 0 && (
         <Collapsible open={hoursOpen} onOpenChange={setHoursOpen}>
           <CollapsibleTrigger className="flex items-center gap-1.5 text-sm text-foreground hover:text-primary transition-colors w-full text-left">
-            <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="flex-1 truncate text-muted-foreground">
-              {todayHours || 'Opening hours'}
+            <span className="shrink-0">🕐</span>
+            <span className="flex-1 truncate text-muted-foreground text-xs font-semibold">
+              {dayName}: {entryDayHoursText || 'Hours unavailable'}
             </span>
             <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', hoursOpen && 'rotate-180')} />
           </CollapsibleTrigger>
           <CollapsibleContent className="pt-1.5 pl-5 space-y-0.5">
             {openingHours.map((day, i) => (
-              <p key={i} className="text-xs text-muted-foreground">{day}</p>
+              <p key={i} className={cn(
+                'text-xs',
+                i === googleIndex ? 'text-primary font-semibold' : 'text-muted-foreground'
+              )}>
+                {day}
+                {i === googleIndex && <span className="ml-1 text-[10px]">← This day</span>}
+              </p>
             ))}
           </CollapsibleContent>
         </Collapsible>
@@ -1564,9 +1559,11 @@ const EntrySheet = ({
             ) : (
               <>
                 {/* Editable Start / End / Duration */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                {/* Time + Map side-by-side grid */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  {/* Left: Time card */}
+                  <div className="rounded-xl border border-border bg-muted/30 p-3">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Time</p>
                     <div className="flex items-center gap-1.5">
                       <InlineField
                         value={formatTimeProp?.(entry.start_time) ?? ''}
@@ -1584,7 +1581,7 @@ const EntrySheet = ({
                         renderDisplay={(val) => <span className="text-sm font-medium">{val}</span>}
                       />
                     </div>
-                    <span className="text-xs text-muted-foreground ml-auto">
+                    <p className="text-lg font-extrabold text-primary mt-1">
                       {(() => {
                         const diffMs = new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime();
                         const totalMin = Math.round(diffMs / 60000);
@@ -1593,9 +1590,20 @@ const EntrySheet = ({
                         const m = totalMin % 60;
                         return h > 0 ? `${h}h${m ? ` ${m}m` : ''}` : `${m}m`;
                       })()}
-                    </span>
-                    {isLocked && <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary"><Lock className="h-2.5 w-2.5 text-primary-foreground" /></span>}
+                    </p>
+                    {isLocked && <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary mt-1"><Lock className="h-2.5 w-2.5 text-primary-foreground" /></span>}
                   </div>
+
+                  {/* Right: Map preview */}
+                  {option.latitude != null && option.longitude != null ? (
+                    <div className="rounded-xl border border-border overflow-hidden relative">
+                      <MapPreview latitude={option.latitude} longitude={option.longitude} locationName={option.location_name} />
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-border bg-muted/30 flex items-center justify-center">
+                      <span className="text-2xl">📍</span>
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -1609,52 +1617,78 @@ const EntrySheet = ({
 
             {/* Enriched Place Details (non-flight, non-transport) */}
             {option.category !== 'flight' && option.category !== 'transfer' && (
-              <PlaceDetailsSection option={option} />
+              <PlaceDetailsSection option={option} entryStartTime={entry.start_time} />
             )}
 
-            {/* Website (hidden for transport) */}
-            {option.category !== 'transfer' && option.category !== 'flight' && (option.website || isEditor) && (
-              <InlineField
-                value={option.website || ''}
-                canEdit={isEditor}
-                onSave={async (v) => handleInlineSaveOption('website', v)}
-                renderDisplay={(val) =>
-                  val ? (
-                    <a href={val} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-sm text-primary hover:underline" onClick={e => e.stopPropagation()}>
-                      <ExternalLink className="h-3.5 w-3.5" /> Visit website
-                    </a>
-                  ) : <span className="text-sm text-muted-foreground italic">Add website</span>
-                }
-                placeholder="https://..."
-              />
+            {/* Phone + Website side-by-side grid */}
+            {option.category !== 'transfer' && option.category !== 'flight' && (
+              <div className="grid grid-cols-2 gap-2.5">
+                {/* Phone */}
+                <div className="rounded-xl border border-border bg-muted/30 p-3 flex items-center gap-2">
+                  <span className="text-sm">📞</span>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Phone</p>
+                    {(option as any).phone ? (
+                      <a href={`tel:${(option as any).phone}`} className="text-xs text-primary hover:underline" onClick={e => e.stopPropagation()}>
+                        {(option as any).phone}
+                      </a>
+                    ) : (
+                      <span className="text-xs text-muted-foreground italic">—</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Website */}
+                <div className="rounded-xl border border-border bg-muted/30 p-3 flex items-center gap-2">
+                  <span className="text-sm">🔗</span>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Website</p>
+                    {option.website ? (
+                      <a href={option.website} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline truncate block max-w-[120px]" onClick={e => e.stopPropagation()}>
+                        {(() => { try { return new URL(option.website).hostname; } catch { return option.website; } })()}
+                      </a>
+                    ) : isEditor ? (
+                      <InlineField
+                        value=""
+                        canEdit={isEditor}
+                        onSave={async (v) => handleInlineSaveOption('website', v)}
+                        renderDisplay={() => <span className="text-xs text-muted-foreground italic">Add</span>}
+                        placeholder="https://..."
+                      />
+                    ) : (
+                      <span className="text-xs text-muted-foreground italic">—</span>
+                    )}
+                  </div>
+                </div>
+              </div>
             )}
 
-            {/* Notes */}
-            {isEditor ? (
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Notes</Label>
-                <textarea
-                  value={notesValue}
-                  onChange={(e) => { setNotesValue(e.target.value); setNotesDirty(true); }}
-                  onBlur={handleNotesSave}
-                  placeholder="Add a note..."
-                  className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
-                  rows={3}
-                />
-              </div>
-            ) : notesValue ? (
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Notes</Label>
-                <p className="text-sm text-foreground whitespace-pre-wrap">{notesValue}</p>
-              </div>
-            ) : null}
-
-            {/* Map + Google Maps link */}
-            {option.latitude != null && option.longitude != null && (
-              <div className="space-y-2">
-              <MapPreview latitude={option.latitude} longitude={option.longitude} locationName={option.location_name} />
-              </div>
-            )}
+            {/* Notes — collapsible */}
+            <Collapsible>
+              <CollapsibleTrigger className="flex items-center gap-1.5 text-sm font-semibold text-foreground w-full text-left py-1">
+                <span>📝</span>
+                <span className="flex-1">Notes</span>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform [&[data-state=open]]:rotate-180" />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                {isEditor ? (
+                  <div className="space-y-1 pt-1">
+                    <textarea
+                      value={notesValue}
+                      onChange={(e) => { setNotesValue(e.target.value); setNotesDirty(true); }}
+                      onBlur={handleNotesSave}
+                      placeholder="Tap to add a note..."
+                      className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
+                      rows={3}
+                    />
+                  </div>
+                ) : notesValue ? (
+                  <p className="text-sm text-foreground whitespace-pre-wrap pt-1">{notesValue}</p>
+                ) : (
+                  <p className="text-sm text-muted-foreground italic pt-1">No notes yet</p>
+                )}
+              </CollapsibleContent>
+            </Collapsible>
 
             {/* Vote (hidden for transport & flights) */}
             {currentUser && option.category !== 'transfer' && option.category !== 'flight' && (

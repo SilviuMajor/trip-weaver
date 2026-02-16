@@ -22,6 +22,19 @@ const formatDuration = (startIso: string, endIso: string): string => {
   return `${h}h ${m}m`;
 };
 
+// ─── Helpers for diagonal fade design ───
+const extractHue = (hslString: string): number => {
+  const match = hslString.match(/hsl\((\d+)/);
+  return match ? parseInt(match[1]) : 260;
+};
+
+const DIAGONAL_GRADIENTS = {
+  full: 'linear-gradient(152deg, transparent 30%, rgba(10,8,6,0.3) 40%, rgba(10,8,6,0.72) 50%, rgba(10,8,6,0.94) 60%)',
+  condensed: 'linear-gradient(155deg, transparent 22%, rgba(10,8,6,0.25) 32%, rgba(10,8,6,0.68) 42%, rgba(10,8,6,0.92) 52%)',
+  medium: 'linear-gradient(158deg, transparent 18%, rgba(10,8,6,0.3) 28%, rgba(10,8,6,0.78) 40%, rgba(10,8,6,0.96) 52%)',
+  compact: 'linear-gradient(160deg, transparent 12%, rgba(10,8,6,0.25) 22%, rgba(10,8,6,0.75) 34%, rgba(10,8,6,0.96) 46%)',
+};
+
 interface EntryCardProps {
   option: EntryOption;
   startTime: string;
@@ -132,8 +145,8 @@ const EntryCard = ({
   const isFlight = option.category === 'flight';
   const isAirportProcessing = option.category === 'airport_processing';
 
-
-  const tintBg = isProcessing ? `${catColor}10` : `${catColor}18`;
+  const isDark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
+  const hue = extractHue(catColor);
 
   const handleLockClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -279,7 +292,49 @@ const EntryCard = ({
     </Popover>
   );
 
-  // ─── Transport connector card (all variants) ───
+  // ─── Glossy no-image backgrounds ───
+  const glossyBg = isDark
+    ? `linear-gradient(145deg, hsl(${hue}, 30%, 16%), hsl(${hue}, 15%, 9%))`
+    : `linear-gradient(145deg, hsl(${hue}, 25%, 92%), hsl(${hue}, 15%, 86%))`;
+  const glassBg = isDark
+    ? 'linear-gradient(152deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.02) 40%, transparent 55%)'
+    : 'linear-gradient(152deg, rgba(255,255,255,0.6) 25%, rgba(255,255,255,0.3) 40%, transparent 55%)';
+  const glossyBorder = isDark ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.06)';
+
+  // ─── Duration pill styles ───
+  const durationPillStyle = (size: 'l' | 'm' | 's' | 'xs') => {
+    const sizes = {
+      l: { fontSize: 14, padding: '5px 14px', top: 10, right: 10 },
+      m: { fontSize: 12, padding: '4px 11px', top: 7, right: 7 },
+      s: { fontSize: 11, padding: '3px 9px', top: 5, right: 5 },
+      xs: { fontSize: 10, padding: '2px 7px', top: 3, right: 4 },
+    };
+    const s = sizes[size];
+    const base: React.CSSProperties = {
+      position: 'absolute', top: s.top, right: s.right, zIndex: 20,
+      borderRadius: 20, fontSize: s.fontSize, padding: s.padding,
+      fontWeight: 700, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+    };
+    if (firstImage) {
+      return { ...base, background: 'rgba(255,255,255,0.22)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' };
+    }
+    if (isDark) {
+      return { ...base, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff' };
+    }
+    return { ...base, background: 'rgba(0,0,0,0.06)', border: '1px solid rgba(0,0,0,0.08)', color: 'hsl(25, 30%, 20%)' };
+  };
+
+  // ─── Corner flag ───
+  const cornerFlag = (emojiSize: number, pad: string) => (
+    <div
+      className="absolute top-0 left-0 z-20 flex items-center justify-center"
+      style={{ background: catColor, padding: pad, borderRadius: '14px 0 8px 0' }}
+    >
+      <span className="text-white" style={{ fontSize: emojiSize, lineHeight: 1 }}>{catEmoji}</span>
+    </div>
+  );
+
+  // ─── Transport connector card (all variants) — UNCHANGED ───
   if (isTransfer) {
     const mode = detectTransportMode(option.name);
     const optionDistanceKm = (option as any).distance_km as number | null | undefined;
@@ -430,92 +485,53 @@ const EntryCard = ({
     );
   }
 
-  // Medium layout for sub-hour entries (40-80px)
-  if (isMedium) {
-    return (
-      <div
-        onClick={onClick}
-        onMouseDown={onDragStart}
-        onTouchStart={onTouchDragStart}
-        onTouchMove={onTouchDragMove}
-        onTouchEnd={onTouchDragEnd}
-        className={cn(
-          'group relative overflow-hidden rounded-xl border shadow-sm transition-all hover:shadow-md',
-          isEntryPast && 'opacity-50 grayscale-[30%]',
-           isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-          isLocked && 'border-2 border-muted-foreground/20',
-          isShaking && 'animate-shake',
-          cardSizeClass
-        )}
-        style={{
-          touchAction: 'none',
-          borderColor: isLocked ? undefined : catColor,
-          borderLeftWidth: isLocked ? undefined : 3,
-          background: tintBg,
-        }}
-      >
-        <div className="relative z-10 flex h-full flex-col justify-center gap-0.5 px-2.5 py-1 pointer-events-none">
-          <span className="truncate text-xs font-semibold leading-tight">
-            {catEmoji} {option.name}
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            {formatTime(startTime)} — {formatTime(endTime)}
-            <span className="ml-1 font-bold">{durationLabel}</span>
-          </span>
-        </div>
-        {overlapFraction > 0 && (
-          <div
-            className="absolute inset-x-0 z-[1] pointer-events-none rounded-xl"
-            style={{
-              background: 'linear-gradient(to right, hsla(0, 70%, 50%, 0.25), hsla(0, 70%, 50%, 0.1))',
-              ...(overlapPosition === 'top'
-                ? { top: 0, height: `${overlapFraction * 100}%` }
-                : { bottom: 0, height: `${overlapFraction * 100}%` }),
-            }}
-          />
-        )}
-      </div>
-    );
-  }
+  // ─── Overlap overlay helper ───
+  const overlapOverlay = overlapFraction > 0 ? (
+    <div
+      className="absolute inset-x-0 z-[1] pointer-events-none rounded-[14px]"
+      style={{
+        background: 'linear-gradient(to right, hsla(0, 70%, 50%, 0.25), hsla(0, 70%, 50%, 0.1))',
+        ...(overlapPosition === 'top'
+          ? { top: 0, height: `${overlapFraction * 100}%` }
+          : { bottom: 0, height: `${overlapFraction * 100}%` }),
+      }}
+    />
+  ) : null;
 
-  // Compact single-line layout for very short entries
-  if (isCompact) {
-    return (
-      <div
-        onClick={onClick}
-        onMouseDown={onDragStart}
-        onTouchStart={onTouchDragStart}
-        onTouchMove={onTouchDragMove}
-        onTouchEnd={onTouchDragEnd}
-        className={cn(
-          'group relative flex items-center gap-1.5 overflow-hidden rounded-lg border shadow-sm transition-all hover:shadow-md',
-          isEntryPast && 'opacity-50 grayscale-[30%]',
-          isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-          isLocked && 'border-2 border-muted-foreground/20',
-          isShaking && 'animate-shake',
-          cardSizeClass
-        )}
-        style={{
-          touchAction: 'none',
-          borderColor: isLocked ? undefined : catColor,
-          borderLeftWidth: isLocked ? undefined : 3,
-          background: tintBg,
-        }}
-      >
-        <div className="relative z-10 flex w-full items-center gap-1.5 px-2 py-0.5 pointer-events-none">
-          <span className="text-xs shrink-0">{catEmoji}</span>
-          <span className="truncate text-[11px] font-semibold leading-tight flex-1 min-w-0">
-            {option.name}
-          </span>
-          <span className="shrink-0 text-[9px] text-muted-foreground whitespace-nowrap">
-            {formatTime(startTime)}–{formatTime(endTime)} <span className="font-bold">{durationLabel}</span>
-          </span>
-        </div>
-      </div>
-    );
-  }
+  // ─── Shared card wrapper for all non-transfer tiers ───
+  const cardBase = (tier: 'full' | 'condensed' | 'medium' | 'compact', children: React.ReactNode) => (
+    <div
+      onClick={onClick}
+      onMouseDown={onDragStart}
+      onTouchStart={onTouchDragStart}
+      onTouchMove={onTouchDragMove}
+      onTouchEnd={onTouchDragEnd}
+      className={cn(
+        'group relative overflow-hidden rounded-[14px] shadow-sm transition-all hover:shadow-md',
+        isEntryPast && 'opacity-50 grayscale-[30%]',
+        isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
+        isShaking && 'animate-shake',
+        cardSizeClass
+      )}
+      style={{ touchAction: 'none' }}
+    >
+      {/* Background: Image + diagonal fade OR glossy */}
+      {firstImage ? (
+        <>
+          <img src={firstImage} alt={option.name} className="absolute inset-0 w-full h-full object-cover" />
+          <div className="absolute inset-0 z-[5]" style={{ background: DIAGONAL_GRADIENTS[tier] }} />
+        </>
+      ) : (
+        <>
+          <div className="absolute inset-0" style={{ background: glossyBg, border: glossyBorder }} />
+          <div className="absolute inset-0 z-[5]" style={{ background: glassBg }} />
+        </>
+      )}
+      {children}
+      {overlapOverlay}
+    </div>
+  );
 
-  // Condensed layout for 1-2 hour events (80-160px)
   // Detect hotel utility blocks for aesthetic labels
   const isCheckIn = option.name?.startsWith('Check in ·');
   const isCheckOut = option.name?.startsWith('Check out ·') || linkedType === 'checkout';
@@ -525,350 +541,184 @@ const EntryCard = ({
       ? option.name?.replace(/^Check out · /, '')
       : option.name;
 
-  if (isCondensed) {
-    return (
-      <div
-        onClick={onClick}
-        onMouseDown={onDragStart}
-        onTouchStart={onTouchDragStart}
-        onTouchMove={onTouchDragMove}
-        onTouchEnd={onTouchDragEnd}
-        className={cn(
-          'group relative overflow-hidden rounded-xl border shadow-sm transition-all hover:shadow-md',
-          isEntryPast && 'opacity-50 grayscale-[30%]',
-          isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-          isLocked && 'border-2 border-muted-foreground/20',
-          isShaking && 'animate-shake',
-          cardSizeClass
-        )}
-        style={{
-          touchAction: 'none',
-          borderColor: isLocked ? undefined : catColor,
-          borderLeftWidth: isLocked ? undefined : 3,
-          background: firstImage ? undefined : tintBg,
-        }}
-      >
-        {firstImage && (
-          <div className="absolute inset-0">
-            <img src={firstImage} alt={option.name} className="h-full w-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-black/5" />
-          </div>
-        )}
-        <div className={cn(
-          'relative z-10 flex h-full flex-col justify-between px-2.5 py-1.5 pointer-events-none',
-          firstImage ? 'text-white' : 'text-foreground'
-        )}>
-          <div>
-            <div className="flex items-center gap-1.5">
-              {option.category && (
-                <span
-                  className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-semibold mb-1"
-                  style={{ backgroundColor: catColor, color: '#fff' }}
-                >
-                  <span className="text-[10px]">{catEmoji}</span>
-                  {catName}
-                </span>
-              )}
-              {isCheckIn && (
-                <span className={cn('text-[8px] uppercase tracking-wider font-semibold mb-1', firstImage ? 'text-white/60' : 'text-muted-foreground')}>CHECK-IN</span>
-              )}
-            </div>
-            <h3 className="truncate text-sm font-bold leading-tight">
-              {displayName}
-            </h3>
-            {(option as any).rating != null && (
-              <p className={cn(
-                'text-[10px]',
-                firstImage ? 'text-white/70' : 'text-muted-foreground'
-              )}>
-                ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
-              </p>
-            )}
-            {option.location_name && (
-              <p className={cn('flex items-center gap-0.5 text-[9px] truncate', firstImage ? 'text-white/70' : 'text-muted-foreground')}>
-                <MapPin className="h-2.5 w-2.5 shrink-0" />
-                <span className="truncate">{option.location_name}</span>
-              </p>
-            )}
-            {notes && (
-              <p className={cn(
-                'text-[9px] line-clamp-1',
-                firstImage ? 'text-white/60' : 'text-muted-foreground'
-              )}>
-                {notes}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <span className={cn(
-                'text-[10px]',
-                firstImage ? 'text-white/70' : 'text-muted-foreground'
-              )}>
-                {formatTime(startTime)} — {formatTime(endTime)}
-              </span>
-            </div>
-            <span className={cn(
-              'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
-              firstImage ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
-            )}>
-              {durationLabel}
-            </span>
-          </div>
+  // Text color depends on whether we have an image (always white) or glossy (depends on theme)
+  const textColor = firstImage ? 'text-white' : isDark ? 'text-white' : 'text-foreground';
+  const subTextColor = firstImage ? 'text-white/75' : isDark ? 'text-white/60' : 'text-muted-foreground';
+  const faintTextColor = firstImage ? 'text-white/40' : isDark ? 'text-white/40' : 'text-muted-foreground/60';
+
+  // ═══ COMPACT (<40px) ═══
+  if (isCompact) {
+    return cardBase('compact', (
+      <>
+        {cornerFlag(9, '2px 4px')}
+        <div style={durationPillStyle('xs')}>{durationLabel}</div>
+        <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[75%] px-2', textColor)}>
+          <span className="text-[12px] font-bold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{option.name}</span>
         </div>
         {isCheckOut && (
-          <span className={cn(
-            'absolute bottom-1 left-2.5 z-10 text-[10px] font-semibold uppercase tracking-wider',
-            firstImage ? 'text-white/60' : 'text-muted-foreground/70'
-          )}>checkout</span>
+          <span className={cn('absolute bottom-0.5 left-7 z-10 text-[8px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
         )}
-        {overlapFraction > 0 && (
-          <div
-            className="absolute inset-x-0 z-[1] pointer-events-none rounded-xl"
-            style={{
-              background: 'linear-gradient(to right, hsla(0, 70%, 50%, 0.25), hsla(0, 70%, 50%, 0.1))',
-              ...(overlapPosition === 'top'
-                ? { top: 0, height: `${overlapFraction * 100}%` }
-                : { bottom: 0, height: `${overlapFraction * 100}%` }),
-            }}
-          />
-        )}
-    </div>
-    );
+      </>
+    ));
   }
 
-  return (
-    <div
-      onClick={onClick}
-      onMouseDown={onDragStart}
-      onTouchStart={onTouchDragStart}
-      onTouchMove={onTouchDragMove}
-      onTouchEnd={onTouchDragEnd}
-        className={cn(
-          'group relative overflow-hidden rounded-2xl border shadow-md transition-all hover:shadow-lg',
-          isEntryPast && 'opacity-50 grayscale-[30%]',
-          isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
-          isLocked && 'border-2 border-muted-foreground/20',
-          isProcessing && 'opacity-80',
-          isShaking && 'animate-shake',
-          cardSizeClass
+  // ═══ MEDIUM (40-79px) ═══
+  if (isMedium) {
+    return cardBase('medium', (
+      <>
+        {cornerFlag(11, '3px 5px')}
+        <div style={durationPillStyle('s')}>{durationLabel}</div>
+        <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[72%] px-2.5 py-1.5', textColor)}>
+          <span className="text-[13px] font-bold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{displayName}</span>
+          <span className={cn('text-[10px]', faintTextColor)}>
+            {formatTime(startTime)} — {formatTime(endTime)}
+          </span>
+        </div>
+        {isCheckIn && (
+          <span className={cn('absolute bottom-1 left-8 z-10 text-[8px] uppercase tracking-wider font-semibold', faintTextColor)}>CHECK-IN</span>
         )}
-      style={{
-        touchAction: 'none',
-        ...(!firstImage ? {
-          borderColor: isLocked ? undefined : catColor,
-          borderLeftWidth: isLocked ? undefined : 4,
-        } : {}),
-      }}
-    >
-      {/* Background */}
-      {firstImage ? (
-        <div className="absolute inset-0">
-          <img src={firstImage} alt={option.name} className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-black/5" />
-        </div>
-      ) : (
-        <div className="absolute inset-0" style={{ background: tintBg }} />
-      )}
+        {isCheckOut && (
+          <span className={cn('absolute bottom-1 left-8 z-10 text-[8px] uppercase tracking-wider font-semibold', faintTextColor)}>checkout</span>
+        )}
+      </>
+    ));
+  }
 
-      {/* Content */}
-      <div className={cn(
-        'relative z-10 p-4 pointer-events-none',
-        firstImage ? 'text-white' : 'text-foreground',
-        isProcessing && 'p-3'
-      )}>
-        {/* Top row: Category + Options indicator */}
-        <div className="mb-3 flex items-start justify-between">
-          <div className="flex items-center gap-1.5">
-            {option.category && (
-              <span
-                className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                style={{ backgroundColor: catColor, color: '#fff' }}
-              >
-                <span className="text-xs">{catEmoji}</span>
-                {isProcessing
-                  ? (linkedType === 'checkin' ? 'Check-in' : 'Checkout')
-                  : catName
-                }
-              </span>
-            )}
-            {isCheckIn && (
-              <span className={cn('text-[8px] uppercase tracking-wider font-semibold', firstImage ? 'text-white/60' : 'text-muted-foreground')}>CHECK-IN</span>
-            )}
-          </div>
-          {totalOptions > 1 && (
-            <span className={cn(
-              'text-[10px] font-medium',
-              firstImage ? 'text-white/70' : 'text-muted-foreground'
-            )}>
-              {optionIndex + 1}/{totalOptions}
-            </span>
+  // ═══ CONDENSED (80-159px) ═══
+  if (isCondensed) {
+    return cardBase('condensed', (
+      <>
+        {cornerFlag(13, '5px 7px')}
+        <div style={durationPillStyle('m')}>{durationLabel}</div>
+        <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] px-3 py-2.5', textColor)} style={{ pointerEvents: 'none' }}>
+          {isCheckIn && (
+            <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-0.5', faintTextColor)}>CHECK-IN</span>
           )}
+          <h3 className="text-[14px] font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
+            {displayName}
+          </h3>
+          {(option as any).rating != null && (
+            <p className={cn('text-[10px] truncate', subTextColor)}>
+              ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
+            </p>
+          )}
+          <p className={cn('text-[10px]', faintTextColor)}>
+            {formatTime(startTime)} — {formatTime(endTime)}
+          </p>
         </div>
+        {isCheckOut && (
+          <span className={cn('absolute bottom-1 left-2.5 z-10 text-[10px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
+        )}
+      </>
+    ));
+  }
 
-        {/* Title with emoji */}
+  // ═══ FULL (≥160px) ═══
+  return cardBase('full', (
+    <>
+      {cornerFlag(16, '5px 7px')}
+      <div style={durationPillStyle('l')}>{durationLabel}</div>
+
+      {/* Content — bottom-right */}
+      <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] p-4', textColor)} style={{ pointerEvents: 'none' }}>
+        {isCheckIn && (
+          <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-1', faintTextColor)}>CHECK-IN</span>
+        )}
+        {totalOptions > 1 && (
+          <span className={cn('text-[10px] font-medium block mb-1', subTextColor)}>
+            {optionIndex + 1}/{totalOptions}
+          </span>
+        )}
         <h3
-          className={cn(
-            'mb-2 flex items-center gap-2 font-display font-bold leading-tight',
-            isProcessing ? 'text-sm' : 'text-lg'
-          )}
+          className="text-[17px] font-bold leading-tight mb-1"
+          style={{ textShadow: firstImage ? '0 1px 4px rgba(0,0,0,0.3)' : undefined }}
         >
-          {!option.category && <span className="text-xl">{catEmoji}</span>}
           {displayName}
         </h3>
-
-        {/* Rating */}
         {!isTransfer && !isProcessing && (option as any).rating != null && (
-          <p className={cn(
-            'mb-1 text-[10px]',
-            firstImage ? 'text-white/70' : 'text-muted-foreground'
-          )}>
+          <p className={cn('text-[11px] mb-0.5', subTextColor)}>
             ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
           </p>
         )}
         {!isTransfer && !isProcessing && option.location_name && (
-          <p className={cn('mb-2 flex items-center gap-1 text-xs truncate', firstImage ? 'text-white/80' : 'text-muted-foreground')}>
-            <MapPin className="h-3 w-3 shrink-0" />
-            <span className="truncate">{option.location_name}</span>
+          <p className={cn('text-[10px] truncate mb-0.5', subTextColor)}>
+            📍 {option.location_name}
           </p>
         )}
-
-        {/* Notes */}
         {notes && !isTransfer && !isProcessing && (
-          <p className={cn(
-            'mb-2 text-xs line-clamp-2',
-            firstImage ? 'text-white/70' : 'text-muted-foreground'
-          )}>
+          <p className={cn('text-[10px] line-clamp-2 mb-0.5', subTextColor)}>
             {notes}
           </p>
         )}
 
-        {/* Transfer FROM → TO display */}
-        {isTransfer && (option.departure_location || option.arrival_location) && (
-          <div className={cn(
-            'mb-2 flex items-center gap-1.5 text-xs',
-            firstImage ? 'text-white/80' : 'text-muted-foreground'
-          )}>
-            <span>{option.departure_location}</span>
-            <ArrowRight className="h-3 w-3" />
-            <span>{option.arrival_location}</span>
-          </div>
-        )}
-
-        {/* Contingency buffer label for transport */}
-        {isTransfer && (() => {
-          const totalMs = new Date(endTime).getTime() - new Date(startTime).getTime();
-          const blockMin = Math.round(totalMs / 60000);
-          const contingency = blockMin % 5 === 0 ? blockMin - Math.floor(blockMin / 5) * 5 : 0;
-          // A simpler approach: if block is a multiple of 5 and > real duration, show contingency
-          // We don't know real duration here, but we can detect if the block is rounded
-          // For now, show nothing - contingency is visual in the block size
-          return null;
-        })()}
-
-        {/* Mini route map on transport cards */}
-        {isTransfer && (option as any).route_polyline && !isCompact && !isMedium && (
-          <div className="mb-2">
-            <RouteMapPreview
-              polyline={(option as any).route_polyline}
-              fromAddress={option.departure_location || ''}
-              toAddress={option.arrival_location || ''}
-              travelMode="transit"
-              size="mini"
-            />
-          </div>
-        )}
-
-        {/* Time / Flight info */}
+        {/* Flight info */}
         {option.category === 'flight' && option.departure_location ? (
-          <div className={cn(
-            'mb-2 flex items-center gap-1.5 text-xs',
-            firstImage ? 'text-white/80' : 'text-muted-foreground'
-          )}>
-            <Plane className="h-3 w-3" />
-            <span>
-              {option.departure_location?.split(' - ')[0]}{option.departure_terminal ? ` T${option.departure_terminal}` : ''} {formatTimeInTz(startTime, option.departure_tz)} → {option.arrival_location?.split(' - ')[0]}{option.arrival_terminal ? ` T${option.arrival_terminal}` : ''} {formatTimeInTz(endTime, option.arrival_tz)}
-            </span>
-          </div>
-        ) : !isTransfer && !isProcessing && (
-          <div className={cn(
-            'mb-2 flex items-center gap-1.5 text-xs',
-            firstImage ? 'text-white/80' : 'text-muted-foreground'
-          )}>
-            <Clock className="h-3 w-3" />
-            <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
-          </div>
+          <p className={cn('text-[10px]', faintTextColor)}>
+            {option.departure_location?.split(' - ')[0]}{option.departure_terminal ? ` T${option.departure_terminal}` : ''} → {option.arrival_location?.split(' - ')[0]}{option.arrival_terminal ? ` T${option.arrival_terminal}` : ''}
+          </p>
+        ) : !isProcessing && (
+          <p className={cn('text-[10px] mt-0.5', faintTextColor)}>
+            {formatTime(startTime)} — {formatTime(endTime)}
+          </p>
         )}
 
-        {/* Processing: show time compactly */}
+        {/* Processing time */}
         {isProcessing && (
-          <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <Clock className="h-3 w-3" />
-            <span>{formatTime(startTime)} — {formatTime(endTime)}</span>
-          </div>
+          <p className={cn('text-[10px]', faintTextColor)}>
+            {formatTime(startTime)} — {formatTime(endTime)}
+          </p>
         )}
-
-        {/* Bottom row: Distance + Duration + Votes */}
-        {!isProcessing && (
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {distanceKm !== null && distanceKm !== undefined && (
-                <div className={cn(
-                  'flex items-center gap-1 text-xs',
-                  firstImage ? 'text-white/70' : 'text-muted-foreground'
-                )}>
-                  <MapPin className="h-3 w-3" />
-                  <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className={cn(
-                'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
-                firstImage ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
-              )}>
-                {durationLabel}
-              </span>
-              {userId && totalOptions > 1 && option.category !== 'transfer' && option.category !== 'flight' && (
-                <span className="pointer-events-auto">
-                <VoteButton
-                  optionId={option.id}
-                  userId={userId}
-                  voteCount={option.vote_count ?? 0}
-                  hasVoted={hasVoted}
-                  locked={votingLocked}
-                  onVoteChange={onVoteChange}
-                />
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
       </div>
 
-      {isCheckOut && (
-        <span className={cn(
-          'absolute bottom-1 left-3 z-10 text-[10px] font-semibold uppercase tracking-wider',
-          firstImage ? 'text-white/60' : 'text-muted-foreground/70'
-        )}>checkout</span>
+      {/* Distance (bottom-left) */}
+      {!isProcessing && distanceKm !== null && distanceKm !== undefined && (
+        <div className={cn('absolute bottom-4 left-4 z-10 flex items-center gap-1 text-[10px]', faintTextColor)}>
+          <MapPin className="h-3 w-3" />
+          <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
+        </div>
       )}
 
-      {/* Overlap red tint overlay */}
-      {overlapFraction > 0 && (
-        <div
-          className="absolute inset-x-0 z-[1] pointer-events-none rounded-2xl"
-          style={{
-            background: 'linear-gradient(to right, hsla(0, 70%, 50%, 0.25), hsla(0, 70%, 50%, 0.1))',
-            ...(overlapPosition === 'top'
-              ? { top: 0, height: `${overlapFraction * 100}%` }
-              : { bottom: 0, height: `${overlapFraction * 100}%` }),
-          }}
-        />
+      {/* Vote button (bottom-left, above distance) */}
+      {!isProcessing && userId && totalOptions > 1 && option.category !== 'transfer' && option.category !== 'flight' && (
+        <div className="absolute bottom-12 left-4 z-10 pointer-events-auto">
+          <VoteButton
+            optionId={option.id}
+            userId={userId}
+            voteCount={option.vote_count ?? 0}
+            hasVoted={hasVoted}
+            locked={votingLocked}
+            onVoteChange={onVoteChange}
+          />
+        </div>
       )}
-    </div>
-  );
+
+      {/* Lock icon */}
+      {isLocked && (
+        <div className="absolute top-2.5 left-[50%] -translate-x-1/2 z-20">
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary">
+            <Lock className="h-3 w-3 text-primary-foreground" />
+          </span>
+        </div>
+      )}
+
+      {/* Mini route map on transport cards */}
+      {isTransfer && (option as any).route_polyline && (
+        <div className="absolute bottom-16 left-4 right-4 z-10">
+          <RouteMapPreview
+            polyline={(option as any).route_polyline}
+            fromAddress={option.departure_location || ''}
+            toAddress={option.arrival_location || ''}
+            travelMode="transit"
+            size="mini"
+          />
+        </div>
+      )}
+
+      {isCheckOut && (
+        <span className={cn('absolute bottom-1 left-3 z-10 text-[10px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
+      )}
+    </>
+  ));
 };
 
 export default EntryCard;
