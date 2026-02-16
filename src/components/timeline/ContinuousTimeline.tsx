@@ -1429,6 +1429,7 @@ const ContinuousTimeline = ({
                         onTouchDragEnd={onTouchEnd}
                         isShaking={shakeEntryId === entry.id}
                         entryId={entry.id}
+                        onToggleLock={isEditor && onToggleLock ? () => onToggleLock(entry.id, !!isLocked) : undefined}
                       />
                       {/* One-time card hint tooltip */}
                       {showCardHint && index === firstHintIndex && (
@@ -1441,25 +1442,6 @@ const ContinuousTimeline = ({
                             <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-foreground rotate-45" />
                           </div>
                         </div>
-                      )}
-                      {/* Lock icon outside card — right side */}
-                      {isEditor && onToggleLock && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onToggleLock(entry.id, !!isLocked);
-                          }}
-                          className={cn(
-                            "absolute top-1/2 -translate-y-1/2 -right-3 z-30 flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
-                            isLocked ? "bg-primary" : "bg-background"
-                          )}
-                        >
-                          {isLocked ? (
-                            <Lock className="h-4 w-4 text-primary-foreground" />
-                          ) : (
-                            <LockOpen className="h-4 w-4 text-muted-foreground/40" />
-                          )}
-                        </button>
                       )}
                       {/* Magnet snap icon outside card — bottom right */}
                       {magnetState.showMagnet && (
