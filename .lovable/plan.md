@@ -1,87 +1,94 @@
 
 
-# Global Places Table, Sync Edge Function, and Global Planner Page
+# Reverse Geocode City/Country + Grouped Global Planner View
 
 ## Overview
-This is a multi-part feature: create a `global_places` database table, a sync edge function, a `GlobalPlace` TypeScript type, dashboard navigation buttons, routes, and a new Global Planner page showing all saved places.
+Add reverse geocoding to the sync edge function to populate `city` and `country`, then upgrade the Global Planner from a flat list to a country/city hierarchy with Netflix-style category rows when drilling into a city.
 
-## Part 1: Database Migration
+## Part 1: Update Sync Edge Function
 
-Create the `global_places` table with the exact schema from the prompt: columns for place data, status/source enums via CHECK constraints, RLS policies scoped to `auth.uid() = user_id`, indexes for fast lookups, and a partial unique index on `(user_id, google_place_id)`.
+**File: `supabase/functions/sync-global-places/index.ts`**
 
-Also add the `updated_at` trigger reusing the existing `update_updated_at_column()` function.
+Add a `reverseGeocode` helper that calls the Google Geocoding API using the existing `GOOGLE_MAPS_API_KEY` secret. After upserting each place, if it has coordinates but no city/country already set, reverse geocode it. Cap at 20 geocode calls per sync to avoid API quota issues.
 
-## Part 2: Edge Function `sync-global-places`
-
-Create `supabase/functions/sync-global-places/index.ts`.
-
-- Accepts `{ userId, tripId? }` in POST body
-- Uses service role key to query `entries` joined with `trips` (filtering by `owner_id = userId`)
-- Fetches related `entry_options` with non-null `google_place_id`
-- Skips transport/airport categories
-- Determines `status` based on whether the trip's `end_date` is in the past
-- Upserts into `global_places` on the `(user_id, google_place_id)` conflict target
-- Returns `{ synced: N }`
-
-Add to `supabase/config.toml`:
-```toml
-[functions.sync-global-places]
-verify_jwt = false
+```typescript
+const reverseGeocode = async (lat: number, lng: number, apiKey: string) => {
+  const res = await fetch(
+    `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}&result_type=locality|administrative_area_level_1`
+  );
+  const data = await res.json();
+  if (!data.results?.length) return { city: null, country: null };
+  const components = data.results[0].address_components ?? [];
+  const city = components.find((c: any) => c.types.includes('locality'))?.long_name ?? null;
+  const country = components.find((c: any) => c.types.includes('country'))?.long_name ?? null;
+  return { city, country };
+};
 ```
 
-## Part 3: TypeScript Type
+Flow changes:
+- After all upserts complete, query `global_places` for this user where `city IS NULL` and `latitude IS NOT NULL`, limit 20
+- For each, call `reverseGeocode`, then update the row's `city` and `country`
+- Read `GOOGLE_MAPS_API_KEY` from `Deno.env.get()`
 
-Add `GlobalPlace` interface to `src/types/trip.ts` with all columns typed.
+## Part 2: Update GlobalPlanner -- Grouped View
 
-## Part 4: Dashboard Navigation
+**File: `src/pages/GlobalPlanner.tsx`**
 
-In `src/pages/Dashboard.tsx`, add two navigation cards ("My Places" and "Explore") in a horizontal row between the header and the trip list. Import `ClipboardList` and `Search` from lucide-react.
+Replace the flat list with a two-level view controlled by `selectedCity` state (already declared but unused).
 
-## Part 5: Routes
+### Top-level view (selectedCity is null)
 
-In `src/App.tsx`, add:
-- `/planner` -> `GlobalPlanner`
-- `/explore` -> placeholder `NotFound` (for Phase F)
+Group filtered places by `country` then `city`. Places without city/country go into an "Other" section.
 
-## Part 6: GlobalPlanner Page
+```typescript
+const grouped = useMemo(() => {
+  const filtered = statusFilter === 'all' ? places : places.filter(p => p.status === statusFilter);
+  const countryMap = new Map<string, Map<string, GlobalPlace[]>>();
+  const unsorted: GlobalPlace[] = [];
 
-Create `src/pages/GlobalPlanner.tsx`:
+  filtered.forEach(place => {
+    if (!place.country || !place.city) { unsorted.push(place); return; }
+    if (!countryMap.has(place.country)) countryMap.set(place.country, new Map());
+    const cities = countryMap.get(place.country)!;
+    if (!cities.has(place.city)) cities.set(place.city, []);
+    cities.get(place.city)!.push(place);
+  });
 
-- **Auth guard**: Uses `useAdminAuth`, redirects to `/auth` if not logged in
-- **Data fetch**: On mount, fetches `global_places` for current user. If empty, auto-invokes `sync-global-places` edge function, then refetches
-- **Filter tabs**: "All", "Visited", "Want to Go" -- styled as rounded pills matching existing patterns
-- **Sync button**: RefreshCw icon in header, triggers the sync function with loading spinner
-- **Place cards**: Each card shows category emoji (looked up from `findCategory`), name, address (truncated), rating stars, and status badge (green for visited, blue for want_to_go)
-- **Tapping a card**: Opens a Drawer with PlaceOverview using a temporary `EntryWithOptions` built from GlobalPlace data (same pattern as Explore's `buildTempEntry`)
-- **Back button**: Navigates to `/`
-
-### Layout
-```text
-+------------------------------------------+
-| <- Back              My Places    [Sync] |
-|                                          |
-| [All] [Visited] [Want to Go]            |
-|                                          |
-| restaurant De Kas            Visited     |
-| Amsterdam, NL  * 4.5                     |
-|                                          |
-| museum Rijksmuseum           Visited     |
-| Amsterdam, NL  * 4.7                     |
-|                                          |
-| coffee Lot Sixty One        Want to Go   |
-| Amsterdam  * 4.3                         |
-+------------------------------------------+
+  return { countryMap, unsorted };
+}, [places, statusFilter]);
 ```
+
+Render as country section headers with tappable city rows showing place count and a chevron. Tapping a city sets `selectedCity`.
+
+### City detail view (selectedCity is set)
+
+Header: back arrow + city name. Content: group the city's places by category, render each category as a horizontal scrolling row using `SidebarEntryCard` (build temporary `EntryWithOptions` from `GlobalPlace` using the existing `buildTempEntry`).
+
+Add a visited badge overlay on cards where `status === 'visited'`.
+
+### SidebarEntryCard visited badge
+
+**File: `src/components/timeline/SidebarEntryCard.tsx`**
+
+Add optional `visitedBadge?: boolean` prop. When true, render a small green check badge below the usage count badge position (top-right area, offset down):
+
+```tsx
+{visitedBadge && (
+  <div className="absolute top-8 right-2 z-20">
+    <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 font-bold bg-green-500/25 text-green-300 border-green-500/20">
+      Visited
+    </Badge>
+  </div>
+)}
+```
+
+Adjust the `top` offset if `usageCount` badge is also shown (use `top-14` when both exist).
 
 ## Files Summary
 
 | File | Change |
 |------|--------|
-| Database migration | Create `global_places` table, indexes, RLS policies, updated_at trigger |
-| `supabase/config.toml` | Add `sync-global-places` function config |
-| `supabase/functions/sync-global-places/index.ts` | New edge function |
-| `src/types/trip.ts` | Add `GlobalPlace` interface |
-| `src/App.tsx` | Add `/planner` and `/explore` routes |
-| `src/pages/Dashboard.tsx` | Add "My Places" and "Explore" navigation cards |
-| `src/pages/GlobalPlanner.tsx` | New page with place list, filters, sync, and PlaceOverview drawer |
+| `supabase/functions/sync-global-places/index.ts` | Add `reverseGeocode` helper; after upserts, geocode up to 20 places missing city/country |
+| `src/pages/GlobalPlanner.tsx` | Replace flat list with country/city grouped view; add city detail with Netflix category rows using SidebarEntryCard |
+| `src/components/timeline/SidebarEntryCard.tsx` | Add optional `visitedBadge` prop rendering a green "Visited" badge |
 
