@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, RefreshCw, Star, Loader2 } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Star, Loader2, ChevronRight, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Drawer, DrawerContent } from '@/components/ui/drawer';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { toast } from '@/hooks/use-toast';
 import { findCategory } from '@/lib/categories';
 import PlaceOverview from '@/components/timeline/PlaceOverview';
+import SidebarEntryCard from '@/components/timeline/SidebarEntryCard';
 import type { GlobalPlace, EntryWithOptions, EntryOption } from '@/types/trip';
 
 type StatusFilter = 'all' | 'visited' | 'want_to_go';
@@ -52,7 +54,7 @@ const buildTempEntry = (place: GlobalPlace): { entry: EntryWithOptions; option: 
     id: place.id,
     trip_id: place.source_trip_id ?? '',
     start_time: new Date().toISOString(),
-    end_time: new Date().toISOString(),
+    end_time: new Date(Date.now() + 3600000).toISOString(),
     is_locked: false,
     is_scheduled: false,
     scheduled_day: null,
@@ -77,6 +79,7 @@ const GlobalPlanner = () => {
   const [syncing, setSyncing] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedPlace, setSelectedPlace] = useState<GlobalPlace | null>(null);
+  const [selectedCity, setSelectedCity] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !isAdmin) navigate('/auth');
@@ -102,7 +105,7 @@ const GlobalPlanner = () => {
         body: { userId: adminUser.id },
       });
       if (error) throw error;
-      toast({ title: `Synced ${data?.synced ?? 0} places` });
+      toast({ title: `Synced ${data?.synced ?? 0} places, geocoded ${data?.geocoded ?? 0}` });
       await fetchPlaces();
     } catch (err: any) {
       toast({ title: 'Sync failed', description: err.message, variant: 'destructive' });
@@ -126,6 +129,38 @@ const GlobalPlanner = () => {
     [places, statusFilter]
   );
 
+  const grouped = useMemo(() => {
+    const countryMap = new Map<string, Map<string, GlobalPlace[]>>();
+    const unsorted: GlobalPlace[] = [];
+
+    filtered.forEach(place => {
+      if (!place.country || !place.city) { unsorted.push(place); return; }
+      if (!countryMap.has(place.country)) countryMap.set(place.country, new Map());
+      const cities = countryMap.get(place.country)!;
+      if (!cities.has(place.city)) cities.set(place.city, []);
+      cities.get(place.city)!.push(place);
+    });
+
+    return { countryMap, unsorted };
+  }, [filtered]);
+
+  // Get places for the selected city
+  const cityPlaces = useMemo(() => {
+    if (!selectedCity) return [];
+    return filtered.filter(p => p.city === selectedCity);
+  }, [filtered, selectedCity]);
+
+  // Group city places by category for Netflix rows
+  const cityCategories = useMemo(() => {
+    const catMap = new Map<string, GlobalPlace[]>();
+    cityPlaces.forEach(p => {
+      const key = p.category ?? 'other';
+      if (!catMap.has(key)) catMap.set(key, []);
+      catMap.get(key)!.push(p);
+    });
+    return catMap;
+  }, [cityPlaces]);
+
   const filters: { label: string; value: StatusFilter }[] = [
     { label: 'All', value: 'all' },
     { label: 'Visited', value: 'visited' },
@@ -147,34 +182,47 @@ const GlobalPlanner = () => {
       <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-lg">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+            <Button variant="ghost" size="icon" onClick={() => {
+              if (selectedCity) { setSelectedCity(null); } else { navigate('/'); }
+            }}>
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <h1 className="text-lg font-bold">My Places</h1>
+            <h1 className="text-lg font-bold">
+              {selectedCity ? (
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="h-4 w-4 text-primary" />
+                  {selectedCity}
+                </span>
+              ) : 'My Places'}
+            </h1>
           </div>
-          <Button variant="ghost" size="icon" onClick={syncPlaces} disabled={syncing}>
-            <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-          </Button>
+          {!selectedCity && (
+            <Button variant="ghost" size="icon" onClick={syncPlaces} disabled={syncing}>
+              <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+            </Button>
+          )}
         </div>
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-4">
         {/* Filter tabs */}
-        <div className="mb-4 flex gap-2">
-          {filters.map(f => (
-            <button
-              key={f.value}
-              onClick={() => setStatusFilter(f.value)}
-              className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
-                statusFilter === f.value
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+        {!selectedCity && (
+          <div className="mb-4 flex gap-2">
+            {filters.map(f => (
+              <button
+                key={f.value}
+                onClick={() => setStatusFilter(f.value)}
+                className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                  statusFilter === f.value
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {loading ? (
           <div className="space-y-3">
@@ -182,56 +230,128 @@ const GlobalPlanner = () => {
               <div key={i} className="h-20 animate-pulse rounded-xl bg-muted" />
             ))}
           </div>
+        ) : selectedCity ? (
+          /* ============ City Detail View — Netflix rows ============ */
+          <div className="space-y-6">
+            {cityPlaces.length === 0 ? (
+              <p className="py-20 text-center text-sm text-muted-foreground">No places in this city.</p>
+            ) : (
+              Array.from(cityCategories.entries()).map(([catKey, catPlaces]) => {
+                const cat = findCategory(catKey);
+                return (
+                  <div key={catKey}>
+                    <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <span>{cat?.emoji ?? '📌'}</span>
+                      <span>{cat?.name ?? catKey}</span>
+                      <span className="text-xs font-normal text-muted-foreground">({catPlaces.length})</span>
+                    </h3>
+                    <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none" style={{ scrollSnapType: 'x mandatory' }}>
+                      {catPlaces.map(place => {
+                        const { entry } = buildTempEntry(place);
+                        return (
+                          <div key={place.id} className="w-[180px] shrink-0" style={{ scrollSnapAlign: 'start' }}>
+                            <SidebarEntryCard
+                              entry={entry}
+                              onClick={() => setSelectedPlace(place)}
+                              compact
+                              visitedBadge={place.status === 'visited'}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-muted text-3xl">
-              📍
-            </div>
+            <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-muted text-3xl">📍</div>
             <p className="text-sm text-muted-foreground">
               {statusFilter === 'all' ? 'No places synced yet. Tap sync to import from your trips.' : `No ${statusFilter === 'visited' ? 'visited' : 'planned'} places.`}
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {filtered.map((place, i) => {
-              const cat = findCategory(place.category);
-              return (
-                <motion.button
-                  key={place.id}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.03 }}
-                  onClick={() => setSelectedPlace(place)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:bg-muted/50"
-                >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-lg">
-                    {cat?.emoji ?? '📍'}
+          /* ============ Grouped Country → City View ============ */
+          <div className="space-y-6">
+            {Array.from(grouped.countryMap.entries())
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([country, cities]) => (
+                <div key={country}>
+                  <h2 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">{country}</h2>
+                  <div className="space-y-1">
+                    {Array.from(cities.entries())
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([city, cityPlaces]) => (
+                        <motion.button
+                          key={city}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          onClick={() => setSelectedCity(city)}
+                          className="flex w-full items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-muted/50"
+                        >
+                          <div className="flex items-center gap-3">
+                            <MapPin className="h-4 w-4 text-primary" />
+                            <span className="font-medium text-sm">{city}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">{cityPlaces.length} places</span>
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                        </motion.button>
+                      ))}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold text-sm">{place.name}</p>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      {place.address && <span className="truncate">{place.address.split(',')[0]}</span>}
-                      {place.rating && (
-                        <span className="flex items-center gap-0.5 shrink-0">
-                          <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                          {place.rating}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <Badge
-                    variant="secondary"
-                    className={`shrink-0 text-[10px] ${
-                      place.status === 'visited'
-                        ? 'bg-green-500/15 text-green-600 border-green-500/30'
-                        : 'bg-blue-500/15 text-blue-600 border-blue-500/30'
-                    }`}
-                  >
-                    {place.status === 'visited' ? '✓ Visited' : 'Want to Go'}
-                  </Badge>
-                </motion.button>
-              );
-            })}
+                </div>
+              ))}
+
+            {/* Unsorted places (no city/country) */}
+            {grouped.unsorted.length > 0 && (
+              <div>
+                <h2 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Other</h2>
+                <div className="space-y-2">
+                  {grouped.unsorted.map((place, i) => {
+                    const cat = findCategory(place.category);
+                    return (
+                      <motion.button
+                        key={place.id}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.03 }}
+                        onClick={() => setSelectedPlace(place)}
+                        className="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:bg-muted/50"
+                      >
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-lg">
+                          {cat?.emoji ?? '📍'}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold text-sm">{place.name}</p>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            {place.address && <span className="truncate">{place.address.split(',')[0]}</span>}
+                            {place.rating && (
+                              <span className="flex items-center gap-0.5 shrink-0">
+                                <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                                {place.rating}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <Badge
+                          variant="secondary"
+                          className={`shrink-0 text-[10px] ${
+                            place.status === 'visited'
+                              ? 'bg-green-500/15 text-green-600 border-green-500/30'
+                              : 'bg-blue-500/15 text-blue-600 border-blue-500/30'
+                          }`}
+                        >
+                          {place.status === 'visited' ? '✓ Visited' : 'Want to Go'}
+                        </Badge>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
