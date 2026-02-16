@@ -63,6 +63,31 @@ const PlannerContent = ({
     return cats;
   }, [trip?.category_presets]);
 
+  // Sort categories by time-of-day relevance
+  const sortedCategories = useMemo(() => {
+    const currentHour = new Date().getHours();
+
+    const getCategoryRelevance = (cat: CategoryDef): number => {
+      const diff = Math.abs(cat.defaultStartHour - currentHour);
+      return Math.min(diff, 24 - diff);
+    };
+
+    const pinToBottom = ['flight', 'hotel'];
+    const normal: CategoryDef[] = [];
+    const custom: CategoryDef[] = [];
+    const bottom: CategoryDef[] = [];
+
+    for (const cat of allCategories) {
+      if (pinToBottom.includes(cat.id)) bottom.push(cat);
+      else if (cat.id.startsWith('custom_')) custom.push(cat);
+      else normal.push(cat);
+    }
+
+    normal.sort((a, b) => getCategoryRelevance(a) - getCategoryRelevance(b));
+
+    return [...normal, ...custom, ...bottom];
+  }, [allCategories]);
+
   // Deduplicate with hotel_id grouping
   const deduplicatedMap = useMemo(() => {
     const groups = new Map<string, EntryWithOptions[]>();
@@ -246,7 +271,7 @@ const PlannerContent = ({
       </div>
 
       {/* Unscheduled section */}
-      {allCategories.map(cat => renderCategoryRow(cat, unscheduledGrouped, true))}
+      {sortedCategories.map(cat => renderCategoryRow(cat, unscheduledGrouped, true))}
       {renderOtherRow(unscheduledGrouped)}
 
       {/* On timeline collapsible */}
@@ -257,7 +282,7 @@ const PlannerContent = ({
             On timeline ({scheduledCount})
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-4 pt-2">
-            {allCategories.map(cat => renderCategoryRow(cat, scheduledGrouped, false))}
+            {sortedCategories.map(cat => renderCategoryRow(cat, scheduledGrouped, false))}
             {renderOtherRow(scheduledGrouped)}
           </CollapsibleContent>
         </Collapsible>
