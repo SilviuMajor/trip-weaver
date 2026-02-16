@@ -1692,17 +1692,13 @@ const EntrySheet = ({
                   {option.latitude != null && option.longitude != null ? (
                     <Popover>
                       <PopoverTrigger asChild>
-                        <div className="rounded-xl border border-border overflow-hidden relative cursor-pointer">
-                          {option.location_name && (
-                            <p className="text-[10px] font-semibold text-muted-foreground px-2 pt-1.5 truncate">{option.location_name}</p>
-                          )}
+                      <div className="rounded-xl border border-border overflow-hidden relative cursor-pointer">
                           <img
                             src={`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/static-map?lat=${option.latitude}&lng=${option.longitude}&size=300x120`}
                             alt="Map preview"
-                            className="w-full h-[80px] object-cover"
+                            className="w-full h-[100px] object-cover"
                             loading="lazy"
                           />
-                          <p className="text-[10px] text-primary px-2 py-1 font-medium">Open in Maps →</p>
                         </div>
                       </PopoverTrigger>
                       <PopoverContent className="w-48 p-1.5" side="top" align="end">

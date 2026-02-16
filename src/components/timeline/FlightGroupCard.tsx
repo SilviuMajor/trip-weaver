@@ -92,7 +92,7 @@ const FlightGroupCard = ({
       {checkinEntry && (
         <div
           className="flex items-center gap-3 px-3 min-h-0 overflow-hidden"
-          style={{ flex: checkinFraction }}
+          style={{ flex: checkinFraction, backgroundColor: `${catColor}33` }}
         >
           {/* Timeline dot + dashed line going down */}
           <div className="flex flex-col items-center self-stretch py-1">
@@ -182,7 +182,7 @@ const FlightGroupCard = ({
       {checkoutEntry && (
         <div
           className="flex items-center gap-3 px-3 min-h-0 overflow-hidden"
-          style={{ flex: checkoutFraction }}
+          style={{ flex: checkoutFraction, backgroundColor: `${catColor}33` }}
         >
           {/* Dashed line coming from above + dot at bottom */}
           <div className="flex flex-col items-center self-stretch py-1">
