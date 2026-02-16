@@ -154,6 +154,11 @@ const EntryCard = ({
   };
 
   const durationLabel = formatDuration(startTime, endTime);
+  const durationMin = Math.round(
+    (new Date(endTime).getTime() - new Date(startTime).getTime()) / 60000
+  );
+  const isShortEntry = durationMin <= 45;
+  const isMicroEntry = durationMin <= 20;
 
   // Overlap red tint calculation
   const totalMs = new Date(endTime).getTime() - new Date(startTime).getTime();
@@ -302,7 +307,7 @@ const EntryCard = ({
   const glossyBorder = isDark ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.06)';
 
   // ─── Duration pill styles ───
-  const durationPillStyle = (size: 'l' | 'm' | 's' | 'xs') => {
+  const durationPillStyle = (size: 'l' | 'm' | 's' | 'xs', centered = false) => {
     const sizes = {
       l: { fontSize: 10, padding: '2px 6px', top: 8, right: 8 },
       m: { fontSize: 10, padding: '2px 6px', top: 7, right: 7 },
@@ -311,9 +316,13 @@ const EntryCard = ({
     };
     const s = sizes[size];
     const base: React.CSSProperties = {
-      position: 'absolute', top: s.top, right: s.right, zIndex: 20,
+      position: 'absolute', zIndex: 20,
       borderRadius: 20, fontSize: s.fontSize, padding: s.padding,
       fontWeight: 700, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      ...(centered
+        ? { top: '50%', transform: 'translateY(-50%)', right: 5 }
+        : { top: s.top, right: s.right }
+      ),
     };
     if (firstImage) {
       return { ...base, background: 'rgba(255,255,255,0.22)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' };
@@ -325,12 +334,21 @@ const EntryCard = ({
   };
 
   // ─── Corner flag ───
-  const cornerFlag = (emojiSize: number, pad: string) => (
+  const cornerFlag = (_emojiSize: number, _pad: string) => (
     <div
-      className="absolute top-0 left-0 z-20 flex items-center justify-center"
-      style={{ background: catColor, padding: pad, borderRadius: '14px 0 8px 0' }}
+      className="absolute z-20 flex items-center justify-center"
+      style={{
+        background: catColor,
+        padding: '4px 6px',
+        fontSize: 12,
+        lineHeight: 1,
+        ...(isMicroEntry
+          ? { left: 5, top: '50%', transform: 'translateY(-50%)', borderRadius: 999 }
+          : { left: 0, top: 0, borderRadius: '14px 0 8px 0' }
+        ),
+      }}
     >
-      <span className="text-white" style={{ fontSize: emojiSize, lineHeight: 1 }}>{catEmoji}</span>
+      <span className="text-white" style={{ lineHeight: 1 }}>{catEmoji}</span>
     </div>
   );
 
@@ -499,7 +517,7 @@ const EntryCard = ({
   ) : null;
 
   // ─── Shared card wrapper for all non-transfer tiers ───
-  const cardBase = (tier: 'full' | 'condensed' | 'medium' | 'compact', children: React.ReactNode) => (
+  const cardBase = (tier: 'full' | 'condensed' | 'medium' | 'compact', children: React.ReactNode, overflowVisible = false) => (
     <div
       onClick={onClick}
       onMouseDown={onDragStart}
@@ -507,7 +525,8 @@ const EntryCard = ({
       onTouchMove={onTouchDragMove}
       onTouchEnd={onTouchDragEnd}
       className={cn(
-        'group relative overflow-hidden rounded-[14px] shadow-sm transition-all hover:shadow-md',
+        'group relative rounded-[14px] shadow-sm transition-all hover:shadow-md',
+        overflowVisible ? 'overflow-visible' : 'overflow-hidden',
         isEntryPast && 'opacity-50 grayscale-[30%]',
         isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
         isShaking && 'animate-shake',
@@ -592,95 +611,124 @@ const EntryCard = ({
     return cardBase('condensed', (
       <>
         {cornerFlag(13, '5px 7px')}
-        <div style={durationPillStyle('m')}>{durationLabel}</div>
-        <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] px-3 py-2.5 pr-14', textColor)} style={{ pointerEvents: 'none' }}>
-          {isCheckIn && (
-            <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-0.5', faintTextColor)}>CHECK-IN</span>
-          )}
-          <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
-            {displayName}
-          </h3>
-          {(option as any).rating != null && (
-            <p className={cn('text-[10px] truncate', subTextColor)}>
-              ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
-            </p>
-          )}
-          <span className={cn('text-[10px]', faintTextColor)}>
-            {formatTime(startTime)} — {formatTime(endTime)}
-          </span>
-        </div>
+        <div style={durationPillStyle('m', isShortEntry)}>{durationLabel}</div>
+        {isShortEntry ? (
+          <div
+            className={cn('absolute z-10 text-right', textColor)}
+            style={{ top: '50%', left: 10, right: 54, transform: 'translateY(-50%)', pointerEvents: 'none' }}
+          >
+            <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
+              {displayName}
+            </h3>
+            <span className={cn('text-[10px]', faintTextColor)}>
+              {formatTime(startTime)} — {formatTime(endTime)}
+            </span>
+          </div>
+        ) : (
+          <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] px-3 py-2.5 pr-14', textColor)} style={{ pointerEvents: 'none' }}>
+            {isCheckIn && (
+              <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-0.5', faintTextColor)}>CHECK-IN</span>
+            )}
+            <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
+              {displayName}
+            </h3>
+            {(option as any).rating != null && (
+              <p className={cn('text-[10px] truncate', subTextColor)}>
+                ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
+              </p>
+            )}
+            <span className={cn('text-[10px]', faintTextColor)}>
+              {formatTime(startTime)} — {formatTime(endTime)}
+            </span>
+          </div>
+        )}
         {isCheckOut && (
           <span className={cn('absolute bottom-1 left-2.5 z-10 text-[10px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
         )}
       </>
-    ));
+    ), isShortEntry);
   }
 
   // ═══ FULL (≥160px) ═══
   return cardBase('full', (
     <>
       {cornerFlag(16, '5px 7px')}
-      <div style={durationPillStyle('l')}>{durationLabel}</div>
+      <div style={durationPillStyle('l', isShortEntry)}>{durationLabel}</div>
 
-      {/* Content — bottom-right */}
-      <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] p-4 pr-16', textColor)} style={{ pointerEvents: 'none' }}>
-        {isCheckIn && (
-          <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-1', faintTextColor)}>CHECK-IN</span>
-        )}
-        {totalOptions > 1 && (
-          <span className={cn('text-[10px] font-medium block mb-1', subTextColor)}>
-            {optionIndex + 1}/{totalOptions}
-          </span>
-        )}
-        <h3
-          className="text-sm font-bold leading-tight mb-1"
-          style={{ textShadow: firstImage ? '0 1px 4px rgba(0,0,0,0.3)' : undefined }}
+      {isShortEntry ? (
+        <div
+          className={cn('absolute z-10 text-right', textColor)}
+          style={{ top: '50%', left: 10, right: 54, transform: 'translateY(-50%)', pointerEvents: 'none' }}
         >
-          {displayName}
-        </h3>
-        {!isTransfer && !isProcessing && (option as any).rating != null && (
-          <p className={cn('text-[10px] mb-0.5', subTextColor)}>
-            ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
-          </p>
-        )}
-        {!isTransfer && !isProcessing && option.location_name && (
-          <p className={cn('text-[10px] truncate mb-0.5', subTextColor)}>
-            📍 {option.location_name}
-          </p>
-        )}
-        {notes && !isTransfer && !isProcessing && (
-          <p className={cn('text-[10px] line-clamp-2 mb-0.5', subTextColor)}>
-            {notes}
-          </p>
-        )}
-
-        {/* Flight info */}
-        {option.category === 'flight' && option.departure_location ? (
-          <p className={cn('text-[10px]', faintTextColor)}>
-            {option.departure_location?.split(' - ')[0]}{option.departure_terminal ? ` T${option.departure_terminal}` : ''} → {option.arrival_location?.split(' - ')[0]}{option.arrival_terminal ? ` T${option.arrival_terminal}` : ''}
-          </p>
-        ) : !isProcessing && (
-          <p className={cn('text-[10px] mt-0.5', faintTextColor)}>
+          <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
+            {displayName}
+          </h3>
+          <span className={cn('text-[10px]', faintTextColor)}>
             {formatTime(startTime)} — {formatTime(endTime)}
-          </p>
-        )}
-
-        {/* Processing time */}
-        {isProcessing && (
-          <p className={cn('text-[10px]', faintTextColor)}>
-            {formatTime(startTime)} — {formatTime(endTime)}
-          </p>
-        )}
-      </div>
-
-      {/* Distance (bottom-left) */}
-      {!isProcessing && distanceKm !== null && distanceKm !== undefined && (
-        <div className={cn('absolute bottom-4 left-4 z-10 flex items-center gap-1 text-[10px]', faintTextColor)}>
-          <MapPin className="h-3 w-3" />
-          <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
+          </span>
         </div>
-      )}
+      ) : (
+        <>
+          {/* Content — bottom-right */}
+          <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] p-4 pr-16', textColor)} style={{ pointerEvents: 'none' }}>
+            {isCheckIn && (
+              <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-1', faintTextColor)}>CHECK-IN</span>
+            )}
+            {totalOptions > 1 && (
+              <span className={cn('text-[10px] font-medium block mb-1', subTextColor)}>
+                {optionIndex + 1}/{totalOptions}
+              </span>
+            )}
+            <h3
+              className="text-sm font-bold leading-tight mb-1"
+              style={{ textShadow: firstImage ? '0 1px 4px rgba(0,0,0,0.3)' : undefined }}
+            >
+              {displayName}
+            </h3>
+            {!isTransfer && !isProcessing && (option as any).rating != null && (
+              <p className={cn('text-[10px] mb-0.5', subTextColor)}>
+                ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
+              </p>
+            )}
+            {!isTransfer && !isProcessing && option.location_name && (
+              <p className={cn('text-[10px] truncate mb-0.5', subTextColor)}>
+                📍 {option.location_name}
+              </p>
+            )}
+            {notes && !isTransfer && !isProcessing && (
+              <p className={cn('text-[10px] line-clamp-2 mb-0.5', subTextColor)}>
+                {notes}
+              </p>
+            )}
 
+            {/* Flight info */}
+            {option.category === 'flight' && option.departure_location ? (
+              <p className={cn('text-[10px]', faintTextColor)}>
+                {option.departure_location?.split(' - ')[0]}{option.departure_terminal ? ` T${option.departure_terminal}` : ''} → {option.arrival_location?.split(' - ')[0]}{option.arrival_terminal ? ` T${option.arrival_terminal}` : ''}
+              </p>
+            ) : !isProcessing && (
+              <p className={cn('text-[10px] mt-0.5', faintTextColor)}>
+                {formatTime(startTime)} — {formatTime(endTime)}
+              </p>
+            )}
+
+            {/* Processing time */}
+            {isProcessing && (
+              <p className={cn('text-[10px]', faintTextColor)}>
+                {formatTime(startTime)} — {formatTime(endTime)}
+              </p>
+            )}
+          </div>
+
+          {/* Distance (bottom-left) */}
+          {!isProcessing && distanceKm !== null && distanceKm !== undefined && (
+            <div className={cn('absolute bottom-4 left-4 z-10 flex items-center gap-1 text-[10px]', faintTextColor)}>
+              <MapPin className="h-3 w-3" />
+              <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Lock icon */}
       {isLocked && (
@@ -708,7 +756,7 @@ const EntryCard = ({
         <span className={cn('absolute bottom-1 left-3 z-10 text-[10px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
       )}
     </>
-  ));
+  ), isShortEntry);
 };
 
 export default EntryCard;
