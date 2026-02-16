@@ -1,101 +1,79 @@
 
-
-# ExploreCard Component + Photo Loading + Card Tap Detail Sheet
+# Add Travel Time + Mode Pills to ExploreView
 
 ## Overview
-Replace the placeholder result cards in ExploreView with polished ExploreCard components matching SidebarEntryCard's visual design, add lazy photo loading from Google Places, and wire card taps to open PlaceOverview in a Drawer/Dialog.
+Add travel mode selection pills below the origin context line in ExploreView, fetch travel times from the google-directions edge function in batches of 5, pass formatted times to ExploreCard, sort results by proximity, and add a loading shimmer placeholder in ExploreCard.
 
-## New File: `src/components/timeline/ExploreCard.tsx`
+## Changes
 
-A card component that mirrors SidebarEntryCard's visual treatment for Explore search results.
+### 1. `src/components/timeline/ExploreView.tsx`
 
-### Visual Design (copied from SidebarEntryCard)
-- `rounded-[14px]` with `overflow-hidden`, full width, fixed `h-[140px]`
-- **With photo**: background image + diagonal fade overlay (`linear-gradient(152deg, transparent 25%, rgba(10,8,6,0.3) 35%, rgba(10,8,6,0.7) 50%, rgba(10,8,6,0.92) 65%)`)
-- **Without photo**: glossy gradient fallback using extracted hue from category color (same `glossyBg`, `glassBg`, `glossyBorder` logic as SidebarEntryCard)
-- **Corner flag**: top-left category emoji on colored background with `borderRadius: '14px 0 8px 0'`
-- **Travel time pill**: top-right, same `durPillStyle` as SidebarEntryCard's duration pill (only shown if `travelTime` prop provided)
-- **Name**: bottom-right, `text-sm font-bold`, white with text-shadow over images, theme-aware otherwise
-- **Address**: below name, `text-[10px]` with map pin emoji, truncated
-- **Rating + price row**: bottom-left area, format: "star 4.4 (2,891) . euro-symbols" using `formatPriceLevel` from entryHelpers
-- **Compact hours**: below address in `text-[9px]` if provided
-- **Planner button**: 32x32 circle, bottom-right, `bg-white/20 backdrop-blur-sm`, ClipboardList icon; swaps to Check icon when `isInTrip`
-- **"Already in trip" state**: opacity 0.75, Check badge replaces clipboard icon
+**New imports**: `TRAVEL_MODES` from `@/lib/categories`
 
-### Photo Loading
-- `useEffect` on `photoRef`: if present and no `photoUrl`, call `supabase.functions.invoke('google-places', { body: { action: 'photo', photoRef } })`
-- Store resolved URL in local `useState`
-- Show glossy gradient while loading; transition to image once loaded
-- On failure, keep gradient
+**New state**:
+- `travelMode: string` (default `'walk'`)
+- `travelTimes: Map<string, number>` (placeId -> minutes)
+- `fetchAbortRef: useRef<number>` for cancelling stale fetches
 
-### Props
+**Travel mode pills**: Rendered below the origin context line as a horizontal row of `rounded-full` pill buttons using `TRAVEL_MODES`. Selected pill gets `bg-primary/10 text-primary border-primary/20`; unselected gets `text-muted-foreground hover:bg-muted`. Short labels: "Walk", "Transit", "Drive", "Cycle".
+
+**Batch travel time fetching**: A `fetchTravelTimes` function that:
+- Takes results array, origin coords, mode
+- Processes in batches of 5 with 200ms delay between batches
+- Updates `travelTimes` state progressively after each batch
+- Uses `fetchAbortRef` to cancel if mode changes mid-fetch
+
+**Trigger fetch** via `useEffect` when `results`, `travelMode`, or `originLocation` change. Clears times immediately on mode change.
+
+**Sort results**: `sortedResults` memo that sorts by travel time (closest first) when times are available; renders `sortedResults` instead of `results`.
+
+**Pass travel time to ExploreCard**:
 ```
-place: ExploreResult
-categoryId: string | null
-onAddToPlanner: () => void
-onTap: () => void
-travelTime?: string | null
-isInTrip?: boolean
-compactHours?: string | null
+const minutes = travelTimes.get(place.placeId);
+const modeEmoji = TRAVEL_MODES.find(m => m.id === travelMode)?.emoji ?? '';
+const travelTimeStr = minutes != null ? `${modeEmoji} ${minutes}m` : undefined;
 ```
+Also pass a new `travelTimeLoading` prop (true when origin exists and times map doesn't have this place yet and results are loaded).
 
-## Modified File: `src/components/timeline/ExploreView.tsx`
+### 2. `src/components/timeline/ExploreCard.tsx`
 
-### Replace placeholder cards with ExploreCard
-- Import ExploreCard
-- For each result, compute `isInTrip` by checking if `place.placeId` matches any `google_place_id` in existing `entries[*].options[*]`
-- Track a local `Set<string>` of `addedPlaceIds` state (starts empty, grows as user adds places during this session) to immediately reflect newly added items
-- Pass `categoryId`, `onAddToPlanner` (wrapping existing handler + adding to local set), `onTap`
-- Leave `travelTime` and `compactHours` as null (future prompts)
+**New prop**: `travelTimeLoading?: boolean`
 
-### Add card tap -> PlaceOverview detail sheet
-- New state: `selectedPlace: ExploreResult | null`, `detailOpen: boolean`
-- `onTap` sets selectedPlace and opens detail
-- `buildTempEntry(place)` function creates fake `EntryWithOptions` + `EntryOption` from ExploreResult for PlaceOverview consumption (temporary IDs prefixed with `explore-`, `is_scheduled: false`, photoUrl mapped to images array)
-- Render detail using `Drawer` (mobile via `useIsMobile`) or `Dialog` (desktop) containing:
-  - "Add to Planner" button at top (ClipboardList icon + text)
-  - PlaceOverview component with `context="explore"`, `isEditor={false}`
-- On add from detail sheet: call `onAddToPlanner`, close sheet
+**Shimmer placeholder**: When `travelTimeLoading` is true and `travelTime` is null, render a `w-10 h-5 rounded-full animate-pulse` element in the top-right position using the same `durPillStyle` background but at lower opacity.
 
-## Modified File: `src/pages/Planner.tsx`
-
-- Remove the placeholder `onCardTap` toast
-- Pass the actual `onCardTap` callback that ExploreView will now handle internally (or keep it as a no-op since ExploreView manages its own detail sheet state)
+No other changes to ExploreCard -- photo loading, tap, add, styling all unchanged.
 
 ## Technical Details
 
-### isInTrip detection
+### Abort pattern for rapid mode switching
 ```typescript
-const existingPlaceIds = useMemo(() => {
-  const ids = new Set<string>();
-  for (const entry of entries) {
-    for (const opt of entry.options) {
-      if (opt.google_place_id) ids.add(opt.google_place_id);
-    }
-  }
-  return ids;
-}, [entries]);
+const fetchAbortRef = useRef(0);
+
+useEffect(() => {
+  if (!originLocation || results.length === 0) return;
+  setTravelTimes(new Map());
+  const generation = ++fetchAbortRef.current;
+  
+  fetchTravelTimes(results, originLocation, travelMode, generation);
+}, [results, travelMode, originLocation]);
+```
+Inside `fetchTravelTimes`, check `fetchAbortRef.current !== generation` before each batch to abort stale fetches.
+
+### Batch fetch implementation
+```
+for i in 0..results.length step 5:
+  batch = results[i:i+5]
+  await Promise.all(batch.map(fetchSingleDirection))
+  update state with new Map(times)
+  if not last batch: await sleep(200ms)
+  if aborted: return
 ```
 
-### buildTempEntry mapping
-Maps ExploreResult fields to EntryOption fields:
-- `placeId` -> `google_place_id`
-- `lat/lng` -> `latitude/longitude`
-- `address` -> `location_name` and `address`
-- `rating`, `userRatingCount` -> `rating`, `user_rating_count`
-- `openingHours` -> `opening_hours`
-- `photoUrl` -> single-element `images` array (if available)
-- All flight-specific fields (departure_tz, arrival_tz, terminals) set to null
-
-### Detail sheet wrapper
-Uses the same Drawer/Dialog pattern as EntrySheet:
-- Mobile: `<Drawer open={detailOpen} onOpenChange={setDetailOpen}><DrawerContent className="max-h-[92vh]">...`
-- Desktop: `<Dialog open={detailOpen} onOpenChange={setDetailOpen}><DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">...`
+### Mode pill short labels
+Map TRAVEL_MODES labels to shorter versions: "Walk", "Transit", "Drive", "Cycle" (Transit instead of "Public Transport").
 
 ## Files Summary
 | File | Action |
 |------|--------|
-| `src/components/timeline/ExploreCard.tsx` | Create |
-| `src/components/timeline/ExploreView.tsx` | Modify (replace placeholder cards, add detail sheet) |
-| `src/pages/Planner.tsx` | Modify (update onCardTap to no-op since ExploreView handles it internally) |
-
+| `src/components/timeline/ExploreView.tsx` | Modify (add mode pills, travel time fetching, sorting) |
+| `src/components/timeline/ExploreCard.tsx` | Modify (add shimmer loading placeholder) |
