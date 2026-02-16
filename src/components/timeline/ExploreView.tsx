@@ -257,7 +257,7 @@ const ExploreView = ({
       setLoading(false);
       setAddedPlaceIds(new Set());
       initialLoadDone.current = false;
-      setOriginResolved(false);
+      
       originManuallySet.current = false;
       setCrossTripMatches(new Map());
       setManualName('');
