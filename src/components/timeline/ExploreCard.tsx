@@ -15,6 +15,7 @@ interface ExploreCardProps {
   travelTimeLoading?: boolean;
   isInTrip?: boolean;
   compactHours?: string | null;
+  crossTripName?: string | null;
 }
 
 const extractHue = (hslString: string): number => {
@@ -22,7 +23,7 @@ const extractHue = (hslString: string): number => {
   return match ? parseInt(match[1]) : 260;
 };
 
-const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, travelTimeLoading, isInTrip, compactHours }: ExploreCardProps) => {
+const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, travelTimeLoading, isInTrip, compactHours, crossTripName }: ExploreCardProps) => {
   const [photoUrl, setPhotoUrl] = useState<string | null>(place.photoUrl ?? null);
 
   const cat = findCategory(categoryId ?? '');
@@ -45,7 +46,7 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
 
   const hasImage = !!photoUrl;
 
-  // Glossy backgrounds (copied from SidebarEntryCard)
+  // Glossy backgrounds
   const glossyBg = isDark
     ? `linear-gradient(145deg, hsl(${hue}, 30%, 16%), hsl(${hue}, 15%, 9%))`
     : `linear-gradient(145deg, hsl(${hue}, 25%, 92%), hsl(${hue}, 15%, 86%))`;
@@ -57,7 +58,6 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
   const textColor = hasImage ? 'text-white' : isDark ? 'text-white' : 'text-foreground';
   const subTextColor = hasImage ? 'text-white/70' : isDark ? 'text-white/60' : 'text-muted-foreground';
 
-  // Duration pill style (same as SidebarEntryCard)
   const durPillStyle: React.CSSProperties = hasImage
     ? { background: 'rgba(255,255,255,0.22)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' }
     : isDark
@@ -65,6 +65,7 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
       : { background: 'rgba(0,0,0,0.06)', border: '1px solid rgba(0,0,0,0.08)', color: 'hsl(25, 30%, 20%)' };
 
   const priceDisplay = formatPriceLevel(place.priceLevel);
+  const isClosedText = compactHours?.toLowerCase().includes('closed');
 
   return (
     <div
@@ -112,7 +113,7 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
 
       {/* Content — bottom area */}
       <div className={cn('absolute bottom-0 left-0 right-0 z-10 px-3 py-2.5 flex items-end justify-between gap-2')}>
-        {/* Left: rating + price */}
+        {/* Left: rating + price + cross-trip */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             {place.rating != null && (
@@ -135,6 +136,11 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
               </span>
             )}
           </div>
+          {crossTripName && (
+            <div className={cn('text-[9px] leading-tight mt-0.5', hasImage ? 'text-white/60' : 'text-muted-foreground')}>
+              📌 In your {crossTripName} trip
+            </div>
+          )}
         </div>
 
         {/* Right: planner icon */}
@@ -152,7 +158,7 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
         )}
       </div>
 
-      {/* Name + address — positioned above the bottom row */}
+      {/* Name + address + hours — positioned above the bottom row */}
       <div className={cn('absolute bottom-8 right-0 z-10 text-right max-w-[80%] px-3', textColor)}>
         <p className="truncate text-sm font-bold leading-tight" style={{ textShadow: hasImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
           {place.name}
@@ -163,7 +169,10 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
           </p>
         )}
         {compactHours && (
-          <p className={cn('text-[9px] leading-tight mt-0.5', subTextColor)}>
+          <p className={cn(
+            'text-[9px] leading-tight mt-0.5',
+            isClosedText ? (hasImage ? 'text-red-300' : 'text-destructive') : subTextColor
+          )}>
             {compactHours}
           </p>
         )}

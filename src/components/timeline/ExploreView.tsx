@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { ArrowLeft, MapPin, ClipboardList, List, Map as MapIcon } from 'lucide-react';
+import { ArrowLeft, MapPin, ClipboardList, List, Map as MapIcon, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -13,6 +14,7 @@ import { CATEGORY_TO_PLACE_TYPES, getCategorySearchPlaceholder } from '@/lib/pla
 import { cn } from '@/lib/utils';
 import ExploreCard from './ExploreCard';
 import PlaceOverview from './PlaceOverview';
+import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import type { Trip, EntryWithOptions, EntryOption } from '@/types/trip';
 
 // ─── Types ───
@@ -49,7 +51,7 @@ interface ExploreViewProps {
 
 // ─── Helpers ───
 
-function resolveOrigin(
+function resolveOriginFromEntries(
   entries: EntryWithOptions[],
 ): { name: string; lat: number; lng: number } | null {
   const now = Date.now();
@@ -127,6 +129,31 @@ function buildTempEntry(place: ExploreResult, tripId: string, categoryId: string
   return { entry, option };
 }
 
+// ─── Compact hours helper ───
+
+const getCompactHours = (openingHours: string[] | null): { text: string | null; isClosed: boolean } => {
+  if (!openingHours || openingHours.length === 0) return { text: null, isClosed: false };
+
+  const now = new Date();
+  const jsDay = now.getDay();
+  const googleIndex = jsDay === 0 ? 6 : jsDay - 1;
+  const dayHours = openingHours[googleIndex];
+
+  if (!dayHours) return { text: null, isClosed: false };
+
+  const lower = dayHours.toLowerCase();
+  if (lower.includes('closed')) {
+    const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return { text: `Closed ${dayNames[googleIndex]}`, isClosed: true };
+  }
+  if (lower.includes('open 24')) return { text: 'Open 24 hours', isClosed: false };
+
+  const timeMatch = dayHours.match(/–\s*(\d{1,2}:\d{2}\s*[APap][Mm])/);
+  if (timeMatch) return { text: `Open until ${timeMatch[1]}`, isClosed: false };
+
+  return { text: dayHours.replace(/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday):\s*/i, ''), isClosed: false };
+};
+
 // ─── Component ───
 
 const ExploreView = ({
@@ -150,6 +177,13 @@ const ExploreView = ({
   const [detailOpen, setDetailOpen] = useState(false);
   const [travelMode, setTravelMode] = useState('walk');
   const [travelTimes, setTravelTimes] = useState<Map<string, number>>(new Map());
+  const [originPopoverOpen, setOriginPopoverOpen] = useState(false);
+  const [originSearchQuery, setOriginSearchQuery] = useState('');
+  const [crossTripMatches, setCrossTripMatches] = useState<Map<string, string>>(new Map());
+  const [manualName, setManualName] = useState('');
+  const [manualLocationQuery, setManualLocationQuery] = useState('');
+  const [manualPlaceDetails, setManualPlaceDetails] = useState<PlaceDetails | null>(null);
+  const originManuallySet = useRef(false);
   const fetchAbortRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const initialLoadDone = useRef(false);
@@ -169,10 +203,21 @@ const ExploreView = ({
     return ids;
   }, [entries]);
 
+  // Today's entries for quick picks
+  const todayEntries = useMemo(() => {
+    return entries.filter(e => {
+      const opt = e.options[0];
+      if (!opt?.latitude || !opt?.longitude) return false;
+      if (opt.category === 'airport_processing' || opt.category === 'transport' || opt.category === 'transfer') return false;
+      return e.is_scheduled !== false;
+    }).slice(0, 8);
+  }, [entries]);
+
   // Resolve origin
   useEffect(() => {
     if (!open) return;
-    const fromEntries = resolveOrigin(entries);
+    if (originManuallySet.current) return;
+    const fromEntries = resolveOriginFromEntries(entries);
     if (fromEntries) {
       setOriginLocation(fromEntries);
       setOriginResolved(true);
@@ -203,6 +248,11 @@ const ExploreView = ({
       setAddedPlaceIds(new Set());
       initialLoadDone.current = false;
       setOriginResolved(false);
+      originManuallySet.current = false;
+      setCrossTripMatches(new Map());
+      setManualName('');
+      setManualLocationQuery('');
+      setManualPlaceDetails(null);
     }
   }, [open]);
 
@@ -229,6 +279,65 @@ const ExploreView = ({
     }, 500);
     return () => clearTimeout(timer);
   }, [searchQuery, open]);
+
+  // Pre-fill manual name when zero results
+  useEffect(() => {
+    if (results.length === 0 && searchQuery) {
+      setManualName(searchQuery);
+    }
+  }, [results, searchQuery]);
+
+  // Fetch cross-trip matches after results load
+  useEffect(() => {
+    if (results.length === 0) { setCrossTripMatches(new Map()); return; }
+    const placeIds = results.map(r => r.placeId).filter(Boolean);
+    if (placeIds.length === 0) return;
+
+    (async () => {
+      try {
+        // Step 1: find matching entry_options in other trips
+        const { data: matchingOptions } = await supabase
+          .from('entry_options')
+          .select('google_place_id, entry_id')
+          .in('google_place_id', placeIds);
+
+        if (!matchingOptions?.length) return;
+
+        const entryIds = matchingOptions.map(o => o.entry_id);
+        const { data: matchingEntries } = await supabase
+          .from('entries')
+          .select('id, trip_id')
+          .in('id', entryIds)
+          .neq('trip_id', trip.id);
+
+        if (!matchingEntries?.length) return;
+
+        const tripIds = [...new Set(matchingEntries.map(e => e.trip_id))];
+        const { data: tripNames } = await supabase
+          .from('trips')
+          .select('id, name')
+          .in('id', tripIds);
+
+        if (!tripNames?.length) return;
+
+        const tripNameMap = new Map(tripNames.map(t => [t.id, t.name]));
+        const entryTripMap = new Map(matchingEntries.map(e => [e.id, e.trip_id]));
+
+        const crossMap = new Map<string, string>();
+        for (const opt of matchingOptions) {
+          if (!opt.google_place_id) continue;
+          const tId = entryTripMap.get(opt.entry_id);
+          if (tId) {
+            const name = tripNameMap.get(tId);
+            if (name) crossMap.set(opt.google_place_id, name);
+          }
+        }
+        setCrossTripMatches(crossMap);
+      } catch {
+        // Non-critical, silently ignore
+      }
+    })();
+  }, [results, trip.id]);
 
   const performNearbySearch = useCallback(async (lat: number, lng: number, types: string[]) => {
     setLoading(true);
@@ -284,6 +393,43 @@ const ExploreView = ({
     setDetailOpen(true);
   }, []);
 
+  // Handle manual origin change
+  const handleOriginChange = useCallback((name: string, lat: number, lng: number) => {
+    originManuallySet.current = true;
+    setOriginLocation({ name, lat, lng });
+    setOriginPopoverOpen(false);
+    setOriginSearchQuery('');
+    // Re-trigger nearby search if we have a category
+    initialLoadDone.current = false;
+    setOriginResolved(true);
+  }, []);
+
+  // Handle manual add from zero-results form
+  const handleManualAdd = useCallback(() => {
+    if (!manualName.trim()) return;
+    const syntheticPlace: ExploreResult = {
+      placeId: manualPlaceDetails?.placeId || `manual-${Date.now()}`,
+      name: manualName,
+      address: manualPlaceDetails?.address || '',
+      lat: manualPlaceDetails?.lat || null,
+      lng: manualPlaceDetails?.lng || null,
+      rating: manualPlaceDetails?.rating || null,
+      userRatingCount: manualPlaceDetails?.userRatingCount || null,
+      priceLevel: manualPlaceDetails?.priceLevel || null,
+      openingHours: manualPlaceDetails?.openingHours || null,
+      types: [],
+      googleMapsUri: manualPlaceDetails?.googleMapsUri || null,
+      website: manualPlaceDetails?.website || null,
+      phone: manualPlaceDetails?.phone || null,
+      photoRef: null,
+    };
+    onAddToPlanner(syntheticPlace);
+    toast({ title: 'Added to planner', description: manualName });
+    setManualName('');
+    setManualLocationQuery('');
+    setManualPlaceDetails(null);
+  }, [manualName, manualPlaceDetails, onAddToPlanner]);
+
   // ─── Travel time fetching ───
 
   const MODE_SHORT_LABELS: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', cycle: 'Cycle' };
@@ -333,14 +479,28 @@ const ExploreView = ({
     fetchTravelTimes(results, originLocation, travelMode, generation);
   }, [results, travelMode, originLocation, fetchTravelTimes]);
 
-  // Sort results by travel time
+  // Sort results by travel time + push closed to bottom
   const sortedResults = useMemo(() => {
-    if (travelTimes.size === 0) return results;
-    return [...results].sort((a, b) => {
-      const timeA = travelTimes.get(a.placeId) ?? 9999;
-      const timeB = travelTimes.get(b.placeId) ?? 9999;
-      return timeA - timeB;
+    let sorted = [...results];
+
+    if (travelTimes.size > 0) {
+      sorted.sort((a, b) => {
+        const timeA = travelTimes.get(a.placeId) ?? 9999;
+        const timeB = travelTimes.get(b.placeId) ?? 9999;
+        return timeA - timeB;
+      });
+    }
+
+    // Stable sort: push closed venues to bottom
+    sorted.sort((a, b) => {
+      const aHours = getCompactHours(a.openingHours);
+      const bHours = getCompactHours(b.openingHours);
+      if (aHours.isClosed && !bHours.isClosed) return 1;
+      if (!aHours.isClosed && bHours.isClosed) return -1;
+      return 0;
     });
+
+    return sorted;
   }, [results, travelTimes]);
 
   if (!open) return null;
@@ -351,7 +511,6 @@ const ExploreView = ({
     const placeIsInTrip = existingPlaceIds.has(selectedPlace.placeId) || addedPlaceIds.has(selectedPlace.placeId);
     return (
       <div className="overflow-y-auto max-h-[85vh]">
-        {/* Add to Planner button */}
         {isEditor && !placeIsInTrip && (
           <div className="px-4 pt-3 pb-1">
             <Button
@@ -417,12 +576,53 @@ const ExploreView = ({
         />
       </form>
 
-      {/* Origin context */}
+      {/* Origin context — tappable popover */}
       {originLocation && (
-        <div className="flex items-center gap-1.5 px-4 py-1.5 text-xs text-muted-foreground">
-          <MapPin className="h-3 w-3 shrink-0" />
-          <span className="truncate">Suggested near {originLocation.name}</span>
-        </div>
+        <Popover open={originPopoverOpen} onOpenChange={setOriginPopoverOpen}>
+          <PopoverTrigger asChild>
+            <button className="flex items-center gap-1.5 px-4 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-left">
+              <MapPin className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                Suggested near <span className="underline decoration-dashed underline-offset-2 cursor-pointer font-medium">{originLocation.name}</span>
+              </span>
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-72 p-3" align="start">
+            <PlacesAutocomplete
+              value={originSearchQuery}
+              onChange={setOriginSearchQuery}
+              onPlaceSelect={(details) => {
+                if (details.lat != null && details.lng != null) {
+                  handleOriginChange(details.name, details.lat, details.lng);
+                }
+              }}
+              placeholder="Search for a location..."
+              tripLocation={originLocation ? { lat: originLocation.lat, lng: originLocation.lng } : undefined}
+              autoFocus
+            />
+            {todayEntries.length > 0 && (
+              <div className="mt-3 border-t pt-2">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Today's entries</p>
+                <div className="space-y-0.5 max-h-40 overflow-y-auto">
+                  {todayEntries.map(entry => {
+                    const opt = entry.options[0];
+                    if (!opt?.latitude || !opt?.longitude) return null;
+                    return (
+                      <button
+                        key={entry.id}
+                        className="flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-xs hover:bg-accent/50 transition-colors text-left"
+                        onClick={() => handleOriginChange(opt.name, opt.latitude!, opt.longitude!)}
+                      >
+                        <span>{findCategory(opt.category)?.emoji ?? '📌'}</span>
+                        <span className="truncate">{opt.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </PopoverContent>
+        </Popover>
       )}
 
       {/* Travel mode pills */}
@@ -454,11 +654,57 @@ const ExploreView = ({
             </div>
           )}
 
-          {!loading && results.length === 0 && (searchQuery.trim() || initialLoadDone.current) && (
+          {/* Zero results inline form */}
+          {!loading && results.length === 0 && searchQuery.trim() && (
+            <div className="py-6 px-1">
+              <div className="text-center mb-4">
+                <p className="text-sm font-medium">No results for "{searchQuery}"</p>
+                <p className="text-xs text-muted-foreground mt-1">Add it manually instead:</p>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Name</label>
+                  <Input
+                    value={manualName}
+                    onChange={(e) => setManualName(e.target.value)}
+                    placeholder="Place name"
+                    className="h-9 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Location</label>
+                  <PlacesAutocomplete
+                    value={manualLocationQuery}
+                    onChange={setManualLocationQuery}
+                    onPlaceSelect={(details) => {
+                      setManualPlaceDetails(details);
+                      setManualLocationQuery(details.name);
+                    }}
+                    placeholder="Search for address..."
+                    tripLocation={originLocation ? { lat: originLocation.lat, lng: originLocation.lng } : undefined}
+                  />
+                </div>
+                <Button
+                  className="w-full gap-2"
+                  onClick={handleManualAdd}
+                  disabled={!manualName.trim()}
+                >
+                  <Plus className="h-4 w-4" />
+                  Add to Planner
+                </Button>
+              </div>
+              <button
+                className="w-full mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                onClick={onAddManually}
+              >
+                Or open the full entry form →
+              </button>
+            </div>
+          )}
+
+          {!loading && results.length === 0 && !searchQuery.trim() && initialLoadDone.current && (
             <div className="text-center py-12">
-              <p className="text-sm text-muted-foreground">
-                {searchQuery.trim() ? `No results for "${searchQuery}"` : 'No places found nearby'}
-              </p>
+              <p className="text-sm text-muted-foreground">No places found nearby</p>
             </div>
           )}
 
@@ -468,6 +714,7 @@ const ExploreView = ({
             const modeEmoji = TRAVEL_MODES.find(m => m.id === travelMode)?.emoji ?? '🚶';
             const travelTimeStr = minutes != null ? `${modeEmoji} ${minutes}m` : undefined;
             const travelTimeLoading = !!originLocation && minutes == null && results.length > 0;
+            const hours = getCompactHours(place.openingHours);
             return (
               <ExploreCard
                 key={place.placeId}
@@ -478,18 +725,19 @@ const ExploreView = ({
                 isInTrip={inTrip}
                 travelTime={travelTimeStr ?? null}
                 travelTimeLoading={travelTimeLoading}
-                compactHours={null}
+                compactHours={hours.text}
+                crossTripName={crossTripMatches.get(place.placeId) || null}
               />
             );
           })}
 
           {/* Add manually link */}
-          {!loading && (results.length > 0 || searchQuery.trim()) && (
+          {!loading && results.length > 0 && (
             <button
               className="w-full py-3 text-sm text-primary hover:underline"
               onClick={onAddManually}
             >
-              + Add manually
+              Can't find it? Add manually →
             </button>
           )}
         </div>
