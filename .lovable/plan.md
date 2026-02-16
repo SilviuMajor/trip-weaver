@@ -1,64 +1,81 @@
 
 
-# Fix: Overview — Drawer on Mobile, Dialog on Desktop
+# Batch Fixes: Votes, Duration Pills, Transport, Overview, Opening Hours
 
-## Problem
-The view mode currently always uses `<Drawer>` (slide-up sheet). This works well on mobile but on desktop a centered `<Dialog>` looks better and was the original behavior.
+## Overview
+Five targeted fixes across EntryCard, EntrySheet, ContinuousTimeline, and TransportConnector.
 
-## Approach
-Use `useIsMobile()` to conditionally wrap the same view content in either `<Drawer>` (mobile) or `<Dialog>` (desktop).
+## Change 1: Remove VoteButton rendering everywhere
 
-## Changes (single file: `EntrySheet.tsx`)
+### EntryCard.tsx
+- Remove `import VoteButton from './VoteButton'` (line 13)
+- Keep `hasVoted` and `onVoteChange` in the interface/destructuring to avoid breaking callers
+- Remove the VoteButton render block (lines 690-701)
 
-### 1. Add import
-Add `import { useIsMobile } from '@/hooks/use-mobile';` at the top (Drawer and Dialog imports already exist).
+### EntrySheet.tsx
+- Remove `import VoteButton from './VoteButton'` (line 30)
+- Remove the VoteButton section in view mode (lines 1767-1779)
 
-### 2. Add hook call
-Inside the EntrySheet component body (near other hooks), add `const isMobile = useIsMobile();`
+### ContinuousTimeline.tsx
+- No changes needed -- it passes `hasVoted`/`onVoteChange` to EntryCard but since EntryCard won't render VoteButton, this is fine. Keep the props to avoid type errors.
 
-### 3. Restructure view mode return (lines 1216-1900)
-Extract ALL content between `<DrawerContent>` and `</DrawerContent>` (lines 1219-1897) into a `viewContent` JSX variable. Then conditionally wrap:
+## Change 2: Duration pill -- ALWAYS absolute top-right, add content padding
 
-```text
-if (mode === 'view') {
-  // ... existing variable declarations ...
+### EntryCard.tsx
+All tiers get the absolute top-right pill via `durationPillStyle`. Content areas get right-padding to prevent overlap.
 
-  const viewContent = (
-    <>
-      {/* Hero image gallery */}
-      ...
-      {/* All existing content through delete dialogs */}
-      ...
-    </>
-  );
+- **Full (>=160px)**: Already has `durationPillStyle('l')` at line 629. Add `pr-16` to content div (line 632).
+- **Condensed (80-159px)**: Add `<div style={durationPillStyle('m')}>{durationLabel}</div>` back. Remove the inline duration pill from the flex row (lines 610-615). Change time to just show time without inline pill. Add `pr-14` to content div (line 594).
+- **Medium (40-79px)**: Add `<div style={durationPillStyle('s')}>{durationLabel}</div>`. Remove inline `<span className="ml-1 font-bold">{durationLabel}</span>` from line 576. Add `pr-12` to content div (line 572).
+- **Compact (<40px)**: Add `<div style={durationPillStyle('xs')}>{durationLabel}</div>`. Remove inline `<span className="font-bold">{durationLabel}</span>` from line 557. Add `pr-10` to content div (line 554).
 
-  if (isMobile) {
-    return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[92vh] overflow-y-auto">
-          {viewContent}
-        </DrawerContent>
-      </Drawer>
-    );
-  }
+## Change 3: TransportConnector.tsx -- already simplified
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
-        {viewContent}
-      </DialogContent>
-    </Dialog>
-  );
-}
+The TransportConnector was already rewritten in the previous batch. The current code matches the simplified version (tappable pill, no mode switching). ContinuousTimeline already passes just `onTap`. No changes needed here.
+
+## Change 4: EntrySheet.tsx -- Overview improvements
+
+### 4a. Hero image height: 200px to 240px on mobile
+- Line 1222: Change `height: 200` to `height: 240`
+- Line 1259: Change `height: 120` to `height: 160` (empty state)
+
+### 4b. Phone + Website as plain text below title
+Replace the grid layout (lines 1697-1738) with simple inline emoji text:
+```tsx
+{option.category !== 'transfer' && option.category !== 'flight' && (
+  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+    {(option as any).phone && (
+      <a href={`tel:${(option as any).phone}`} className="text-sm text-primary hover:underline" onClick={e => e.stopPropagation()}>
+        phone emoji {(option as any).phone}
+      </a>
+    )}
+    {option.website && (
+      <a href={option.website} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline truncate max-w-[200px]" onClick={e => e.stopPropagation()}>
+        link emoji {hostname}
+      </a>
+    )}
+  </div>
+)}
 ```
+No boxes, no containers, no labels. Empty values are simply not shown (no dashes).
 
-## What does NOT change
-- Create/edit mode (stays as Dialog always)
-- All view mode content (hero gallery, grids, collapsibles, vote, delete dialogs)
-- Hero image 200px height
-- Any other file
+## Change 5: Opening hours -- fix double day name
+
+### EntrySheet.tsx PlaceDetailsSection (line 187)
+The trigger currently shows: `{dayName}: {entryDayHoursText}` which produces "Wed: Wednesday: 09:00 - 01:00".
+
+Fix: Just show the raw `entryDayHoursText` string from the Google API as-is (it already contains the day name):
+```tsx
+<span className="flex-1 truncate text-muted-foreground text-xs font-semibold">
+  {entryDayHoursText || 'Opening hours'}
+</span>
+```
+Remove the `{dayName}: ` prefix. Keep the clock emoji before it.
 
 ## Files modified
 | File | Scope |
 |------|-------|
-| `src/components/timeline/EntrySheet.tsx` | Import useIsMobile, conditional Drawer vs Dialog wrapper in view mode |
+| `src/components/timeline/EntryCard.tsx` | Remove VoteButton import+render, duration pill always absolute with content padding |
+| `src/components/timeline/EntrySheet.tsx` | Remove VoteButton, hero 240px, plain phone/website, fix opening hours double day |
+| No changes to ContinuousTimeline or TransportConnector |
+
