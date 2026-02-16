@@ -1,41 +1,64 @@
 
 
-# Fix: EntryCard short-entry rendering across all tiers
+# Fix: Text/pill overlap and rounded corners on short cards
 
-## Problem
-The compact and medium tiers bypass the `isShortEntry` logic entirely -- they never pass `overflowVisible` to `cardBase`, use wrong font sizes, and show time when they shouldn't. The condensed and full short branches also incorrectly show time text.
+## Bug 1: Text overlapping duration pill
 
-## Changes (all in `src/components/timeline/EntryCard.tsx`)
+After auditing the code, the `right: 54` on content divs (lines 576, 596) and `right: 5` on the pill (line 323) are correctly set in the inline styles. However, the issue may be that the pill's `right: 5` uses a pixel value without `px` suffix in the style object -- this is actually fine in React. The positioning values are correct.
 
-### 1. Compact tier (lines 569-584)
-- Pass `isShortEntry` as 3rd argument to `cardBase()` to enable `overflow-visible`
-- Replace flex-based content with absolute-positioned centered content: `absolute top-1/2 -translate-y-1/2 z-10 text-right`, with `left: isMicroEntry ? 30 : 10`, `right: 54`
-- Change title from `text-[11px] font-semibold` to `text-sm font-bold`
-- Remove the time span entirely (compact is always too short)
+To be safe, I will verify and ensure the values are explicitly applied and not overridden by any className.
 
-### 2. Medium tier (lines 588-606)
-- Pass `isShortEntry` as 3rd argument to `cardBase()`
-- When `isShortEntry` is true: use absolute centered content (same pattern as compact), no time, `text-sm font-bold` title
-- When `isShortEntry` is false: keep bottom-right content but change title to `text-sm font-bold`, keep time display
-- Remove time from the short-entry branch only
+## Bug 2: Rounded corners disappear (confirmed)
 
-### 3. Condensed short branch (lines 615-626)
-- Remove the time span (lines 623-625) from the `isShortEntry` branch only
-- The normal branch (lines 628-643) keeps time -- no change there
+This is the main visual bug. In `cardBase` (lines 520-552), the image and fade gradient layers are direct children of the outer wrapper div. When `overflow-visible` is applied for short entries, the image/fade bleed past the rounded corners since nothing clips them.
 
-### 4. Full short branch (lines 658-669)
-- Remove the time span (lines 666-668) from the `isShortEntry` branch only
-- The normal branch (lines 670-730) keeps time -- no change there
+**Fix**: Add an inner clipping container (`absolute inset-0 overflow-hidden rounded-[14px]`) that wraps ONLY the image and fade layers. The outer wrapper can then be `overflow-visible` without affecting background rendering.
 
-## Summary of time display rules
+### Current structure (broken)
+```text
+Outer div (overflow-visible on short cards, rounded-[14px])
+  +-- img (bleeds past corners!)
+  +-- fade gradient (bleeds past corners!)
+  +-- children (text, pill, flag)
+```
 
-| Tier | isShortEntry? | Show time? |
-|------|--------------|------------|
-| Compact | always | never |
-| Medium | true | no |
-| Medium | false | yes |
-| Condensed | true | no |
-| Condensed | false | yes |
-| Full | true | no |
-| Full | false | yes |
+### Fixed structure
+```text
+Outer div (overflow-visible on short cards, rounded-[14px])
+  +-- Inner div (overflow-hidden rounded-[14px], absolute inset-0)
+  |     +-- img (clipped to rounded corners)
+  |     +-- fade gradient (clipped to rounded corners)
+  +-- children (text, pill, flag -- can overflow)
+```
+
+## Changes
+
+### File: `src/components/timeline/EntryCard.tsx`
+
+**1. cardBase function (lines 537-548)** -- Wrap image/fade in inner clipping container
+
+Replace the direct image/fade children with a wrapping div:
+
+```tsx
+{/* Background clipping container -- always clips to rounded corners */}
+<div className="absolute inset-0 overflow-hidden rounded-[14px]">
+  {firstImage ? (
+    <>
+      <img src={firstImage} alt={option.name} className="absolute inset-0 w-full h-full object-cover" />
+      <div className="absolute inset-0 z-[5]" style={{ background: DIAGONAL_GRADIENTS[tier] }} />
+    </>
+  ) : (
+    <>
+      <div className="absolute inset-0" style={{ background: glossyBg, border: glossyBorder }} />
+      <div className="absolute inset-0 z-[5]" style={{ background: glassBg }} />
+    </>
+  )}
+</div>
+```
+
+This is a single structural change inside the `cardBase` function that fixes all tiers at once.
+
+**2. Verify text positioning** -- Confirm `right: 54` is not overridden
+
+The compact (line 576) and medium short-entry (line 596) content divs both set `right: 54` in the inline style object. This is correct. I will double-check no Tailwind class on those divs adds a conflicting `right` value.
 
