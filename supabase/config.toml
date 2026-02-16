@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.parse-hotel-booking]
 verify_jwt = false
+
+[functions.sync-global-places]
+verify_jwt = false
