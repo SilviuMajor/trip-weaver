@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Plane, ArrowRight, Clock } from 'lucide-react';
+import { ArrowRight, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { EntryOption, EntryWithOptions } from '@/types/trip';
 import { findCategory } from '@/lib/categories';
@@ -81,18 +81,17 @@ const FlightGroupCard = ({
       onTouchMove={onTouchDragMove}
       onTouchEnd={onTouchDragEnd}
       className={cn(
-        'group relative flex flex-col overflow-hidden rounded-2xl border shadow-md transition-all hover:shadow-lg h-full',
+        'group relative flex flex-col overflow-hidden rounded-[14px] shadow-md transition-all hover:shadow-lg h-full',
         isPast && 'opacity-50 grayscale-[30%]',
         isDragging ? 'cursor-grabbing ring-2 ring-primary' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
         isLocked && 'border-dashed border-2 border-muted-foreground/40',
         isShaking && 'animate-shake',
       )}
-      style={{ borderColor: isLocked ? undefined : catColor, borderLeftWidth: isLocked ? undefined : 4 }}
     >
       {/* Check-in section */}
       {checkinEntry && (
         <div
-          className="flex items-center gap-2 px-3 text-[11px] min-h-0 overflow-hidden"
+          className="flex items-center gap-2 px-3 text-[11px] min-h-0 overflow-hidden rounded-t-[14px]"
           style={{ flex: checkinFraction, background: `${catColor}0A` }}
         >
           <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: catColor }} />
@@ -112,36 +111,57 @@ const FlightGroupCard = ({
         <div className="h-[2px] shrink-0" style={{ backgroundColor: catColor, opacity: 0.4 }} />
       )}
 
-      {/* Main flight section */}
+      {/* Main flight section — diagonal fade */}
       <div className="relative min-h-0 overflow-hidden" style={{ flex: flightFraction }}>
+        {/* Layer 1: Image or glossy background */}
         {firstImage ? (
-          <div className="absolute inset-0">
-            <img src={firstImage} alt={flightOption.name} className="h-full w-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
-          </div>
+          <>
+            <img src={firstImage} alt={flightOption.name} className="absolute inset-0 h-full w-full object-cover" />
+            {/* Layer 2: Diagonal fade */}
+            <div
+              className="absolute inset-0 z-[5]"
+              style={{ background: 'linear-gradient(155deg, transparent 22%, rgba(10,8,6,0.25) 32%, rgba(10,8,6,0.68) 42%, rgba(10,8,6,0.92) 52%)' }}
+            />
+          </>
         ) : (
-          <div className="absolute inset-0" style={{ background: `${catColor}22` }} />
+          <>
+            {/* Glossy no-image background */}
+            <div
+              className="absolute inset-0"
+              style={{ background: 'linear-gradient(145deg, hsl(210, 22%, 14%), hsl(210, 10%, 7%))' }}
+            />
+            <div
+              className="absolute inset-0"
+              style={{ background: 'linear-gradient(152deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.02) 40%, transparent 55%)' }}
+            />
+          </>
         )}
 
-        <div className={cn('relative z-10 p-3 h-full flex flex-col justify-center', firstImage ? 'text-white' : 'text-foreground')}>
-          {/* Category badge */}
-          <span
-            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold mb-1.5 w-fit"
-            style={{ backgroundColor: catColor, color: '#fff' }}
-          >
-            <Plane className="h-3 w-3" /> Flight
-          </span>
+        {/* Corner flag — top-left, emoji only */}
+        <div
+          className="absolute top-0 left-0 z-20 flex items-center justify-center px-2 py-1"
+          style={{ backgroundColor: catColor, borderRadius: '14px 0 8px 0' }}
+        >
+          <span className="text-sm">✈️</span>
+        </div>
 
-          {/* Flight name */}
-          <h3 className="mb-1 text-base font-bold leading-tight truncate">
+        {/* Duration pill — top-right */}
+        <div
+          className="absolute top-2 right-2 z-20 rounded-full px-2.5 py-0.5 text-[10px] font-bold text-white/90"
+          style={{ background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
+        >
+          {flightDuration}
+        </div>
+
+        {/* Content — LEFT-aligned (boarding pass style) */}
+        <div className="relative z-10 p-3 h-full flex flex-col justify-end">
+          {/* Flight name/number */}
+          <h3 className="text-base font-bold text-white leading-tight truncate mb-1">
             {flightOption.name}
           </h3>
 
-          {/* Route with times + duration */}
-          <div className={cn(
-            'flex items-center gap-2 text-xs flex-wrap',
-            firstImage ? 'text-white/80' : 'text-muted-foreground'
-          )}>
+          {/* Route: DEP TIME → ARR TIME */}
+          <div className="flex items-center gap-2 text-xs text-white/80 font-medium">
             <span className="shrink-0">
               {depCode}{flightOption.departure_terminal ? ` T${flightOption.departure_terminal}` : ''}{' '}
               {formatTimeOnly(flightEntry.start_time, flightOption.departure_tz)}
@@ -150,12 +170,6 @@ const FlightGroupCard = ({
             <span className="shrink-0">
               {arrCode}{flightOption.arrival_terminal ? ` T${flightOption.arrival_terminal}` : ''}{' '}
               {formatTimeOnly(flightEntry.end_time, flightOption.arrival_tz)}
-            </span>
-            <span className={cn(
-              'ml-auto text-[10px] font-medium shrink-0',
-              firstImage ? 'text-white/60' : 'text-muted-foreground/60'
-            )}>
-              {flightDuration}
             </span>
           </div>
         </div>
@@ -169,7 +183,7 @@ const FlightGroupCard = ({
       {/* Checkout section */}
       {checkoutEntry && (
         <div
-          className="flex items-center gap-2 px-3 text-[11px] min-h-0 overflow-hidden"
+          className="flex items-center gap-2 px-3 text-[11px] min-h-0 overflow-hidden rounded-b-[14px]"
           style={{ flex: checkoutFraction, background: `${catColor}0A` }}
         >
           <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: catColor }} />
@@ -183,7 +197,6 @@ const FlightGroupCard = ({
           </span>
         </div>
       )}
-
     </motion.div>
   );
 };

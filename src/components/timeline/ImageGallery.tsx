@@ -9,6 +9,7 @@ interface ImageGalleryProps {
 
 const ImageGallery = ({ images }: ImageGalleryProps) => {
   const [current, setCurrent] = useState(0);
+  const [touchStart, setTouchStart] = useState<number | null>(null);
 
   if (images.length === 0) return null;
 
@@ -16,7 +17,17 @@ const ImageGallery = ({ images }: ImageGalleryProps) => {
 
   return (
     <div className="relative overflow-hidden rounded-xl">
-      <div className="aspect-[16/10] w-full">
+      <div
+        className="aspect-[16/9] w-full"
+        onTouchStart={(e) => setTouchStart(e.touches[0].clientX)}
+        onTouchEnd={(e) => {
+          if (touchStart === null) return;
+          const diff = touchStart - e.changedTouches[0].clientX;
+          if (diff > 50) setCurrent(prev => Math.min(prev + 1, sorted.length - 1));
+          if (diff < -50) setCurrent(prev => Math.max(prev - 1, 0));
+          setTouchStart(null);
+        }}
+      >
         <img
           src={sorted[current].image_url}
           alt={`Image ${current + 1}`}
