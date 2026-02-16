@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Drawer, DrawerContent } from '@/components/ui/drawer';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -283,6 +284,7 @@ const EntrySheet = ({
   onHotelSelected,
 }: EntrySheetProps) => {
   const { currentUser, isEditor } = useCurrentUser();
+  const isMobile = useIsMobile();
 
   // ─── View mode state ───
   const [deleting, setDeleting] = useState(false);
@@ -1213,10 +1215,9 @@ const EntrySheet = ({
     const flightHours = Math.floor(flightDurationMin / 60);
     const flightMins = flightDurationMin % 60;
 
-    return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[90vh] overflow-y-auto">
-          {/* Hero image gallery at top — fixed 200px height */}
+    const viewContent = (
+      <>
+        {/* Hero image gallery at top — fixed 200px height */}
           {images.length > 0 ? (
             <div className="relative w-full overflow-hidden" style={{ height: 200 }}>
               {(() => {
@@ -1894,9 +1895,26 @@ const EntrySheet = ({
                 </AlertDialogContent>
               </AlertDialog>
             )}
-          </div>
-        </DrawerContent>
-      </Drawer>
+        </div>
+      </>
+    );
+
+    if (isMobile) {
+      return (
+        <Drawer open={open} onOpenChange={onOpenChange}>
+          <DrawerContent className="max-h-[92vh] overflow-y-auto">
+            {viewContent}
+          </DrawerContent>
+        </Drawer>
+      );
+    }
+
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+          {viewContent}
+        </DialogContent>
+      </Dialog>
     );
   }
 
