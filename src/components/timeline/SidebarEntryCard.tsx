@@ -15,6 +15,7 @@ interface SidebarEntryCardProps {
   usageCount?: number;
   isFlight?: boolean;
   compact?: boolean;
+  visitedBadge?: boolean;
 }
 
 const formatDuration = (startIso: string, endIso: string): string => {
@@ -32,7 +33,7 @@ const extractHue = (hslString: string): number => {
   return match ? parseInt(match[1]) : 260;
 };
 
-const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, onTouchDragStart, usageCount, isFlight, compact }: SidebarEntryCardProps) => {
+const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, onTouchDragStart, usageCount, isFlight, compact, visitedBadge }: SidebarEntryCardProps) => {
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -160,6 +161,18 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
             className="text-[9px] px-1.5 py-0 h-4 font-bold bg-white/25 text-white border-white/20"
           >
             x{usageCount}
+          </Badge>
+        </div>
+      )}
+
+      {/* Visited badge */}
+      {visitedBadge && (
+        <div className={`absolute ${usageCount != null && usageCount > 1 ? 'top-14' : 'top-8'} right-2 z-20`}>
+          <Badge
+            variant="secondary"
+            className="text-[9px] px-1.5 py-0 h-4 font-bold bg-green-500/25 text-green-300 border-green-500/20"
+          >
+            ✓ Visited
           </Badge>
         </div>
       )}

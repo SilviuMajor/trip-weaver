@@ -6,6 +6,22 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const reverseGeocode = async (lat: number, lng: number, apiKey: string): Promise<{ city: string | null; country: string | null }> => {
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}&result_type=locality|administrative_area_level_1`
+    );
+    const data = await res.json();
+    if (!data.results?.length) return { city: null, country: null };
+    const components = data.results[0].address_components ?? [];
+    const city = components.find((c: any) => c.types.includes('locality'))?.long_name ?? null;
+    const country = components.find((c: any) => c.types.includes('country'))?.long_name ?? null;
+    return { city, country };
+  } catch {
+    return { city: null, country: null };
+  }
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -39,7 +55,7 @@ serve(async (req) => {
     const { data: trips, error: tripsErr } = await tripsQuery;
     if (tripsErr) throw tripsErr;
     if (!trips || trips.length === 0) {
-      return new Response(JSON.stringify({ synced: 0 }), {
+      return new Response(JSON.stringify({ synced: 0, geocoded: 0 }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -56,7 +72,7 @@ serve(async (req) => {
 
     if (entriesErr) throw entriesErr;
     if (!entries || entries.length === 0) {
-      return new Response(JSON.stringify({ synced: 0 }), {
+      return new Response(JSON.stringify({ synced: 0, geocoded: 0 }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -111,7 +127,32 @@ serve(async (req) => {
       if (!upsertErr) synced++;
     }
 
-    return new Response(JSON.stringify({ synced }), {
+    // Reverse geocode places missing city/country (max 20 per sync)
+    let geocoded = 0;
+    const apiKey = Deno.env.get('GOOGLE_MAPS_API_KEY');
+    if (apiKey) {
+      const { data: missingGeo } = await supabase
+        .from('global_places')
+        .select('id, latitude, longitude')
+        .eq('user_id', userId)
+        .is('city', null)
+        .not('latitude', 'is', null)
+        .not('longitude', 'is', null)
+        .limit(20);
+
+      for (const place of (missingGeo ?? [])) {
+        const { city, country } = await reverseGeocode(place.latitude, place.longitude, apiKey);
+        if (city || country) {
+          const { error: geoErr } = await supabase
+            .from('global_places')
+            .update({ city, country })
+            .eq('id', place.id);
+          if (!geoErr) geocoded++;
+        }
+      }
+    }
+
+    return new Response(JSON.stringify({ synced, geocoded }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err: any) {
