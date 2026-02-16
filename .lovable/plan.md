@@ -1,43 +1,22 @@
 
 
-# Fix: Auto-load Nearby Search on Explore Mount
+# Fix: Explore Suggestions Not Loading
 
 ## Root Cause
 
-The origin resolution fallback in `ExploreView.tsx` (lines 236-245) has two bugs:
+A race condition between three `useEffect` hooks in `ExploreView.tsx`:
 
-1. It calls the `autocomplete` action with `{ action: 'autocomplete', input: destination }` but the edge function expects the param name `query`, not `input`
-2. Even if it worked, autocomplete predictions return `place_id` and formatted text -- they do NOT return `lat`/`lng` coordinates. So `first?.lat && first?.lng` is always falsy.
-
-This means when there are no scheduled entries with coordinates (so `resolveOriginFromEntries` returns null), the geocoding fallback silently fails. `originLocation` stays `null`, and the auto-load nearby search useEffect (line 270-282) bails at `if (!types || !originLocation)`.
+When `open` becomes `true`, React runs effects in declaration order. Effect #1 (line 227, "Resolve origin") calls `setOriginResolved(true)`. Then Effect #2 (line 252, "Auto-focus/reset") calls `setOriginResolved(false)`. React batches these -- the final value is `false`. Effect #3 (line 270, "Auto-load nearby search") sees `originResolved === false` and never fires. Since no deps change after that, the nearby search is permanently blocked.
 
 ## Fix
 
-**File: `src/components/timeline/ExploreView.tsx`** (lines 236-245)
+**File: `src/components/timeline/ExploreView.tsx`**, line 260
 
-Replace the broken autocomplete-based geocoding with a `textSearch` call, which returns place results with coordinates:
+Remove `setOriginResolved(false);` from the reset effect (line 260). The resolve-origin effect (line 227) already re-runs when `open` changes and correctly sets `originResolved` to `true`. Resetting it in a separate effect creates the race.
 
-```typescript
-if (destination) {
-  supabase.functions.invoke('google-places', {
-    body: { action: 'textSearch', query: destination, maxResults: 1 },
-  }).then(({ data }) => {
-    const first = data?.results?.[0];
-    if (first?.lat && first?.lng) {
-      setOriginLocation({ name: destination, lat: first.lat, lng: first.lng });
-    }
-    setOriginResolved(true);
-  }).catch(() => setOriginResolved(true));
-}
-```
-
-The `textSearch` action already returns `lat` and `lng` in each result (from `place.location.latitude/longitude`), so the first result for the trip destination will give us valid coordinates.
-
-No other changes needed -- the existing auto-load useEffect (lines 270-282) already correctly watches `originResolved` and `originLocation`, and calls `performNearbySearch` when both are ready.
-
-## Files Summary
+The `initialLoadDone.current = false` reset on line 259 is sufficient to allow the nearby search to re-fire on subsequent opens.
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/ExploreView.tsx` | Fix geocoding fallback: replace `autocomplete` call with `textSearch` (lines 237-245) |
+| `src/components/timeline/ExploreView.tsx` | Remove line 260: `setOriginResolved(false);` |
 
