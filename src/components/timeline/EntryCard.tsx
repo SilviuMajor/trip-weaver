@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Button } from '@/components/ui/button';
 
 import { findCategory } from '@/lib/categories';
-import VoteButton from './VoteButton';
+
 
 const formatDuration = (startIso: string, endIso: string): string => {
   const ms = new Date(endIso).getTime() - new Date(startIso).getTime();
@@ -551,10 +551,11 @@ const EntryCard = ({
     return cardBase('compact', (
       <>
         {cornerFlag(9, '2px 4px')}
-        <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[75%] px-2', textColor)}>
+        <div style={durationPillStyle('xs')}>{durationLabel}</div>
+        <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[75%] px-2 pr-10', textColor)}>
           <span className="text-[11px] font-semibold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{option.name}</span>
           <span className={cn('text-[9px] whitespace-nowrap shrink-0', faintTextColor)}>
-            {formatTime(startTime)} <span className="font-bold">{durationLabel}</span>
+            {formatTime(startTime)}
           </span>
         </div>
         {isCheckOut && (
@@ -569,11 +570,11 @@ const EntryCard = ({
     return cardBase('medium', (
       <>
         {cornerFlag(11, '3px 5px')}
-        <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[72%] px-2.5 py-1.5', textColor)}>
+        <div style={durationPillStyle('s')}>{durationLabel}</div>
+        <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[72%] px-2.5 py-1.5 pr-12', textColor)}>
           <span className="text-xs font-semibold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{displayName}</span>
           <span className={cn('text-[10px]', faintTextColor)}>
             {formatTime(startTime)} — {formatTime(endTime)}
-            <span className="ml-1 font-bold">{durationLabel}</span>
           </span>
         </div>
         {isCheckIn && (
@@ -591,7 +592,8 @@ const EntryCard = ({
     return cardBase('condensed', (
       <>
         {cornerFlag(13, '5px 7px')}
-        <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] px-3 py-2.5', textColor)} style={{ pointerEvents: 'none' }}>
+        <div style={durationPillStyle('m')}>{durationLabel}</div>
+        <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] px-3 py-2.5 pr-14', textColor)} style={{ pointerEvents: 'none' }}>
           {isCheckIn && (
             <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-0.5', faintTextColor)}>CHECK-IN</span>
           )}
@@ -603,17 +605,9 @@ const EntryCard = ({
               ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
             </p>
           )}
-          <div className="flex items-center justify-between gap-1">
-            <span className={cn('text-[10px]', faintTextColor)}>
-              {formatTime(startTime)} — {formatTime(endTime)}
-            </span>
-            <span className={cn(
-              'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
-              firstImage ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
-            )}>
-              {durationLabel}
-            </span>
-          </div>
+          <span className={cn('text-[10px]', faintTextColor)}>
+            {formatTime(startTime)} — {formatTime(endTime)}
+          </span>
         </div>
         {isCheckOut && (
           <span className={cn('absolute bottom-1 left-2.5 z-10 text-[10px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
@@ -629,7 +623,7 @@ const EntryCard = ({
       <div style={durationPillStyle('l')}>{durationLabel}</div>
 
       {/* Content — bottom-right */}
-      <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] p-4', textColor)} style={{ pointerEvents: 'none' }}>
+      <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] p-4 pr-16', textColor)} style={{ pointerEvents: 'none' }}>
         {isCheckIn && (
           <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-1', faintTextColor)}>CHECK-IN</span>
         )}
@@ -687,19 +681,6 @@ const EntryCard = ({
         </div>
       )}
 
-      {/* Vote button (bottom-left, above distance) */}
-      {!isProcessing && userId && totalOptions > 1 && option.category !== 'transfer' && option.category !== 'flight' && (
-        <div className="absolute bottom-12 left-4 z-10 pointer-events-auto">
-          <VoteButton
-            optionId={option.id}
-            userId={userId}
-            voteCount={option.vote_count ?? 0}
-            hasVoted={hasVoted}
-            locked={votingLocked}
-            onVoteChange={onVoteChange}
-          />
-        </div>
-      )}
 
       {/* Lock icon */}
       {isLocked && (
