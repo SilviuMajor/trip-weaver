@@ -189,7 +189,7 @@ const FlightGroupCard = ({
 
         {/* Content — RIGHT-aligned at bottom */}
         <div className="relative z-10 p-3 h-full flex flex-col justify-end text-right text-white">
-          <h3 className="text-base font-bold leading-tight truncate mb-1"
+          <h3 className="text-sm font-bold leading-tight truncate mb-1"
             style={{ textShadow: '0 1px 3px rgba(0,0,0,0.3)' }}>
             {displayTitle}
           </h3>
