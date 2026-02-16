@@ -1,120 +1,56 @@
 
 
-# Planner Layout Redesign — PlannerContent + Horizontal Scroll
+# Time-Based Category Sorting in PlannerContent
 
 ## Overview
-Extract shared planner content into a reusable `PlannerContent.tsx`, replace filter tabs with an unscheduled-first layout with a collapsible "On timeline" section, switch cards to Netflix-style horizontal scroll rows, and add a search placeholder button.
+Sort category rows by relevance to the current time of day, with flight/hotel pinned to the bottom.
 
-## Step 1: Add scrollbar-hide CSS utility
+## Changes: `src/components/timeline/PlannerContent.tsx`
 
-In `src/index.css`, add:
-```css
-.scrollbar-hide::-webkit-scrollbar { display: none; }
-.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-```
+### Add sorting logic
 
-## Step 2: Create `src/components/timeline/PlannerContent.tsx`
+After the `allCategories` memo (line 49-64), add a new `sortedCategories` memo that reorders them:
 
-### Props
 ```typescript
-interface PlannerContentProps {
-  entries: EntryWithOptions[];
-  trip: Trip | null;
-  isEditor: boolean;
-  onCardTap: (entry: EntryWithOptions) => void;
-  onAddEntry?: (categoryId: string) => void;
-  onDragStart: (e: React.DragEvent, entry: EntryWithOptions) => void;
-  onDuplicate?: (entry: EntryWithOptions) => void;
-  onInsert?: (entry: EntryWithOptions) => void;
-  onTouchDragStart?: (entry: EntryWithOptions, initialPosition: { x: number; y: number }) => void;
-}
+const sortedCategories = useMemo(() => {
+  const currentHour = new Date().getHours();
+
+  const getCategoryRelevance = (cat: CategoryDef): number => {
+    const diff = Math.abs(cat.defaultStartHour - currentHour);
+    return Math.min(diff, 24 - diff);
+  };
+
+  const pinToBottom = ['flight', 'hotel'];
+
+  const normal: CategoryDef[] = [];
+  const custom: CategoryDef[] = [];
+  const bottom: CategoryDef[] = [];
+
+  for (const cat of allCategories) {
+    if (pinToBottom.includes(cat.id)) bottom.push(cat);
+    else if (cat.id.startsWith('custom_')) custom.push(cat);
+    else normal.push(cat);
+  }
+
+  normal.sort((a, b) => getCategoryRelevance(a) - getCategoryRelevance(b));
+
+  return [...normal, ...custom, ...bottom];
+}, [allCategories]);
 ```
 
-### Consolidated logic (moved from both CategorySidebar and Planner)
-- `allCategories` memo: build from `PICKER_CATEGORIES` + trip custom presets
-- `deduplicatedMap` memo with hotel-aware dedup (use CategorySidebar's more complete version with `hotel_id` grouping)
-- `getFilteredOriginals` helper
-- Two separate groupings:
-  - `unscheduledGrouped`: entries where `is_scheduled === false`, grouped by category
-  - `scheduledGrouped`: entries where `is_scheduled !== false`, grouped by category
-- `scheduledCount`: count of scheduled entries excluding `airport_processing`, `transport`, `transfer`
+The `currentHour` is computed inside the memo. Since `allCategories` only changes when trip presets change, and there's no other dependency, the sort recalculates on mount and when presets change. This satisfies the "recalculate on mount or when hour changes" requirement without adding a timer (the hour won't change during a typical session view, and remounting handles it).
 
-### Layout structure
-1. No filter tabs
-2. **Unscheduled section** (top): category rows with only `is_scheduled === false` entries. Empty categories hidden except `hotel` (always show).
-3. **"On timeline (N)" collapsible** (bottom): uses `Collapsible` from `@/components/ui/collapsible`. Default collapsed. Shows scheduled entries grouped by category when expanded. Header: "On timeline ({scheduledCount})" with a `ChevronDown` icon that rotates when open.
+### Update references
 
-### Category row rendering (shared helper)
-For each category with entries:
-```
-🍽️ LUNCH (2)                    [+]
-<horizontal scroll container>
-  <fixed-width card> <fixed-width card> ...
-</horizontal scroll container>
-```
+Replace `allCategories` with `sortedCategories` in four places:
 
-- Horizontal scroll container: `flex gap-2 overflow-x-auto scrollbar-hide` with `-webkit-overflow-scrolling: touch`
-- Each card wrapper: `w-[160px] shrink-0` on mobile, `w-[180px] shrink-0` on desktop (use `useIsMobile`)
-- SidebarEntryCard itself unchanged — just wrapped in the fixed-width div
-- The "Other" category section uses the same horizontal layout
+1. **Line 127** (`groupByCategory`): keep using `allCategories` here since this just initializes the map keys (order doesn't matter for a Map).
+2. **Line 249**: `allCategories.map(cat => renderCategoryRow(...))` becomes `sortedCategories.map(...)`
+3. **Line 260**: same change inside the CollapsibleContent
 
-### Search button
-In the component's top area (not a sticky header — the header belongs to the parent), render a `Search` icon button. On tap, show toast: "Explore coming soon". Position it as part of content, or expose via a render prop / slot. Since CategorySidebar has its own header and Planner has its own header, the search button will be rendered as the first element inside PlannerContent, as a small bar with the search icon on the right.
+That's it. No other files change. The `groupByCategory` function uses the Map for lookup so key insertion order doesn't affect it. Only the rendering loops need `sortedCategories`.
 
-Actually, looking at the current layout: CategorySidebar has a header with "Planner" title. The search button should go next to that. I'll add an optional `renderHeader` slot or just include a minimal toolbar row at the top of PlannerContent with the search icon.
-
-Simplest approach: PlannerContent renders a small toolbar row at the top with a search button on the right. The "+" per-category buttons remain on each category row.
-
-## Step 3: Update `CategorySidebar.tsx`
-
-- Remove: `FilterTab` type, `activeFilter` state, `allCategories` memo, `filteredEntries` memo, `deduplicatedMap` memo, `getFilteredOriginals`, `grouped` memo, count calculations, `filterTabs`, and all the category rendering JSX
-- Keep: Sheet/panel wrapper, header with back arrow and "Planner" title, `open`/`onOpenChange` props, mobile Sheet vs desktop panel logic, `compact`/`hiddenForDrag` props
-- Replace the filter tabs + category sections area with:
-  ```tsx
-  <PlannerContent
-    entries={entries}
-    trip={trip}
-    isEditor={!!onAddEntry}
-    onCardTap={(e) => onCardTap?.(e)}
-    onAddEntry={onAddEntry}
-    onDragStart={onDragStart}
-    onDuplicate={onDuplicate}
-    onInsert={onInsert}
-    onTouchDragStart={onTouchDragStart}
-  />
-  ```
-- Remove the debug console.log
-
-## Step 4: Update `Planner.tsx`
-
-- Remove: `FilterTab` type, `activeFilter` state, `allCategories` memo, `filteredEntries` memo, `deduplicatedMap` memo, `getFilteredOriginals`, `grouped` memo, count calculations, `filterTabs`, filter tabs JSX, and the category sections JSX
-- Remove imports: `PREDEFINED_CATEGORIES`, `CategoryDef`, `SidebarEntryCard`, `cn`
-- Add import: `PlannerContent`
-- Replace the filter tabs + `<div className="mx-auto max-w-2xl ...">` section with:
-  ```tsx
-  <PlannerContent
-    entries={entries}
-    trip={trip}
-    isEditor={isEditor}
-    onCardTap={handleCardTap}
-    onAddEntry={(catId) => {
-      if (catId === 'hotel') { setHotelWizardOpen(true); return; }
-      setPrefillCategory(catId);
-      setSheetMode('create');
-      setSheetEntry(null);
-      setSheetOption(null);
-      setSheetOpen(true);
-    }}
-    onDragStart={() => {}}
-  />
-  ```
-- Keep: data fetching, EntrySheet, HotelWizard, FAB, TimelineHeader, TripNavBar
-
-## Technical Notes
-
-- The `isEditor` prop on PlannerContent controls whether "+" buttons and the search button appear (search is visible to all, but "+" is editor-only — same as current behavior)
-- `alwaysShowCategories = ['hotel']` logic preserved: hotel row shows in the unscheduled section even when empty
-- Hotel dedup uses `hotel_id` grouping (the more complete version from CategorySidebar)
-- The `onAddEntry` callback is optional — when not provided, no "+" buttons render (same as current)
-- Card height stays at current SidebarEntryCard dimensions — the fixed width creates a nice card aspect ratio
-
+## What stays the same
+- All card rendering, horizontal scroll, dedup logic, search button, collapsible behavior
+- `groupByCategory` still uses `allCategories` for Map initialization (order irrelevant)
+- "Other" row always renders last (after all categories), unchanged
