@@ -299,6 +299,43 @@ const EntrySheet = ({
   const [notesValue, setNotesValue] = useState('');
   const [notesDirty, setNotesDirty] = useState(false);
   const [heroIndex, setHeroIndex] = useState(0);
+  const [showPlaceSearch, setShowPlaceSearch] = useState(false);
+  const [placeSearchQuery, setPlaceSearchQuery] = useState('');
+
+  const handlePlaceSelectInView = async (details: PlaceDetails) => {
+    if (!option) return;
+    const updateData: Record<string, any> = {
+      name: details.name,
+      location_name: details.address || null,
+      latitude: details.lat,
+      longitude: details.lng,
+      phone: details.phone || null,
+      website: details.website || null,
+      opening_hours: details.openingHours || null,
+      rating: details.rating,
+      user_rating_count: details.userRatingCount,
+      google_maps_uri: details.googleMapsUri || null,
+      google_place_id: details.placeId || null,
+      price_level: details.priceLevel || null,
+      address: details.address || null,
+    };
+    await supabase.from('entry_options').update(updateData as any).eq('id', option.id);
+    // Add photos if any
+    if (details.photos.length > 0) {
+      const existingImages = option.images ?? [];
+      const newPhotos = details.photos.filter(url => !existingImages.some(img => img.image_url === url));
+      for (let i = 0; i < newPhotos.length; i++) {
+        await supabase.from('option_images').insert({
+          option_id: option.id,
+          image_url: newPhotos[i],
+          sort_order: existingImages.length + i,
+        });
+      }
+    }
+    setShowPlaceSearch(false);
+    setPlaceSearchQuery('');
+    onSaved();
+  };
 
   useEffect(() => {
     if (mode === 'view' && entry) {
@@ -1277,10 +1314,33 @@ const EntrySheet = ({
                 <InlineField
                   value={option.name}
                   canEdit={isEditor}
-                  onSave={async (v) => handleInlineSaveOption('name', v)}
+                  onSave={async (v) => {
+                    await handleInlineSaveOption('name', v);
+                    if (v !== option.name && v.trim().length > 2) {
+                      setPlaceSearchQuery(v);
+                      setShowPlaceSearch(true);
+                    }
+                  }}
                   placeholder="Entry name"
                 />
               </h2>
+              {showPlaceSearch && (
+                <div className="pt-1">
+                  <PlacesAutocomplete
+                    value={placeSearchQuery}
+                    onChange={setPlaceSearchQuery}
+                    onPlaceSelect={handlePlaceSelectInView}
+                    placeholder="Search for a place..."
+                    autoFocus
+                  />
+                  <button
+                    className="text-xs text-muted-foreground hover:text-foreground mt-1"
+                    onClick={() => { setShowPlaceSearch(false); setPlaceSearchQuery(''); }}
+                  >
+                    Cancel search
+                  </button>
+                </div>
+              )}
 
               {/* Lock + Delete action row */}
               <div className="flex items-center gap-2 pt-1">
@@ -1673,9 +1733,20 @@ const EntrySheet = ({
                         </a>
                       </PopoverContent>
                     </Popover>
+                  ) : isEditor ? (
+                    <button
+                      className="rounded-xl border border-dashed border-border bg-muted/20 flex flex-col items-center justify-center gap-1 w-full min-h-[100px] hover:border-primary hover:bg-primary/5 transition-all"
+                      onClick={() => {
+                        setShowPlaceSearch(true);
+                        setPlaceSearchQuery(option.name || '');
+                      }}
+                    >
+                      <span className="text-2xl opacity-20">📍</span>
+                      <span className="text-[10px] font-semibold text-muted-foreground">Tap to add location</span>
+                    </button>
                   ) : (
                     <div className="rounded-xl border border-border bg-muted/30 flex items-center justify-center">
-                      <span className="text-2xl">📍</span>
+                      <span className="text-2xl opacity-20">📍</span>
                     </div>
                   )}
                 </div>
@@ -1694,48 +1765,66 @@ const EntrySheet = ({
               <PlaceDetailsSection option={option} entryStartTime={entry.start_time} />
             )}
 
-            {/* Phone + Website — plain inline text */}
+            {/* Phone + Website — plain inline text with editable empty states */}
             {option.category !== 'transfer' && option.category !== 'flight' && (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                {(option as any).phone && (
+                {(option as any).phone ? (
                   <a href={`tel:${(option as any).phone}`} className="text-sm text-primary hover:underline" onClick={e => e.stopPropagation()}>
                     📞 {(option as any).phone}
                   </a>
-                )}
-                {option.website && (
+                ) : isEditor ? (
+                  <InlineField
+                    value=""
+                    canEdit={true}
+                    onSave={async (v) => {
+                      await supabase.from('entry_options').update({ phone: v } as any).eq('id', option.id);
+                      onSaved();
+                    }}
+                    placeholder="Add phone"
+                    renderDisplay={() => (
+                      <span className="text-sm text-muted-foreground/40 hover:text-primary transition-colors cursor-pointer">
+                        📞 Add phone
+                      </span>
+                    )}
+                  />
+                ) : null}
+                {option.website ? (
                   <a href={option.website} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline truncate max-w-[200px]" onClick={e => e.stopPropagation()}>
                     🔗 {(() => { try { return new URL(option.website).hostname; } catch { return option.website; } })()}
                   </a>
-                )}
+                ) : isEditor ? (
+                  <InlineField
+                    value=""
+                    canEdit={true}
+                    onSave={async (v) => handleInlineSaveOption('website', v)}
+                    placeholder="https://..."
+                    renderDisplay={() => (
+                      <span className="text-sm text-muted-foreground/40 hover:text-primary transition-colors cursor-pointer">
+                        🔗 Add website
+                      </span>
+                    )}
+                  />
+                ) : null}
               </div>
             )}
 
-            {/* Notes — collapsible */}
-            <Collapsible>
-              <CollapsibleTrigger className="flex items-center gap-1.5 text-sm font-semibold text-foreground w-full text-left py-1">
-                <span>📝</span>
-                <span className="flex-1">Notes</span>
-                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform [&[data-state=open]]:rotate-180" />
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                {isEditor ? (
-                  <div className="space-y-1 pt-1">
-                    <textarea
-                      value={notesValue}
-                      onChange={(e) => { setNotesValue(e.target.value); setNotesDirty(true); }}
-                      onBlur={handleNotesSave}
-                      placeholder="Tap to add a note..."
-                      className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
-                      rows={3}
-                    />
-                  </div>
-                ) : notesValue ? (
-                  <p className="text-sm text-foreground whitespace-pre-wrap pt-1">{notesValue}</p>
-                ) : (
-                  <p className="text-sm text-muted-foreground italic pt-1">No notes yet</p>
-                )}
-              </CollapsibleContent>
-            </Collapsible>
+            {/* Notes — always visible for editors */}
+            {isEditor ? (
+              <div className="space-y-1">
+                <textarea
+                  value={notesValue}
+                  onChange={(e) => { setNotesValue(e.target.value); setNotesDirty(true); }}
+                  onBlur={handleNotesSave}
+                  placeholder="📝 Add a note..."
+                  className="flex min-h-[48px] w-full rounded-md border border-dashed border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground/40 focus:border-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                  rows={2}
+                />
+              </div>
+            ) : notesValue ? (
+              <div className="space-y-1">
+                <p className="text-sm text-foreground whitespace-pre-wrap">📝 {notesValue}</p>
+              </div>
+            ) : null}
 
 
             {/* Budget — collapsible */}
