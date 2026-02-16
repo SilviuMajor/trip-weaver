@@ -1,56 +1,38 @@
 
-
-# Time-Based Category Sorting in PlannerContent
+# Compact Flight/Hotel Cards in Planner
 
 ## Overview
-Sort category rows by relevance to the current time of day, with flight/hotel pinned to the bottom.
+Add a `compact` prop to SidebarEntryCard that reduces height, hides location/rating, and uses smaller text. Pass it for flight/hotel entries in PlannerContent with narrower card widths.
 
-## Changes: `src/components/timeline/PlannerContent.tsx`
+## Changes
 
-### Add sorting logic
+### File 1: `src/components/timeline/SidebarEntryCard.tsx`
 
-After the `allCategories` memo (line 49-64), add a new `sortedCategories` memo that reorders them:
+1. Add `compact?: boolean` to the props interface (line 8-17)
+2. Destructure `compact` in the component (line 34)
+3. Update the height class (line 114): replace `firstImage ? 'h-[144px]' : 'min-h-[100px]'` with:
+   ```
+   compact ? 'h-[80px]' : (firstImage ? 'h-[144px]' : 'min-h-[100px]')
+   ```
+4. Update the name text size (line 171): change `text-sm` to `compact ? 'text-xs' : 'text-sm'`
+5. Conditionally hide location_name (lines 174-177): wrap with `{!compact && option.location_name && ...}`
+6. Conditionally hide rating (lines 179-182): wrap with `{!compact && (option as any).rating != null && ...}`
 
-```typescript
-const sortedCategories = useMemo(() => {
-  const currentHour = new Date().getHours();
+### File 2: `src/components/timeline/PlannerContent.tsx`
 
-  const getCategoryRelevance = (cat: CategoryDef): number => {
-    const diff = Math.abs(cat.defaultStartHour - currentHour);
-    return Math.min(diff, 24 - diff);
-  };
-
-  const pinToBottom = ['flight', 'hotel'];
-
-  const normal: CategoryDef[] = [];
-  const custom: CategoryDef[] = [];
-  const bottom: CategoryDef[] = [];
-
-  for (const cat of allCategories) {
-    if (pinToBottom.includes(cat.id)) bottom.push(cat);
-    else if (cat.id.startsWith('custom_')) custom.push(cat);
-    else normal.push(cat);
-  }
-
-  normal.sort((a, b) => getCategoryRelevance(a) - getCategoryRelevance(b));
-
-  return [...normal, ...custom, ...bottom];
-}, [allCategories]);
-```
-
-The `currentHour` is computed inside the memo. Since `allCategories` only changes when trip presets change, and there's no other dependency, the sort recalculates on mount and when presets change. This satisfies the "recalculate on mount or when hour changes" requirement without adding a timer (the hour won't change during a typical session view, and remounting handles it).
-
-### Update references
-
-Replace `allCategories` with `sortedCategories` in four places:
-
-1. **Line 127** (`groupByCategory`): keep using `allCategories` here since this just initializes the map keys (order doesn't matter for a Map).
-2. **Line 249**: `allCategories.map(cat => renderCategoryRow(...))` becomes `sortedCategories.map(...)`
-3. **Line 260**: same change inside the CollapsibleContent
-
-That's it. No other files change. The `groupByCategory` function uses the Map for lookup so key insertion order doesn't affect it. Only the rendering loops need `sortedCategories`.
+1. In `renderCategoryRow` (around line 207-221), pass `compact` prop to SidebarEntryCard:
+   ```tsx
+   compact={original.options[0]?.category === 'flight' || original.options[0]?.category === 'hotel'}
+   ```
+2. Update the card width wrapper (line 209): use a narrower width for compact cards:
+   ```tsx
+   const isCompact = original.options[0]?.category === 'flight' || original.options[0]?.category === 'hotel';
+   // wrapper class: isCompact ? 'w-[140px]' : cardWidth
+   ```
+3. Apply the same in `renderOtherRow` if needed (though flight/hotel entries shouldn't appear in "other", this is defensive)
 
 ## What stays the same
-- All card rendering, horizontal scroll, dedup logic, search button, collapsible behavior
-- `groupByCategory` still uses `allCategories` for Map initialization (order irrelevant)
-- "Other" row always renders last (after all categories), unchanged
+- All drag behavior, touch events, click handlers
+- Card appearance on the Timeline page (compact is never passed there)
+- Corner flag, duration pill, usage count badge all remain visible
+- Image background still renders, just cropped to 80px height
