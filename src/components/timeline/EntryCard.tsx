@@ -634,7 +634,7 @@ const EntryCard = ({
             {/* No time on short entries */}
           </div>
         ) : (
-          <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] px-3 py-2.5 pr-14', textColor)} style={{ pointerEvents: 'none' }}>
+          <div className={cn('absolute bottom-0 right-0 z-10 text-right p-3', textColor)} style={{ pointerEvents: 'none' }}>
             {isCheckIn && (
               <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-0.5', faintTextColor)}>CHECK-IN</span>
             )}
@@ -677,7 +677,7 @@ const EntryCard = ({
       ) : (
         <>
           {/* Content — bottom-right */}
-          <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] p-4 pr-16', textColor)} style={{ pointerEvents: 'none' }}>
+          <div className={cn('absolute bottom-0 right-0 z-10 text-right p-3', textColor)} style={{ pointerEvents: 'none' }}>
             {isCheckIn && (
               <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-1', faintTextColor)}>CHECK-IN</span>
             )}
