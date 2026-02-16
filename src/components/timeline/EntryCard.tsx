@@ -157,7 +157,7 @@ const EntryCard = ({
   const durationMin = Math.round(
     (new Date(endTime).getTime() - new Date(startTime).getTime()) / 60000
   );
-  const isShortEntry = durationMin <= 45;
+  const isShortEntry = durationMin <= 30;
   const isMicroEntry = durationMin <= 20;
 
   // Overlap red tint calculation
