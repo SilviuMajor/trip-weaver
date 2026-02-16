@@ -1,85 +1,64 @@
 
 
-# Fix Card Sizing, Duration Pill Overlap, and Overview Hero Image
+# Fix: Overview — Drawer on Mobile, Dialog on Desktop
 
-## Overview
-Three fixes to restore correct sizing after the diagonal-fade redesign: title/pill font sizes, duration pill positioning per tier, and hero image height constraint.
+## Problem
+The view mode currently always uses `<Drawer>` (slide-up sheet). This works well on mobile but on desktop a centered `<Dialog>` looks better and was the original behavior.
 
-## Fix 1: Restore Title and Duration Pill Sizes (`EntryCard.tsx`)
+## Approach
+Use `useIsMobile()` to conditionally wrap the same view content in either `<Drawer>` (mobile) or `<Dialog>` (desktop).
 
-### 1a. Fix `durationPillStyle` function (lines 305-325)
-Replace the oversized pill dimensions with the original small sizes:
-- `l` (full): fontSize 10, padding `2px 6px`, top 8, right 8
-- `m` (condensed): fontSize 10, padding `2px 6px`, top 7, right 7
-- `s` (medium): fontSize 10, padding `2px 6px`, top 5, right 5
-- `xs` (compact): fontSize 9, padding `2px 5px`, top 3, right 4
+## Changes (single file: `EntrySheet.tsx`)
 
-### 1b. Fix title sizes per tier
-- **Full** (line 633): Change `text-[17px]` to `text-lg` (18px)
-- **Full** rating (line 639): Change `text-[11px]` to `text-[10px]`
-- **Condensed** title (line 597): Already `text-[14px]` -- correct (matches `text-sm`)
-- **Medium** title (line 572): Change `text-[13px]` to `text-xs` (12px), change `font-bold` to `font-semibold`
-- **Compact** title (line 556): Change `text-[12px]` to `text-[11px]`, change `font-bold` to `font-semibold`
+### 1. Add import
+Add `import { useIsMobile } from '@/hooks/use-mobile';` at the top (Drawer and Dialog imports already exist).
 
-## Fix 2: Duration Pill Positioning Per Tier (`EntryCard.tsx`)
+### 2. Add hook call
+Inside the EntrySheet component body (near other hooks), add `const isMobile = useIsMobile();`
 
-### 2a. Full cards (>=160px) -- keep absolute top-right pill
-No change needed, the `durationPillStyle('l')` stays as an absolute-positioned pill.
+### 3. Restructure view mode return (lines 1216-1900)
+Extract ALL content between `<DrawerContent>` and `</DrawerContent>` (lines 1219-1897) into a `viewContent` JSX variable. Then conditionally wrap:
 
-### 2b. Condensed cards (80-159px) -- move pill inline
-Remove the `<div style={durationPillStyle('m')}>` absolute pill (line 592). Instead, replace the time line (lines 605-607) with a flex row containing time on the left and an inline pill on the right:
-```tsx
-<div className="flex items-center justify-between gap-1">
-  <span className={cn('text-[10px]', faintTextColor)}>
-    {formatTime(startTime)} — {formatTime(endTime)}
-  </span>
-  <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-bold',
-    firstImage ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground')}>
-    {durationLabel}
-  </span>
-</div>
+```text
+if (mode === 'view') {
+  // ... existing variable declarations ...
+
+  const viewContent = (
+    <>
+      {/* Hero image gallery */}
+      ...
+      {/* All existing content through delete dialogs */}
+      ...
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        <DrawerContent className="max-h-[92vh] overflow-y-auto">
+          {viewContent}
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+        {viewContent}
+      </DialogContent>
+    </Dialog>
+  );
+}
 ```
-
-### 2c. Medium cards (40-79px) -- duration inline with time
-Remove the `<div style={durationPillStyle('s')}>` absolute pill (line 570). Append duration inline to the time span (lines 573-575):
-```tsx
-<span className={cn('text-[10px]', faintTextColor)}>
-  {formatTime(startTime)} — {formatTime(endTime)}
-  <span className="ml-1 font-bold">{durationLabel}</span>
-</span>
-```
-
-### 2d. Compact cards (<40px) -- duration inline with name
-Remove the `<div style={durationPillStyle('xs')}>` absolute pill (line 554). Add duration inline after the name:
-```tsx
-<span className="text-[11px] font-semibold truncate">
-  {option.name}
-</span>
-<span className={cn('text-[9px] whitespace-nowrap shrink-0', faintTextColor)}>
-  {formatTime(startTime)} <span className="font-bold">{durationLabel}</span>
-</span>
-```
-
-## Fix 3: Overview Hero Image Height (`EntrySheet.tsx`)
-
-### 3a. Replace ImageGallery with fixed-height hero (lines 1219-1233)
-Replace the `ImageGallery` component usage with a fixed `height: 200` container that renders a single image with inline swipe controls (arrows + dots). Add `heroIndex` state (defaults to 0).
-
-### 3b. Import ChevronLeft/ChevronRight
-Add `ChevronLeft, ChevronRight` to the lucide-react import if not already present.
-
-### 3c. No-image non-editor: render nothing
-Change the empty state: if no images and not editor, render `null` (no placeholder eating space).
 
 ## What does NOT change
-- Diagonal fade gradients, corner flags, glossy backgrounds
-- Card wrapper, drag handlers, overlap overlay
-- Transport card rendering
-- EntrySheet create/edit mode
-- Any other component
+- Create/edit mode (stays as Dialog always)
+- All view mode content (hero gallery, grids, collapsibles, vote, delete dialogs)
+- Hero image 200px height
+- Any other file
 
 ## Files modified
 | File | Scope |
 |------|-------|
-| `src/components/timeline/EntryCard.tsx` | Pill sizes, title sizes, pill positioning per tier |
-| `src/components/timeline/EntrySheet.tsx` | Hero gallery fixed 200px height with inline controls |
+| `src/components/timeline/EntrySheet.tsx` | Import useIsMobile, conditional Drawer vs Dialog wrapper in view mode |
