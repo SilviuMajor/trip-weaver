@@ -1,102 +1,74 @@
 
 
-# Add Explore Filters (Price, Rating, Travel Time)
+# Add "Venue Closed" Warning on Timeline Placement
 
 ## Overview
-Add three client-side filter chips below the travel mode pills in ExploreView: Price Level (multi-select), Minimum Rating (single-select), and Max Travel Time (single-select). Filtering is applied via `useMemo` on already-fetched results. A result count line shows when filters are active.
+When a venue with opening hours is placed on a day marked "Closed", show a warning toast and a red banner in the detail view.
 
 ## Changes
 
-### File: `src/components/timeline/ExploreView.tsx`
+### 1. New helper in `src/lib/entryHelpers.ts`
 
-**1. New filter state (after line 192, alongside existing state)**
-
-```typescript
-const [selectedPriceLevels, setSelectedPriceLevels] = useState<string[]>([]);
-const [minRating, setMinRating] = useState<number | null>(null);
-const [maxTravelMinutes, setMaxTravelMinutes] = useState<number | null>(null);
-```
-
-Default: empty array for price (means "all"), null for rating and travel time (means "any"). Reset these in the existing `open` reset effect (line 252-267).
-
-**2. New `filteredResults` useMemo (before `sortedResults` at line 493)**
+Add `checkOpeningHoursConflict` function after the existing `getEntryDayHours`:
 
 ```typescript
-const filteredResults = useMemo(() => {
-  return results.filter(place => {
-    if (selectedPriceLevels.length > 0 && selectedPriceLevels.length < 4) {
-      if (!place.priceLevel || !selectedPriceLevels.includes(place.priceLevel)) return false;
-    }
-    if (minRating !== null) {
-      if (!place.rating || place.rating < minRating) return false;
-    }
-    if (maxTravelMinutes !== null) {
-      const time = travelTimes.get(place.placeId);
-      if (time == null || time > maxTravelMinutes) return false;
-    }
-    return true;
-  });
-}, [results, selectedPriceLevels, minRating, maxTravelMinutes, travelTimes]);
+export const checkOpeningHoursConflict = (
+  openingHours: string[] | null,
+  startTime: string
+): { isConflict: boolean; message: string | null } => {
+  if (!openingHours || openingHours.length === 0) return { isConflict: false, message: null };
+  const d = new Date(startTime);
+  const jsDay = d.getDay();
+  const googleIndex = jsDay === 0 ? 6 : jsDay - 1;
+  const dayHours = openingHours[googleIndex];
+  if (!dayHours) return { isConflict: false, message: null };
+  if (dayHours.toLowerCase().includes('closed')) {
+    const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    return { isConflict: true, message: `This place is closed on ${dayNames[googleIndex]}` };
+  }
+  return { isConflict: false, message: null };
+};
 ```
 
-**3. Update `sortedResults` to use `filteredResults` instead of `results`**
+### 2. Warning toast in `src/pages/Timeline.tsx`
 
-Change line 494 from `[...results]` to `[...filteredResults]` and update deps.
+Two insertion points:
 
-**4. Filter chips row (after travel mode pills, ~line 681)**
+**a) `handleDropOnTimeline`** (around line 1450, after `await fetchData()`): Check the dropped entry's opening hours against the new `startIso` and show a destructive toast if closed.
 
-Add a new horizontal scrolling row with three Popover-based filter chips:
+**b) `handleAddAtTime`** (around line 346, after the success toast): Same check using `place.openingHours` and `startTime`.
 
-- **Price**: Popover with four toggleable pills (EUR, EUR EUR, etc.). Chip label shows "Price" when all/none selected, or the active symbols when filtered.
-- **Rating**: Popover with options "4.5+", "4.0+", "3.5+", "Any". Chip label shows the active filter or "Rating".
-- **Distance**: Popover with "Under 10m", "Under 15m", "Under 30m", "Any". Chip label shows active filter or "Distance".
+Both use:
+```typescript
+const opt = entry.options?.[0];
+if (opt?.opening_hours) {
+  const { isConflict, message } = checkOpeningHoursConflict(opt.opening_hours, startIso);
+  if (isConflict) {
+    toast({ title: 'Venue may be closed', description: message, variant: 'destructive' });
+  }
+}
+```
 
-Chip styling:
-- Active (non-default): `bg-primary/10 text-primary border-primary/20 rounded-full px-3 py-1 text-[11px] font-medium`
-- Default: `text-muted-foreground border-border/50 rounded-full px-3 py-1 text-[11px] font-medium`
+For `handleAddAtTime`, since we have the `place` object (not a DB entry), we check `place.openingHours` directly.
 
-**5. Result count text (below filter chips, above the results list)**
+### 3. Warning banner in `src/components/timeline/PlaceOverview.tsx`
+
+In the `PlaceDetailsSection` component (line 26-80), add a closed-day warning banner above the opening hours collapsible. Compute it using `checkOpeningHoursConflict` with `entryStartTime`, and render a red alert-style div when there is a conflict. Only show for entries that have a real scheduled time (not the reference date `2099-01-01`).
 
 ```tsx
-{!loading && results.length > 0 && (
-  <div className="px-4 pb-1">
-    <span className="text-[11px] text-muted-foreground">
-      {filteredResults.length === results.length
-        ? `${results.length} results`
-        : `${filteredResults.length} of ${results.length} results`}
-    </span>
+{closedWarning && (
+  <div className="flex items-center gap-2 rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive font-medium">
+    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+    <span>{closedWarning}</span>
   </div>
 )}
 ```
 
-**6. Reset filters on open**
-
-In the existing reset effect (line 252-267), add:
-```typescript
-setSelectedPriceLevels([]);
-setMinRating(null);
-setMaxTravelMinutes(null);
-```
-
-## Technical Details
-
-### Price Level Mapping
-Google returns these string values in `priceLevel`:
-- `PRICE_LEVEL_INEXPENSIVE` = EUR
-- `PRICE_LEVEL_MODERATE` = EUR EUR
-- `PRICE_LEVEL_EXPENSIVE` = EUR EUR EUR
-- `PRICE_LEVEL_VERY_EXPENSIVE` = EUR EUR EUR EUR
-
-The filter stores the full Google string values in `selectedPriceLevels` and compares directly against `place.priceLevel`.
-
-### Filter Chip Popover Pattern
-Each chip is a `Popover` + `PopoverTrigger` (the pill button) + `PopoverContent` (the options). The price popover uses toggle buttons; rating and distance use radio-like single-select buttons. Selecting an option closes the popover for single-select filters.
-
-### Files Summary
+## Files Summary
 
 | File | Change |
 |------|--------|
-| `src/components/timeline/ExploreView.tsx` | Add filter state, filteredResults memo, filter chip row UI, result count, reset on open |
-
-No new files, no database changes, no edge function changes.
+| `src/lib/entryHelpers.ts` | Add `checkOpeningHoursConflict` helper |
+| `src/pages/Timeline.tsx` | Import helper; add warning toast in `handleDropOnTimeline` and `handleAddAtTime` |
+| `src/components/timeline/PlaceOverview.tsx` | Import helper + AlertTriangle; add closed-day warning banner in `PlaceDetailsSection` |
 
