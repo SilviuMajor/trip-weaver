@@ -579,6 +579,9 @@ const EntryCard = ({
             ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
           }}
           onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
+          onMouseDown={(e) => { e.stopPropagation(); }}
+          onTouchStart={(e) => { e.stopPropagation(); }}
+          onPointerDown={(e) => { e.stopPropagation(); }}
         >
           {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
           <span>{durationLabel}</span>
@@ -607,6 +610,9 @@ const EntryCard = ({
             ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
           }}
           onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
+          onMouseDown={(e) => { e.stopPropagation(); }}
+          onTouchStart={(e) => { e.stopPropagation(); }}
+          onPointerDown={(e) => { e.stopPropagation(); }}
         >
           {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
           <span>{durationLabel}</span>
@@ -647,6 +653,9 @@ const EntryCard = ({
             ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
           }}
           onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
+          onMouseDown={(e) => { e.stopPropagation(); }}
+          onTouchStart={(e) => { e.stopPropagation(); }}
+          onPointerDown={(e) => { e.stopPropagation(); }}
         >
           {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
           <span>{durationLabel}</span>
@@ -695,11 +704,14 @@ const EntryCard = ({
           ...durationPillStyle('l', isShortEntry),
           ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
         }}
-        onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
-      >
-        {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
-        <span>{durationLabel}</span>
-      </div>
+          onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
+          onMouseDown={(e) => { e.stopPropagation(); }}
+          onTouchStart={(e) => { e.stopPropagation(); }}
+          onPointerDown={(e) => { e.stopPropagation(); }}
+        >
+          {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
+          <span>{durationLabel}</span>
+        </div>
 
       {isShortEntry ? (
         <div
