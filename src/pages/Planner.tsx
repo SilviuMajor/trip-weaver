@@ -227,7 +227,7 @@ const Planner = () => {
             categoryId={exploreCategoryId}
             isEditor={isEditor}
             onAddToPlanner={handleAddToPlanner}
-            onCardTap={() => toast({ title: 'Detail view coming soon' })}
+            onCardTap={() => {}}
             onAddManually={() => {
               setExploreOpen(false);
               setPrefillCategory(exploreCategoryId || undefined);
