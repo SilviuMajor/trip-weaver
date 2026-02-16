@@ -3,6 +3,7 @@ import { ArrowRight, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { EntryOption, EntryWithOptions } from '@/types/trip';
 import { findCategory } from '@/lib/categories';
+import AIRPORTS from '@/lib/airports';
 import { useToast } from '@/hooks/use-toast';
 import { useTheme } from 'next-themes';
 
@@ -77,6 +78,9 @@ const FlightGroupCard = ({
   const depCode = flightOption.departure_location?.split(' - ')[0] ?? '';
   const arrCode = flightOption.arrival_location?.split(' - ')[0] ?? '';
   const flightDuration = formatDuration(flightEntry.start_time, flightEntry.end_time);
+
+  const arrCity = AIRPORTS.find(a => a.iata === arrCode.trim().toUpperCase())?.city;
+  const displayTitle = arrCity ? `Flight to ${arrCity}` : flightOption.name;
 
   const handleFlightLockTap = (e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
     e.stopPropagation();
@@ -187,7 +191,7 @@ const FlightGroupCard = ({
         <div className="relative z-10 p-3 h-full flex flex-col justify-end text-right text-white">
           <h3 className="text-base font-bold leading-tight truncate mb-1"
             style={{ textShadow: '0 1px 3px rgba(0,0,0,0.3)' }}>
-            {flightOption.name}
+            {displayTitle}
           </h3>
           <div className="flex items-center gap-2 text-xs text-white/80 font-medium justify-end">
             <span className="shrink-0">
