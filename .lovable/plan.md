@@ -1,65 +1,41 @@
 
 
-# Remaining Fixes: Flight Bar Tint, EntryCard Duration Behavior, Map Cleanup
+# Fix: EntryCard short-entry rendering across all tiers
 
-## Change 1: FlightGroupCard.tsx -- Background tint on check-in/checkout bars
+## Problem
+The compact and medium tiers bypass the `isShortEntry` logic entirely -- they never pass `overflowVisible` to `cardBase`, use wrong font sizes, and show time when they shouldn't. The condensed and full short branches also incorrectly show time text.
 
-The check-in and checkout bar containers (lines 93-94 and 183-184) currently have no background color. Add a subtle ~20% opacity tint using the category color.
+## Changes (all in `src/components/timeline/EntryCard.tsx`)
 
-### Lines 93-95
-Add `backgroundColor: \`\${catColor}33\`` to the style object of the check-in container div.
+### 1. Compact tier (lines 569-584)
+- Pass `isShortEntry` as 3rd argument to `cardBase()` to enable `overflow-visible`
+- Replace flex-based content with absolute-positioned centered content: `absolute top-1/2 -translate-y-1/2 z-10 text-right`, with `left: isMicroEntry ? 30 : 10`, `right: 54`
+- Change title from `text-[11px] font-semibold` to `text-sm font-bold`
+- Remove the time span entirely (compact is always too short)
 
-### Lines 183-185
-Same for the checkout container div.
+### 2. Medium tier (lines 588-606)
+- Pass `isShortEntry` as 3rd argument to `cardBase()`
+- When `isShortEntry` is true: use absolute centered content (same pattern as compact), no time, `text-sm font-bold` title
+- When `isShortEntry` is false: keep bottom-right content but change title to `text-sm font-bold`, keep time display
+- Remove time from the short-entry branch only
 
-## Change 2: EntryCard.tsx -- Duration-based layout behavior
+### 3. Condensed short branch (lines 615-626)
+- Remove the time span (lines 623-625) from the `isShortEntry` branch only
+- The normal branch (lines 628-643) keeps time -- no change there
 
-Compute entry duration in minutes. Behavior changes at two thresholds:
+### 4. Full short branch (lines 658-669)
+- Remove the time span (lines 666-668) from the `isShortEntry` branch only
+- The normal branch (lines 670-730) keeps time -- no change there
 
-### Duration > 45 min (current behavior, mostly unchanged)
-- Text bottom-right (justify-end), pill top-right -- different vertical zones
-- Card uses overflow-hidden (default)
-- No extra padding-right needed on content
+## Summary of time display rules
 
-### Duration <= 45 min ("compact image" mode)
-- Card wrapper: `overflow: visible` instead of `overflow-hidden`
-- Both text AND pill vertically centered
-- Pill: `top: 50%, transform: translateY(-50%), right: 5px` instead of fixed top
-- Content: absolutely positioned with `top: 50%, left: 10px, right: 54px, transform: translateY(-50%), textAlign: right, zIndex: 10`
-- This means if the card height is shorter than the text, the text visibly overflows -- it is never clipped
-
-### Duration <= 20 min ("micro" mode, subset of <= 45min)
-- Corner flag becomes a centered circle pill on the left: `left: 5, top: 50%, transform: translateY(-50%), borderRadius: 999px` instead of pinned top-left with `borderRadius: 14px 0 8px 0`
-
-### Implementation in EntryCard.tsx
-
-Add duration computation near line 156:
-```typescript
-const durationMin = Math.round(
-  (new Date(endTime).getTime() - new Date(startTime).getTime()) / 60000
-);
-const isShortEntry = durationMin <= 45;
-const isMicroEntry = durationMin <= 20;
-```
-
-Modify `cardBase` function (line 502) to accept an `overflowVisible` parameter. When true, add `overflow-visible` class instead of `overflow-hidden`.
-
-Modify `cornerFlag` function (line 328) to accept the `isMicro` flag and adjust positioning.
-
-Modify Condensed and Full tier renders to use the short-entry layout when `isShortEntry` is true.
-
-## Change 3: EntrySheet.tsx -- Map cleanup
-
-Remove the `location_name` text above the map image (lines 1696-1698) and the "Open in Maps ->" text below (line 1705). Keep just the map image as the popover trigger.
-
-### Lines 1694-1706
-Replace with a cleaner version: just the `<img>` inside the PopoverTrigger, no text above or below, with rounded-xl overflow-hidden styling.
-
-## Files Modified
-
-| File | Change |
-|------|--------|
-| FlightGroupCard.tsx | Add backgroundColor tint to check-in/checkout containers |
-| EntryCard.tsx | Duration-based layout: overflow-visible + centered for short entries, micro corner flag |
-| EntrySheet.tsx | Remove location text and "Open in Maps" from map cell |
+| Tier | isShortEntry? | Show time? |
+|------|--------------|------------|
+| Compact | always | never |
+| Medium | true | no |
+| Medium | false | yes |
+| Condensed | true | no |
+| Condensed | false | yes |
+| Full | true | no |
+| Full | false | yes |
 
