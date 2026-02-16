@@ -211,6 +211,11 @@ const Planner = () => {
             userVotes={userVotes}
             onVoteChange={fetchData}
             prefillCategory={prefillCategory}
+            onExploreRequest={(catId) => {
+              setSheetOpen(false);
+              setExploreCategoryId(catId);
+              setExploreOpen(true);
+            }}
           />
           <HotelWizard
             open={hotelWizardOpen}

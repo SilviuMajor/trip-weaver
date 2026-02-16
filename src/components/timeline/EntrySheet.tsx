@@ -77,6 +77,7 @@ interface EntrySheetProps {
   gapContext?: { fromName: string; toName: string; fromAddress: string; toAddress: string } | null;
   onTransportConflict?: (blockDuration: number, gapMinutes: number) => void;
   onHotelSelected?: () => void;
+  onExploreRequest?: (categoryId: string) => void;
 }
 
 type Step = 'category' | 'details';
@@ -90,6 +91,7 @@ const EntrySheet = ({
   gapContext,
   onTransportConflict,
   onHotelSelected,
+  onExploreRequest,
 }: EntrySheetProps) => {
   const { currentUser, isEditor } = useCurrentUser();
   const isMobile = useIsMobile();
@@ -266,6 +268,12 @@ const EntrySheet = ({
   useEffect(() => {
     if (mode !== 'create') return;
     if (prefillCategory && open && !editEntry) {
+      const specialCats = ['flight', 'hotel', 'transfer', 'private_transfer'];
+      if (!specialCats.includes(prefillCategory) && onExploreRequest) {
+        onExploreRequest(prefillCategory);
+        onOpenChange(false);
+        return;
+      }
       const cat = allCategories.find(c => c.id === prefillCategory);
       if (cat) {
         setCategoryId(prefillCategory);
@@ -464,6 +472,11 @@ const EntrySheet = ({
   const handleCategorySelect = (catId: string) => {
     if (catId === 'hotel' && onHotelSelected) {
       onHotelSelected();
+      return;
+    }
+    const specialCats = ['flight', 'hotel', 'transfer', 'private_transfer'];
+    if (!specialCats.includes(catId) && onExploreRequest) {
+      onExploreRequest(catId);
       return;
     }
     setCategoryId(catId);
