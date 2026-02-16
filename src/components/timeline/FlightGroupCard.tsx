@@ -1,8 +1,10 @@
 import { motion } from 'framer-motion';
-import { ArrowRight, Clock } from 'lucide-react';
+import { ArrowRight, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { EntryOption, EntryWithOptions } from '@/types/trip';
 import { findCategory } from '@/lib/categories';
+import { useToast } from '@/hooks/use-toast';
+import { useTheme } from 'next-themes';
 
 interface FlightGroupCardProps {
   flightOption: EntryOption;
@@ -62,6 +64,12 @@ const FlightGroupCard = ({
   onTouchDragEnd,
   isShaking,
 }: FlightGroupCardProps) => {
+  const { toast } = useToast();
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const processBarBg = isDark ? 'hsla(210, 50%, 45%, 0.25)' : 'hsla(210, 55%, 55%, 0.15)';
+  const processBarBorder = '1px solid hsla(210, 50%, 55%, 0.12)';
+
   const catInfo = findCategory('flight');
   const catColor = catInfo?.color ?? 'hsl(260, 50%, 55%)';
   const firstImage = flightOption.images?.[0]?.image_url;
@@ -69,6 +77,11 @@ const FlightGroupCard = ({
   const depCode = flightOption.departure_location?.split(' - ')[0] ?? '';
   const arrCode = flightOption.arrival_location?.split(' - ')[0] ?? '';
   const flightDuration = formatDuration(flightEntry.start_time, flightEntry.end_time);
+
+  const handleFlightLockTap = (e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
+    e.stopPropagation();
+    toast({ description: "Flights are locked — edit times in the overview" });
+  };
 
   return (
     <motion.div
@@ -92,7 +105,7 @@ const FlightGroupCard = ({
       {checkinEntry && (
         <div
           className="flex items-center gap-3 px-3 min-h-0 overflow-hidden"
-          style={{ flex: checkinFraction, backgroundColor: `${catColor}33` }}
+          style={{ flex: checkinFraction, background: processBarBg, borderBottom: processBarBorder }}
         >
           {/* Timeline dot + dashed line going down */}
           <div className="flex flex-col items-center self-stretch py-1">
@@ -150,12 +163,24 @@ const FlightGroupCard = ({
           <span className="text-sm">✈️</span>
         </div>
 
-        {/* Duration pill — top-right */}
+        {/* Lock-in-pill — always locked on flights */}
         <div
-          className="absolute top-2 right-2 z-20 rounded-full px-2.5 py-0.5 text-[10px] font-bold text-white/90"
-          style={{ background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
+          className="absolute top-[7px] right-[7px] z-20 rounded-full font-bold flex items-center gap-1 cursor-pointer select-none"
+          style={{
+            fontSize: 10,
+            padding: '3px 10px',
+            background: 'rgba(224, 138, 58, 0.85)',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(224, 138, 58, 0.4)',
+            color: '#fff',
+          }}
+          onClick={handleFlightLockTap}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
         >
-          {flightDuration}
+          <Lock className="h-2.5 w-2.5" />
+          <span>{flightDuration}</span>
         </div>
 
         {/* Content — RIGHT-aligned at bottom */}
@@ -182,7 +207,7 @@ const FlightGroupCard = ({
       {checkoutEntry && (
         <div
           className="flex items-center gap-3 px-3 min-h-0 overflow-hidden"
-          style={{ flex: checkoutFraction, backgroundColor: `${catColor}33` }}
+          style={{ flex: checkoutFraction, background: processBarBg, borderTop: processBarBorder }}
         >
           {/* Dashed line coming from above + dot at bottom */}
           <div className="flex flex-col items-center self-stretch py-1">
