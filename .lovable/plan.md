@@ -1,81 +1,75 @@
 
 
-# Batch Fixes: Votes, Duration Pills, Transport, Overview, Opening Hours
+# Changes: Flight Card Right-Align, Timeline Dots, Overview Editable Empty States, Opening Hours Fix
 
 ## Overview
-Five targeted fixes across EntryCard, EntrySheet, ContinuousTimeline, and TransportConnector.
+Four changes across FlightGroupCard.tsx and EntrySheet.tsx: right-align flight content, replace check-in/checkout bars with timeline dots, add editable empty states in the overview, and confirm opening hours fix.
 
-## Change 1: Remove VoteButton rendering everywhere
+## Change 1: FlightGroupCard.tsx -- Right-align + Timeline Dots
 
-### EntryCard.tsx
-- Remove `import VoteButton from './VoteButton'` (line 13)
-- Keep `hasVoted` and `onVoteChange` in the interface/destructuring to avoid breaking callers
-- Remove the VoteButton render block (lines 690-701)
+### 1a. Right-align flight content (lines 156-175)
+Change the content div from left-aligned to right-aligned:
+- Add `text-right` to the content wrapper div
+- Add `justify-end` to the route flex row
+- Add text shadow to the title for readability
 
-### EntrySheet.tsx
-- Remove `import VoteButton from './VoteButton'` (line 30)
-- Remove the VoteButton section in view mode (lines 1767-1779)
+### 1b. Replace check-in bar with timeline dot (lines 91-112)
+Remove the flat bar layout and replace with a timeline dot + dashed line design:
+- Left side: circle dot at top with dashed line extending down
+- Right side: "Check-in" label, terminal info, and time range
+- Delete the check-in divider line (lines 109-111)
 
-### ContinuousTimeline.tsx
-- No changes needed -- it passes `hasVoted`/`onVoteChange` to EntryCard but since EntryCard won't render VoteButton, this is fine. Keep the props to avoid type errors.
+### 1c. Replace checkout bar with timeline dot (lines 178-199)
+Same pattern but inverted -- dashed line on top, dot at bottom:
+- Left side: dashed line coming from above with circle dot at bottom
+- Right side: "Checkout" label, terminal info, and time range
+- Delete the checkout divider line (lines 178-180)
 
-## Change 2: Duration pill -- ALWAYS absolute top-right, add content padding
+## Change 2: Opening Hours -- Already Fixed
 
-### EntryCard.tsx
-All tiers get the absolute top-right pill via `durationPillStyle`. Content areas get right-padding to prevent overlap.
+The opening hours fix from the previous batch is already in place (line 187 shows `{entryDayHoursText || 'Opening hours'}` without a day prefix). The `getEntryDayHours` function (line 139) already accepts `entryStartTime` and `PlaceDetailsSection` (line 149) already has the `entryStartTime` prop. No changes needed here.
 
-- **Full (>=160px)**: Already has `durationPillStyle('l')` at line 629. Add `pr-16` to content div (line 632).
-- **Condensed (80-159px)**: Add `<div style={durationPillStyle('m')}>{durationLabel}</div>` back. Remove the inline duration pill from the flex row (lines 610-615). Change time to just show time without inline pill. Add `pr-14` to content div (line 594).
-- **Medium (40-79px)**: Add `<div style={durationPillStyle('s')}>{durationLabel}</div>`. Remove inline `<span className="ml-1 font-bold">{durationLabel}</span>` from line 576. Add `pr-12` to content div (line 572).
-- **Compact (<40px)**: Add `<div style={durationPillStyle('xs')}>{durationLabel}</div>`. Remove inline `<span className="font-bold">{durationLabel}</span>` from line 557. Add `pr-10` to content div (line 554).
+## Change 3: Hero Image Height -- Already 240px
 
-## Change 3: TransportConnector.tsx -- already simplified
+The hero is already at 240px (line 1222) and empty state at 160px (line 1259). No changes needed.
 
-The TransportConnector was already rewritten in the previous batch. The current code matches the simplified version (tappable pill, no mode switching). ContinuousTimeline already passes just `onTap`. No changes needed here.
+## Change 4: EntrySheet.tsx -- Editable Empty States
 
-## Change 4: EntrySheet.tsx -- Overview improvements
+### 4a. Map cell empty state (lines 1676-1680)
+Replace the plain pin emoji placeholder with a tappable button that triggers place search:
+- Dashed border, "Tap to add location" text
+- On click: opens PlacesAutocomplete inline or triggers a search flow
+- Add state: `showPlaceSearch` and `placeSearchQuery`
 
-### 4a. Hero image height: 200px to 240px on mobile
-- Line 1222: Change `height: 200` to `height: 240`
-- Line 1259: Change `height: 120` to `height: 160` (empty state)
+### 4b. Phone -- editable when empty (lines 1698-1710)
+When phone is empty and user is editor, show an `InlineField` with "Add phone" placeholder. On save, update `entry_options.phone` via supabase and call `onSaved()`.
 
-### 4b. Phone + Website as plain text below title
-Replace the grid layout (lines 1697-1738) with simple inline emoji text:
-```tsx
-{option.category !== 'transfer' && option.category !== 'flight' && (
-  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-    {(option as any).phone && (
-      <a href={`tel:${(option as any).phone}`} className="text-sm text-primary hover:underline" onClick={e => e.stopPropagation()}>
-        phone emoji {(option as any).phone}
-      </a>
-    )}
-    {option.website && (
-      <a href={option.website} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline truncate max-w-[200px]" onClick={e => e.stopPropagation()}>
-        link emoji {hostname}
-      </a>
-    )}
-  </div>
-)}
+### 4c. Website -- editable when empty (lines 1705-1709)
+Same pattern: when website is empty and user is editor, show `InlineField` with "Add website" placeholder. On save, call `handleInlineSaveOption('website', v)`.
+
+### 4d. Notes -- always visible for editors (lines 1713-1738)
+Remove the Collapsible wrapper for notes. Show the textarea directly with dashed border and "Add a note..." placeholder. For non-editors with no notes, show nothing.
+
+### 4e. Title triggers place search on rename (lines 1276-1283)
+When InlineField for the title saves a new name that differs from the original, add state to show a PlacesAutocomplete dropdown below the title. When a place is selected, auto-fill location, phone, website, hours, rating, photos. Add `showPlaceSearch`, `placeSearchQuery` state variables and render PlacesAutocomplete conditionally.
+
+## Technical Details
+
+### New state variables in EntrySheet (view mode section)
+```typescript
+const [showPlaceSearch, setShowPlaceSearch] = useState(false);
+const [placeSearchQuery, setPlaceSearchQuery] = useState('');
 ```
-No boxes, no containers, no labels. Empty values are simply not shown (no dashes).
 
-## Change 5: Opening hours -- fix double day name
+### PlacesAutocomplete reuse
+The existing `PlacesAutocomplete` component (already imported) will be rendered below the title when `showPlaceSearch` is true. When a place is selected, update the option fields via supabase and call `onSaved()`.
 
-### EntrySheet.tsx PlaceDetailsSection (line 187)
-The trigger currently shows: `{dayName}: {entryDayHoursText}` which produces "Wed: Wednesday: 09:00 - 01:00".
+### handlePlaceSelectInView function
+New handler that takes a PlaceDetails result and updates the entry_option with all enriched data (name, location, phone, website, opening_hours, rating, photos, etc.) via a single supabase update call.
 
-Fix: Just show the raw `entryDayHoursText` string from the Google API as-is (it already contains the day name):
-```tsx
-<span className="flex-1 truncate text-muted-foreground text-xs font-semibold">
-  {entryDayHoursText || 'Opening hours'}
-</span>
-```
-Remove the `{dayName}: ` prefix. Keep the clock emoji before it.
-
-## Files modified
+## Files Modified
 | File | Scope |
 |------|-------|
-| `src/components/timeline/EntryCard.tsx` | Remove VoteButton import+render, duration pill always absolute with content padding |
-| `src/components/timeline/EntrySheet.tsx` | Remove VoteButton, hero 240px, plain phone/website, fix opening hours double day |
-| No changes to ContinuousTimeline or TransportConnector |
+| `src/components/timeline/FlightGroupCard.tsx` | Right-align content, timeline dot check-in/checkout, remove dividers |
+| `src/components/timeline/EntrySheet.tsx` | Editable empty states (map, phone, website, notes, title-search) |
 
