@@ -400,8 +400,19 @@ const ExploreView = ({
   };
 
   const handleAdd = useCallback((place: ExploreResult) => {
-    onAddToPlanner(place);
+    // Optimistic: mark as added + toast immediately
     setAddedPlaceIds(prev => new Set(prev).add(place.placeId));
+    toast({ title: `Added ${place.name} to Planner` });
+
+    // Fire DB insert in background, rollback on failure
+    Promise.resolve(onAddToPlanner(place)).catch(() => {
+      setAddedPlaceIds(prev => {
+        const next = new Set(prev);
+        next.delete(place.placeId);
+        return next;
+      });
+      toast({ title: `Failed to add ${place.name}`, description: 'Please try again', variant: 'destructive' });
+    });
   }, [onAddToPlanner]);
 
   const handleCardTap = useCallback((place: ExploreResult) => {

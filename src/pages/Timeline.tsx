@@ -269,48 +269,49 @@ const Timeline = () => {
   // Handle adding an Explore result as an unscheduled entry
   const handleAddToPlanner = useCallback(async (place: ExploreResult) => {
     if (!trip || !tripId) return;
-    try {
-      const catId = exploreCategoryId || inferCategoryFromTypes(place.types);
-      const cat = findCategory(catId);
-      const REFERENCE_DATE_STR = '2099-01-01';
-      const startIso = localToUTC(REFERENCE_DATE_STR, '00:00', homeTimezone);
-      const endIso = localToUTC(REFERENCE_DATE_STR, '01:00', homeTimezone);
+    const catId = exploreCategoryId || inferCategoryFromTypes(place.types);
+    const cat = findCategory(catId);
+    const REFERENCE_DATE_STR = '2099-01-01';
+    const startIso = localToUTC(REFERENCE_DATE_STR, '00:00', homeTimezone);
+    const endIso = localToUTC(REFERENCE_DATE_STR, '01:00', homeTimezone);
 
-      const { data: d, error } = await supabase
-        .from('entries')
-        .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false } as any)
-        .select('id').single();
-      if (error) throw error;
+    const { data: d, error } = await supabase
+      .from('entries')
+      .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false } as any)
+      .select('id').single();
+    if (error) throw error;
 
-      await supabase.from('entry_options').insert({
-        entry_id: d.id,
-        name: place.name,
-        category: cat?.id ?? catId,
-        category_color: cat?.color ?? null,
-        location_name: place.address || null,
-        latitude: place.lat,
-        longitude: place.lng,
-        rating: place.rating,
-        user_rating_count: place.userRatingCount,
-        phone: place.phone || null,
-        address: place.address || null,
-        google_maps_uri: place.googleMapsUri || null,
-        google_place_id: place.placeId || null,
-        price_level: place.priceLevel || null,
-        opening_hours: place.openingHours || null,
-        website: place.website || null,
-      } as any);
+    await supabase.from('entry_options').insert({
+      entry_id: d.id,
+      name: place.name,
+      category: cat?.id ?? catId,
+      category_color: cat?.color ?? null,
+      location_name: place.address || null,
+      latitude: place.lat,
+      longitude: place.lng,
+      rating: place.rating,
+      user_rating_count: place.userRatingCount,
+      phone: place.phone || null,
+      address: place.address || null,
+      google_maps_uri: place.googleMapsUri || null,
+      google_place_id: place.placeId || null,
+      price_level: place.priceLevel || null,
+      opening_hours: place.openingHours || null,
+      website: place.website || null,
+    } as any);
 
-      toast({ title: `Added ${place.name} to Planner` });
-      fetchData();
-    } catch (err: any) {
-      toast({ title: 'Failed to add', description: err.message, variant: 'destructive' });
-    }
+    fetchData();
   }, [trip, tripId, exploreCategoryId, homeTimezone, fetchData]);
 
   // Handle adding an Explore result as a scheduled entry at a specific time
   const handleAddAtTime = useCallback(async (place: ExploreResult, startTime: string, endTime: string) => {
     if (!trip || !tripId) return;
+    // Close Explore and show toast immediately
+    setExploreOpen(false);
+    setExploreCategoryId(null);
+    const timeStr = new Date(startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+    toast({ title: `Added ${place.name} at ${timeStr}` });
+
     try {
       const catId = exploreCategoryId || inferCategoryFromTypes(place.types);
       const cat = findCategory(catId);
@@ -340,11 +341,6 @@ const Timeline = () => {
         website: place.website || null,
       } as any);
 
-      setExploreOpen(false);
-      setExploreCategoryId(null);
-
-      const timeStr = new Date(startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-      toast({ title: `Added ${place.name} at ${timeStr}` });
       await fetchData();
       if (trip) await autoExtendTripIfNeeded(tripId, endTime, trip, fetchData);
 
@@ -356,7 +352,7 @@ const Timeline = () => {
         }
       }
     } catch (err: any) {
-      toast({ title: 'Failed to add', description: err.message, variant: 'destructive' });
+      toast({ title: `Failed to add ${place.name}`, description: err.message, variant: 'destructive' });
     }
   }, [trip, tripId, exploreCategoryId, fetchData]);
 
