@@ -1,74 +1,102 @@
 
 
-# Add "Venue Closed" Warning on Timeline Placement
+# Optimistic Quick-Add for Explore Cards
 
 ## Overview
-When a venue with opening hours is placed on a day marked "Closed", show a warning toast and a red banner in the detail view.
+Make the quick-add flow feel instant by showing the checkmark and toast immediately, then performing the database insert in the background with rollback on failure.
+
+## Current Behavior
+- `handleAdd` in ExploreView calls `onAddToPlanner(place)` (which does the DB insert and waits) then adds to `addedPlaceIds`
+- The toast only fires after the DB insert completes in `handleAddToPlanner` in Timeline.tsx
+- The card checkmark appears only after the sync `onAddToPlanner` call
 
 ## Changes
 
-### 1. New helper in `src/lib/entryHelpers.ts`
+### File: `src/components/timeline/ExploreView.tsx`
 
-Add `checkOpeningHoursConflict` function after the existing `getEntryDayHours`:
+**Update `handleAdd` (line 402-405)** to be optimistic:
 
 ```typescript
-export const checkOpeningHoursConflict = (
-  openingHours: string[] | null,
-  startTime: string
-): { isConflict: boolean; message: string | null } => {
-  if (!openingHours || openingHours.length === 0) return { isConflict: false, message: null };
-  const d = new Date(startTime);
-  const jsDay = d.getDay();
-  const googleIndex = jsDay === 0 ? 6 : jsDay - 1;
-  const dayHours = openingHours[googleIndex];
-  if (!dayHours) return { isConflict: false, message: null };
-  if (dayHours.toLowerCase().includes('closed')) {
-    const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-    return { isConflict: true, message: `This place is closed on ${dayNames[googleIndex]}` };
-  }
-  return { isConflict: false, message: null };
-};
+const handleAdd = useCallback((place: ExploreResult) => {
+  // Optimistic: mark as added + toast immediately
+  setAddedPlaceIds(prev => new Set(prev).add(place.placeId));
+  toast({ title: `Added ${place.name} to Planner` });
+  
+  // Fire DB insert in background, rollback on failure
+  Promise.resolve(onAddToPlanner(place)).catch(() => {
+    setAddedPlaceIds(prev => {
+      const next = new Set(prev);
+      next.delete(place.placeId);
+      return next;
+    });
+    toast({ title: `Failed to add ${place.name}`, description: 'Please try again', variant: 'destructive' });
+  });
+}, [onAddToPlanner]);
 ```
 
-### 2. Warning toast in `src/pages/Timeline.tsx`
+### File: `src/pages/Timeline.tsx`
 
-Two insertion points:
+**Update `handleAddToPlanner` (line 270-309)** to remove the success toast (ExploreView now handles it) and re-throw errors so the optimistic rollback catches them:
 
-**a) `handleDropOnTimeline`** (around line 1450, after `await fetchData()`): Check the dropped entry's opening hours against the new `startIso` and show a destructive toast if closed.
-
-**b) `handleAddAtTime`** (around line 346, after the success toast): Same check using `place.openingHours` and `startTime`.
-
-Both use:
 ```typescript
-const opt = entry.options?.[0];
-if (opt?.opening_hours) {
-  const { isConflict, message } = checkOpeningHoursConflict(opt.opening_hours, startIso);
-  if (isConflict) {
-    toast({ title: 'Venue may be closed', description: message, variant: 'destructive' });
-  }
-}
+const handleAddToPlanner = useCallback(async (place: ExploreResult) => {
+  if (!trip || !tripId) return;
+  // No try/catch toast here -- ExploreView handles optimistic toast + rollback
+  const catId = exploreCategoryId || inferCategoryFromTypes(place.types);
+  const cat = findCategory(catId);
+  const REFERENCE_DATE_STR = '2099-01-01';
+  const startIso = localToUTC(REFERENCE_DATE_STR, '00:00', homeTimezone);
+  const endIso = localToUTC(REFERENCE_DATE_STR, '01:00', homeTimezone);
+
+  const { data: d, error } = await supabase
+    .from('entries')
+    .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false } as any)
+    .select('id').single();
+  if (error) throw error;
+
+  await supabase.from('entry_options').insert({ ... } as any);
+  fetchData();
+}, [trip, tripId, exploreCategoryId, homeTimezone, fetchData]);
 ```
 
-For `handleAddAtTime`, since we have the `place` object (not a DB entry), we check `place.openingHours` directly.
+Key change: remove `toast(...)` success call and remove `try/catch` so errors propagate to ExploreView's `.catch()`.
 
-### 3. Warning banner in `src/components/timeline/PlaceOverview.tsx`
+**Update `handleAddAtTime` (line 312-361)** similarly: move toast and close to happen before the await, with rollback on failure:
 
-In the `PlaceDetailsSection` component (line 26-80), add a closed-day warning banner above the opening hours collapsible. Compute it using `checkOpeningHoursConflict` with `entryStartTime`, and render a red alert-style div when there is a conflict. Only show for entries that have a real scheduled time (not the reference date `2099-01-01`).
+```typescript
+const handleAddAtTime = useCallback(async (place: ExploreResult, startTime: string, endTime: string) => {
+  if (!trip || !tripId) return;
+  // Close Explore immediately
+  setExploreOpen(false);
+  setExploreCategoryId(null);
+  const timeStr = new Date(startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  toast({ title: `Added ${place.name} at ${timeStr}` });
 
-```tsx
-{closedWarning && (
-  <div className="flex items-center gap-2 rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive font-medium">
-    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-    <span>{closedWarning}</span>
-  </div>
-)}
+  try {
+    // DB insert in background
+    const catId = exploreCategoryId || inferCategoryFromTypes(place.types);
+    const cat = findCategory(catId);
+    const { data: d, error } = await supabase.from('entries').insert(...).select('id').single();
+    if (error) throw error;
+    await supabase.from('entry_options').insert({ ... } as any);
+    await fetchData();
+    if (trip) await autoExtendTripIfNeeded(tripId, endTime, trip, fetchData);
+    // Opening hours conflict check
+    if (place.openingHours) {
+      const { isConflict, message } = checkOpeningHoursConflict(place.openingHours as string[], startTime);
+      if (isConflict) {
+        toast({ title: 'Venue may be closed', description: message, variant: 'destructive' });
+      }
+    }
+  } catch (err: any) {
+    toast({ title: `Failed to add ${place.name}`, description: err.message, variant: 'destructive' });
+  }
+}, [trip, tripId, exploreCategoryId, fetchData]);
 ```
 
 ## Files Summary
 
 | File | Change |
 |------|--------|
-| `src/lib/entryHelpers.ts` | Add `checkOpeningHoursConflict` helper |
-| `src/pages/Timeline.tsx` | Import helper; add warning toast in `handleDropOnTimeline` and `handleAddAtTime` |
-| `src/components/timeline/PlaceOverview.tsx` | Import helper + AlertTriangle; add closed-day warning banner in `PlaceDetailsSection` |
-
+| `src/components/timeline/ExploreView.tsx` | Make `handleAdd` optimistic with immediate toast + rollback on error |
+| `src/pages/Timeline.tsx` | Remove success toast from `handleAddToPlanner` (let errors propagate); move toast/close before await in `handleAddAtTime` |
