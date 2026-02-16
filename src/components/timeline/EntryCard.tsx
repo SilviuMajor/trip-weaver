@@ -633,7 +633,7 @@ const EntryCard = ({
           </span>
         )}
         <h3
-          className="text-lg font-bold leading-tight mb-1"
+          className="text-sm font-bold leading-tight mb-1"
           style={{ textShadow: firstImage ? '0 1px 4px rgba(0,0,0,0.3)' : undefined }}
         >
           {displayName}
