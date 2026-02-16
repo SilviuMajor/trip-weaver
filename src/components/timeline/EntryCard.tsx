@@ -319,6 +319,7 @@ const EntryCard = ({
       position: 'absolute', zIndex: 20,
       borderRadius: 20, fontSize: s.fontSize, padding: s.padding,
       fontWeight: 700, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer',
       ...(centered
         ? { top: '50%', transform: 'translateY(-50%)', right: 5 }
         : { top: s.top, right: s.right }
@@ -572,7 +573,16 @@ const EntryCard = ({
     return cardBase('compact', (
       <>
         {cornerFlag(9, '2px 4px')}
-        <div style={durationPillStyle('xs', isShortEntry)}>{durationLabel}</div>
+        <div
+          style={{
+            ...durationPillStyle('xs', isShortEntry),
+            ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
+          }}
+          onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
+        >
+          {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
+          <span>{durationLabel}</span>
+        </div>
         <div
           className={cn('absolute z-10 text-right', textColor)}
           style={{ top: '50%', left: isMicroEntry ? 30 : 10, right: 54, transform: 'translateY(-50%)', pointerEvents: 'none' }}
@@ -591,7 +601,16 @@ const EntryCard = ({
     return cardBase('medium', (
       <>
         {cornerFlag(11, '3px 5px')}
-        <div style={durationPillStyle('s', isShortEntry)}>{durationLabel}</div>
+        <div
+          style={{
+            ...durationPillStyle('s', isShortEntry),
+            ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
+          }}
+          onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
+        >
+          {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
+          <span>{durationLabel}</span>
+        </div>
         {isShortEntry ? (
           <div
             className={cn('absolute z-10 text-right', textColor)}
@@ -622,7 +641,16 @@ const EntryCard = ({
     return cardBase('condensed', (
       <>
         {cornerFlag(13, '5px 7px')}
-        <div style={durationPillStyle('m', isShortEntry)}>{durationLabel}</div>
+        <div
+          style={{
+            ...durationPillStyle('m', isShortEntry),
+            ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
+          }}
+          onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
+        >
+          {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
+          <span>{durationLabel}</span>
+        </div>
         {isShortEntry ? (
           <div
             className={cn('absolute z-10 text-right', textColor)}
@@ -662,7 +690,16 @@ const EntryCard = ({
   return cardBase('full', (
     <>
       {cornerFlag(16, '5px 7px')}
-      <div style={durationPillStyle('l', isShortEntry)}>{durationLabel}</div>
+      <div
+        style={{
+          ...durationPillStyle('l', isShortEntry),
+          ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
+        }}
+        onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
+      >
+        {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
+        <span>{durationLabel}</span>
+      </div>
 
       {isShortEntry ? (
         <div
@@ -737,14 +774,6 @@ const EntryCard = ({
         </>
       )}
 
-      {/* Lock icon */}
-      {isLocked && (
-        <div className="absolute top-2.5 left-[50%] -translate-x-1/2 z-20">
-          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary">
-            <Lock className="h-3 w-3 text-primary-foreground" />
-          </span>
-        </div>
-      )}
 
       {/* Mini route map on transport cards */}
       {isTransfer && (option as any).route_polyline && (
