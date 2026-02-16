@@ -1,113 +1,101 @@
 
 
-# ExploreView Component + Planner Integration
+# ExploreCard Component + Photo Loading + Card Tap Detail Sheet
 
 ## Overview
-Create a new ExploreView component that provides search and nearby discovery of places using the Google Places API, and wire it into PlannerContent so tapping the search button or a category "+" button opens Explore instead of the current toast/EntrySheet.
+Replace the placeholder result cards in ExploreView with polished ExploreCard components matching SidebarEntryCard's visual design, add lazy photo loading from Google Places, and wire card taps to open PlaceOverview in a Drawer/Dialog.
 
-## New Files
+## New File: `src/components/timeline/ExploreCard.tsx`
 
-### 1. `src/lib/placeTypeMapping.ts`
-Category-to-Google-Places-type mapping and search placeholder generator.
-- `CATEGORY_TO_PLACE_TYPES` record mapping category IDs (breakfast, lunch, dinner, etc.) to arrays of Google Places types
-- `getCategorySearchPlaceholder(categoryId, destination)` returns context-aware placeholder text
+A card component that mirrors SidebarEntryCard's visual treatment for Explore search results.
 
-### 2. `src/components/timeline/ExploreView.tsx`
-Full-screen overlay component for searching and browsing places.
+### Visual Design (copied from SidebarEntryCard)
+- `rounded-[14px]` with `overflow-hidden`, full width, fixed `h-[140px]`
+- **With photo**: background image + diagonal fade overlay (`linear-gradient(152deg, transparent 25%, rgba(10,8,6,0.3) 35%, rgba(10,8,6,0.7) 50%, rgba(10,8,6,0.92) 65%)`)
+- **Without photo**: glossy gradient fallback using extracted hue from category color (same `glossyBg`, `glassBg`, `glossyBorder` logic as SidebarEntryCard)
+- **Corner flag**: top-left category emoji on colored background with `borderRadius: '14px 0 8px 0'`
+- **Travel time pill**: top-right, same `durPillStyle` as SidebarEntryCard's duration pill (only shown if `travelTime` prop provided)
+- **Name**: bottom-right, `text-sm font-bold`, white with text-shadow over images, theme-aware otherwise
+- **Address**: below name, `text-[10px]` with map pin emoji, truncated
+- **Rating + price row**: bottom-left area, format: "star 4.4 (2,891) . euro-symbols" using `formatPriceLevel` from entryHelpers
+- **Compact hours**: below address in `text-[9px]` if provided
+- **Planner button**: 32x32 circle, bottom-right, `bg-white/20 backdrop-blur-sm`, ClipboardList icon; swaps to Check icon when `isInTrip`
+- **"Already in trip" state**: opacity 0.75, Check badge replaces clipboard icon
 
-**Props**: `open`, `onClose`, `trip`, `entries`, `categoryId?`, `isEditor`, `onAddToPlanner`, `onCardTap`
+### Photo Loading
+- `useEffect` on `photoRef`: if present and no `photoUrl`, call `supabase.functions.invoke('google-places', { body: { action: 'photo', photoRef } })`
+- Store resolved URL in local `useState`
+- Show glossy gradient while loading; transition to image once loaded
+- On failure, keep gradient
 
-**ExploreResult type**: Matches the shape returned by the nearbySearch/textSearch edge function actions, plus an optional `photoUrl` field for lazy-loaded images.
-
-**Layout**:
-- **Header bar**: Back arrow, category emoji+name (or "Explore"), list/map toggle (map disabled with toast)
-- **Search bar**: Auto-focused input with 500ms debounce. On submit calls `textSearch` action. When empty + categoryId provided, auto-loads `nearbySearch` on mount
-- **Origin context line**: "Suggested near [location]" -- finds nearest entry with coordinates to current time, falls back to trip destination via autocomplete lookup
-- **Results list**: Vertical scroll of simple placeholder cards (name, address, rating stars, price level, "Add" button)
-- **Loading state**: Spinner
-- **Empty state**: "No results for [query]"
-- **"Add manually" link**: At bottom, closes Explore and opens EntrySheet in create mode
-
-**State management**:
-- `results: ExploreResult[]`, `loading: boolean`, `searchQuery: string`
-- `originLocation: { name: string; lat: number; lng: number } | null`
-- Debounced search via `useEffect` with 500ms timeout
-- Origin resolution on mount: scan entries for nearest coordinates, fallback to trip destination
-
-**API calls** (via `supabase.functions.invoke('google-places', { body })`):
-- `nearbySearch` on mount when categoryId is set and search is empty
-- `textSearch` when user types a query
-- Both pass origin lat/lng for location bias
-
-### 3. Modified: `src/components/timeline/PlannerContent.tsx`
-
-**New props** added to interface:
-- `onExploreOpen?: (categoryId: string | null) => void` -- called when search button or "+" is tapped
-
-**Changes**:
-- Search button onClick: calls `onExploreOpen?.(null)` instead of showing toast
-- "+" button on each category row: calls `onExploreOpen?.(cat.id)` instead of `onAddEntry?.(cat.id)`, EXCEPT for 'hotel' and 'flight' which still call `onAddEntry?.(cat.id)` as before
-- No internal Explore state in PlannerContent -- it delegates upward
-
-### 4. Modified: `src/pages/Planner.tsx`
-
-**New state**: `exploreOpen`, `exploreCategoryId`
-
-**onAddEntry handler updated**:
-- 'hotel' still opens HotelWizard
-- 'flight' still opens EntrySheet with flight prefill
-- All other categories: `setExploreCategoryId(catId); setExploreOpen(true)`
-
-**New prop passed to PlannerContent**:
-- `onExploreOpen` callback that sets explore state
-
-**ExploreView rendered** when `exploreOpen` is true, with:
-- `onAddToPlanner` handler: creates entry (is_scheduled: false) + entry_option with place data using the same pattern as `handleSaveAsIdea` in EntrySheet, then calls `fetchData()` and shows toast
-- `onClose`: resets explore state
-- Category inference for general search: if no categoryId, infer from place types + time of day (restaurant types at lunch hours -> 'lunch', etc.)
-
-**Quick-add implementation** (in Planner.tsx):
+### Props
 ```
-1. Insert into 'entries': trip_id, start_time/end_time (placeholder), is_scheduled: false
-2. Insert into 'entry_options': entry_id, name, category, category_color, 
-   location_name (address), latitude, longitude, rating, user_rating_count, 
-   phone, address, google_maps_uri, google_place_id, price_level, opening_hours
-3. Toast "Added [name] to Planner"
-4. Call fetchData() to refresh
+place: ExploreResult
+categoryId: string | null
+onAddToPlanner: () => void
+onTap: () => void
+travelTime?: string | null
+isInTrip?: boolean
+compactHours?: string | null
 ```
+
+## Modified File: `src/components/timeline/ExploreView.tsx`
+
+### Replace placeholder cards with ExploreCard
+- Import ExploreCard
+- For each result, compute `isInTrip` by checking if `place.placeId` matches any `google_place_id` in existing `entries[*].options[*]`
+- Track a local `Set<string>` of `addedPlaceIds` state (starts empty, grows as user adds places during this session) to immediately reflect newly added items
+- Pass `categoryId`, `onAddToPlanner` (wrapping existing handler + adding to local set), `onTap`
+- Leave `travelTime` and `compactHours` as null (future prompts)
+
+### Add card tap -> PlaceOverview detail sheet
+- New state: `selectedPlace: ExploreResult | null`, `detailOpen: boolean`
+- `onTap` sets selectedPlace and opens detail
+- `buildTempEntry(place)` function creates fake `EntryWithOptions` + `EntryOption` from ExploreResult for PlaceOverview consumption (temporary IDs prefixed with `explore-`, `is_scheduled: false`, photoUrl mapped to images array)
+- Render detail using `Drawer` (mobile via `useIsMobile`) or `Dialog` (desktop) containing:
+  - "Add to Planner" button at top (ClipboardList icon + text)
+  - PlaceOverview component with `context="explore"`, `isEditor={false}`
+- On add from detail sheet: call `onAddToPlanner`, close sheet
+
+## Modified File: `src/pages/Planner.tsx`
+
+- Remove the placeholder `onCardTap` toast
+- Pass the actual `onCardTap` callback that ExploreView will now handle internally (or keep it as a no-op since ExploreView manages its own detail sheet state)
 
 ## Technical Details
 
-### Origin location resolution
-```
-1. Get current hour, find entries on today's trip day with lat/lng
-2. Sort by proximity to current time
-3. Use closest entry's option location_name + coordinates
-4. If none found, use trip.destination -- call autocomplete action to get coords
-5. Cache origin in state to avoid re-fetching
-```
-
-### Category inference for general search
-When adding from general search (no categoryId), map Google types to app categories:
-- Types include 'restaurant'/'cafe' -> use time-based: before 11am = breakfast, 11-15 = lunch, after 17 = dinner
-- Types include 'bar'/'night_club' -> drinks/nightlife based on hour
-- Types include 'museum'/'art_gallery' -> museum
-- Default: 'activity'
-
-### Debounce pattern
+### isInTrip detection
 ```typescript
-useEffect(() => {
-  if (!searchQuery.trim()) return;
-  const timer = setTimeout(() => { performTextSearch(searchQuery); }, 500);
-  return () => clearTimeout(timer);
-}, [searchQuery]);
+const existingPlaceIds = useMemo(() => {
+  const ids = new Set<string>();
+  for (const entry of entries) {
+    for (const opt of entry.options) {
+      if (opt.google_place_id) ids.add(opt.google_place_id);
+    }
+  }
+  return ids;
+}, [entries]);
 ```
 
-### Files summary
+### buildTempEntry mapping
+Maps ExploreResult fields to EntryOption fields:
+- `placeId` -> `google_place_id`
+- `lat/lng` -> `latitude/longitude`
+- `address` -> `location_name` and `address`
+- `rating`, `userRatingCount` -> `rating`, `user_rating_count`
+- `openingHours` -> `opening_hours`
+- `photoUrl` -> single-element `images` array (if available)
+- All flight-specific fields (departure_tz, arrival_tz, terminals) set to null
+
+### Detail sheet wrapper
+Uses the same Drawer/Dialog pattern as EntrySheet:
+- Mobile: `<Drawer open={detailOpen} onOpenChange={setDetailOpen}><DrawerContent className="max-h-[92vh]">...`
+- Desktop: `<Dialog open={detailOpen} onOpenChange={setDetailOpen}><DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">...`
+
+## Files Summary
 | File | Action |
 |------|--------|
-| `src/lib/placeTypeMapping.ts` | Create |
-| `src/components/timeline/ExploreView.tsx` | Create |
-| `src/components/timeline/PlannerContent.tsx` | Modify (add onExploreOpen prop, update search + "+" button handlers) |
-| `src/pages/Planner.tsx` | Modify (add Explore state, quick-add logic, render ExploreView) |
+| `src/components/timeline/ExploreCard.tsx` | Create |
+| `src/components/timeline/ExploreView.tsx` | Modify (replace placeholder cards, add detail sheet) |
+| `src/pages/Planner.tsx` | Modify (update onCardTap to no-op since ExploreView handles it internally) |
 
