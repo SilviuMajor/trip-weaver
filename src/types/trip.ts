@@ -168,6 +168,31 @@ export interface Hotel {
   updated_at: string;
 }
 
+export interface GlobalPlace {
+  id: string;
+  user_id: string;
+  google_place_id: string | null;
+  name: string;
+  category: string | null;
+  city: string | null;
+  country: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  status: 'visited' | 'want_to_go';
+  source: 'trip_auto' | 'trip_planner' | 'explore_save' | 'manual' | 'favourite';
+  source_trip_id: string | null;
+  rating: number | null;
+  price_level: string | null;
+  opening_hours: string[] | null;
+  website: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  starred: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export type Timezone = 'UK' | 'Amsterdam';
 
 export interface EntryWithOptions extends Entry {

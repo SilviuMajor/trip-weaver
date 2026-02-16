@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, LogOut, Settings, MoreVertical, Link2, Trash2, Copy } from 'lucide-react';
+import { Plus, LogOut, Settings, MoreVertical, Link2, Trash2, Copy, ClipboardList, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
@@ -159,6 +159,34 @@ const Dashboard = () => {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-6">
+        {/* Navigation cards */}
+        <div className="mb-6 grid grid-cols-2 gap-3">
+          <button
+            onClick={() => navigate('/planner')}
+            className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:bg-muted/50"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/15">
+              <ClipboardList className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <p className="font-semibold text-sm">My Places</p>
+              <p className="text-xs text-muted-foreground">All saved places</p>
+            </div>
+          </button>
+          <button
+            onClick={() => navigate('/explore')}
+            className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:bg-muted/50"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/15">
+              <Search className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <p className="font-semibold text-sm">Explore</p>
+              <p className="text-xs text-muted-foreground">Discover places</p>
+            </div>
+          </button>
+        </div>
+
         {loading ? (
           <div className="space-y-3">
             {[1, 2, 3].map(i => (
