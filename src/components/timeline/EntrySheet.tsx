@@ -18,7 +18,8 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import AIRPORTS from '@/lib/airports';
-import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, AlertTriangle, RefreshCw, Phone, ChevronDown } from 'lucide-react';
+import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, AlertTriangle, RefreshCw, Phone, ChevronDown, Navigation, Car } from 'lucide-react';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import PhotoStripPicker from './PhotoStripPicker';
@@ -1615,11 +1616,35 @@ const EntrySheet = ({
                     {isLocked && <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary mt-1"><Lock className="h-2.5 w-2.5 text-primary-foreground" /></span>}
                   </div>
 
-                  {/* Right: Map preview */}
+                  {/* Right: Map preview with navigation popover */}
                   {option.latitude != null && option.longitude != null ? (
-                    <div className="rounded-xl border border-border overflow-hidden relative">
-                      <MapPreview latitude={option.latitude} longitude={option.longitude} locationName={option.location_name} />
-                    </div>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <div className="rounded-xl border border-border overflow-hidden relative cursor-pointer">
+                          {option.location_name && (
+                            <p className="text-[10px] font-semibold text-muted-foreground px-2 pt-1.5 truncate">{option.location_name}</p>
+                          )}
+                          <img
+                            src={`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/static-map?lat=${option.latitude}&lng=${option.longitude}&size=300x120`}
+                            alt="Map preview"
+                            className="w-full h-[80px] object-cover"
+                            loading="lazy"
+                          />
+                          <p className="text-[10px] text-primary px-2 py-1 font-medium">Open in Maps →</p>
+                        </div>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-48 p-1.5" side="top" align="end">
+                        <a href={`https://maps.apple.com/?ll=${option.latitude},${option.longitude}&q=${encodeURIComponent(option.location_name || 'Location')}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm hover:bg-muted transition-colors">
+                          <Navigation className="h-3.5 w-3.5" /> Apple Maps
+                        </a>
+                        <a href={`https://www.google.com/maps/search/?api=1&query=${option.latitude},${option.longitude}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm hover:bg-muted transition-colors">
+                          <ExternalLink className="h-3.5 w-3.5" /> Google Maps
+                        </a>
+                        <a href={`https://m.uber.com/ul/?action=setPickup&pickup[latitude]=my_location&pickup[longitude]=my_location&dropoff[latitude]=${option.latitude}&dropoff[longitude]=${option.longitude}&dropoff[nickname]=${encodeURIComponent(option.location_name || 'Destination')}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm hover:bg-muted transition-colors">
+                          <Car className="h-3.5 w-3.5" /> Uber
+                        </a>
+                      </PopoverContent>
+                    </Popover>
                   ) : (
                     <div className="rounded-xl border border-border bg-muted/30 flex items-center justify-center">
                       <span className="text-2xl">📍</span>
