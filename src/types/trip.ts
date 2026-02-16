@@ -90,6 +90,8 @@ export interface EntryOption {
   images?: OptionImage[];
   transport_modes?: TransportMode[] | null;
   hotel_id?: string | null;
+  estimated_budget: number | null;
+  actual_cost: number | null;
 }
 
 export interface TransportMode {

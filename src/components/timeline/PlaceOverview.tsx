@@ -903,17 +903,109 @@ const PlaceOverview = ({
           ) : null}
 
 
-          {/* Budget — collapsible */}
-          <Collapsible>
-            <CollapsibleTrigger className="flex items-center gap-1.5 text-sm font-semibold text-foreground w-full text-left py-1">
-              <span>💰</span>
-              <span className="flex-1">Budget</span>
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform [&[data-state=open]]:rotate-180" />
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <p className="text-sm text-muted-foreground italic pt-1">No budget info yet</p>
-            </CollapsibleContent>
-          </Collapsible>
+          {/* Budget — collapsible (not for flights/transfers) */}
+          {option.category !== 'flight' && option.category !== 'transfer' && (() => {
+            const est = option.estimated_budget;
+            const act = option.actual_cost;
+            const hasEst = est != null;
+            const hasAct = act != null;
+            const headerLabel = hasEst && hasAct
+              ? `💰 €${act.toFixed(2)} / €${est.toFixed(2)}`
+              : '💰 Budget';
+
+            const budgetSummary = () => {
+              if (hasEst && hasAct) {
+                const diff = est - act;
+                if (diff > 0) return <p className="text-sm text-green-600 font-medium">€{diff.toFixed(2)} under budget</p>;
+                if (diff === 0) return <p className="text-sm text-green-600 font-medium">On budget</p>;
+                return <p className="text-sm text-destructive font-medium">€{Math.abs(diff).toFixed(2)} over budget</p>;
+              }
+              if (hasEst) return <p className="text-sm text-muted-foreground">Estimated: €{est.toFixed(2)}</p>;
+              if (hasAct) return <p className="text-sm text-muted-foreground">Spent: €{act.toFixed(2)}</p>;
+              return <p className="text-sm text-muted-foreground italic">Track spending for this activity</p>;
+            };
+
+            return (
+              <Collapsible>
+                <CollapsibleTrigger className="flex items-center gap-1.5 text-sm font-semibold text-foreground w-full text-left py-1">
+                  <span className="flex-1">{headerLabel}</span>
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform [&[data-state=open]]:rotate-180" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-2 pt-1">
+                  {isEditor ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground w-20">Estimated</span>
+                        <InlineField
+                          value={est != null ? est.toFixed(2) : ''}
+                          canEdit={true}
+                          placeholder="Add budget"
+                          renderDisplay={(val) => val ? <span className="text-sm">€{val}</span> : <span className="text-sm text-muted-foreground italic">Add budget</span>}
+                          renderInput={(val, onChange, onDone) => (
+                            <div className="flex items-center gap-1">
+                              <span className="text-sm text-muted-foreground">€</span>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={val}
+                                onChange={e => onChange(e.target.value)}
+                                onBlur={onDone}
+                                onKeyDown={e => { if (e.key === 'Enter') onDone(); }}
+                                autoFocus
+                                placeholder="0.00"
+                                className="h-8 w-28"
+                              />
+                            </div>
+                          )}
+                          onSave={async (v) => {
+                            const parsed = v ? parseFloat(v) : null;
+                            await supabase.from('entry_options').update({ estimated_budget: parsed } as any).eq('id', option.id);
+                            onSaved();
+                          }}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground w-20">Actual</span>
+                        <InlineField
+                          value={act != null ? act.toFixed(2) : ''}
+                          canEdit={true}
+                          placeholder="Add actual cost"
+                          renderDisplay={(val) => val ? <span className="text-sm">€{val}</span> : <span className="text-sm text-muted-foreground italic">Add actual cost</span>}
+                          renderInput={(val, onChange, onDone) => (
+                            <div className="flex items-center gap-1">
+                              <span className="text-sm text-muted-foreground">€</span>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={val}
+                                onChange={e => onChange(e.target.value)}
+                                onBlur={onDone}
+                                onKeyDown={e => { if (e.key === 'Enter') onDone(); }}
+                                autoFocus
+                                placeholder="0.00"
+                                className="h-8 w-28"
+                              />
+                            </div>
+                          )}
+                          onSave={async (v) => {
+                            const parsed = v ? parseFloat(v) : null;
+                            await supabase.from('entry_options').update({ actual_cost: parsed } as any).eq('id', option.id);
+                            onSaved();
+                          }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {hasEst && <p className="text-sm">Estimated: €{est.toFixed(2)}</p>}
+                      {hasAct && <p className="text-sm">Spent: €{act.toFixed(2)}</p>}
+                    </>
+                  )}
+                  {budgetSummary()}
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })()}
 
           {/* Editor actions */}
           {isEditor && onMoveToIdeas && option?.category !== 'transfer' && option?.category !== 'flight' && (

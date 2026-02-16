@@ -106,6 +106,7 @@ export type Database = {
       }
       entry_options: {
         Row: {
+          actual_cost: number | null
           address: string | null
           airport_checkin_hours: number | null
           airport_checkout_min: number | null
@@ -120,6 +121,7 @@ export type Database = {
           departure_tz: string | null
           distance_km: number | null
           entry_id: string
+          estimated_budget: number | null
           google_maps_uri: string | null
           google_place_id: string | null
           hotel_id: string | null
@@ -139,6 +141,7 @@ export type Database = {
           website: string | null
         }
         Insert: {
+          actual_cost?: number | null
           address?: string | null
           airport_checkin_hours?: number | null
           airport_checkout_min?: number | null
@@ -153,6 +156,7 @@ export type Database = {
           departure_tz?: string | null
           distance_km?: number | null
           entry_id: string
+          estimated_budget?: number | null
           google_maps_uri?: string | null
           google_place_id?: string | null
           hotel_id?: string | null
@@ -172,6 +176,7 @@ export type Database = {
           website?: string | null
         }
         Update: {
+          actual_cost?: number | null
           address?: string | null
           airport_checkin_hours?: number | null
           airport_checkout_min?: number | null
@@ -186,6 +191,7 @@ export type Database = {
           departure_tz?: string | null
           distance_km?: number | null
           entry_id?: string
+          estimated_budget?: number | null
           google_maps_uri?: string | null
           google_place_id?: string | null
           hotel_id?: string | null
