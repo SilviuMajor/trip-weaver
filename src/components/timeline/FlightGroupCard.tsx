@@ -133,7 +133,7 @@ const FlightGroupCard = ({
           </span>
 
           {/* Flight name */}
-          <h3 className="mb-1 font-display text-base font-bold leading-tight truncate">
+          <h3 className="mb-1 text-base font-bold leading-tight truncate">
             {flightOption.name}
           </h3>
 

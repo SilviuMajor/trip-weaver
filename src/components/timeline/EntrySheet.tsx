@@ -1250,7 +1250,7 @@ const EntrySheet = ({
                   {option.category}
                 </Badge>
               )}
-              <DialogTitle className="font-display text-xl">
+              <DialogTitle className="text-xl">
                 <InlineField
                   value={option.name}
                   canEdit={isEditor}
@@ -1832,7 +1832,7 @@ const EntrySheet = ({
       <Dialog open={open} onOpenChange={handleClose}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="font-display">{stepTitle}</DialogTitle>
+            <DialogTitle>{stepTitle}</DialogTitle>
           </DialogHeader>
 
           {step === 'category' && (

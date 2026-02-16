@@ -1,7 +1,8 @@
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Button } from '@/components/ui/button';
-import { LogOut, Settings, RefreshCw, User } from 'lucide-react';
+import { LogOut, Settings, RefreshCw, User, Moon, Sun } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useTheme } from 'next-themes';
 import type { Trip } from '@/types/trip';
 
 interface TimelineHeaderProps {
@@ -14,6 +15,7 @@ interface TimelineHeaderProps {
 const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderProps) => {
   const { currentUser, logout, isOrganizer } = useCurrentUser();
   const navigate = useNavigate();
+  const { theme, setTheme } = useTheme();
 
   const handleLogout = () => {
     logout();
@@ -46,7 +48,7 @@ const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderP
           </div>
         </div>
 
-        {/* Right: Refresh + Settings + Exit */}
+        {/* Right: Refresh + Theme + Settings + Exit */}
         <div className="flex items-center gap-1">
           {onRefresh && (
             <Button
@@ -60,6 +62,15 @@ const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderP
               <RefreshCw className={`h-4 w-4 text-muted-foreground ${refreshing ? 'animate-spin' : ''}`} />
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            className="h-8 w-8"
+            title="Toggle theme"
+          >
+            {theme === 'dark' ? <Sun className="h-4 w-4 text-muted-foreground" /> : <Moon className="h-4 w-4 text-muted-foreground" />}
+          </Button>
           {isOrganizer && (
             <Button variant="ghost" size="icon" onClick={() => navigate(`/trip/${tripId}/settings`)} className="h-8 w-8" title="Trip settings">
               <Settings className="h-4 w-4 text-muted-foreground" />
