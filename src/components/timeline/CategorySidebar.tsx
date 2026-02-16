@@ -191,7 +191,7 @@ const CategorySidebar = ({
         <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => onOpenChange(false)}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <div className="flex flex-1 items-center gap-2 font-display text-base font-semibold">
+        <div className="flex flex-1 items-center gap-2 text-base font-semibold">
           <ClipboardList className="h-4 w-4 text-primary" />
           Planner
         </div>

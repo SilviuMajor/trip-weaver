@@ -203,7 +203,7 @@ const Dashboard = () => {
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="truncate font-display text-lg font-bold">{trip.name}</h3>
+                  <h3 className="truncate text-lg font-bold">{trip.name}</h3>
                   {(tripDestinations[trip.id] || trip.destination) && (
                     <p className="truncate text-sm text-muted-foreground">📍 {tripDestinations[trip.id] || trip.destination}</p>
                   )}

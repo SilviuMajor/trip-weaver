@@ -59,7 +59,7 @@ const TimelineDay = ({
           <div>
             <div className="flex items-baseline gap-2">
               <span className={cn(
-                'font-display text-sm font-bold',
+                'text-sm font-bold',
                 today ? 'text-primary' : dayPast ? 'text-muted-foreground' : 'text-foreground'
               )}>
                 {format(date, 'EEEE')}

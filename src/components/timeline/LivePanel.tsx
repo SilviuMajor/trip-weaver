@@ -18,7 +18,7 @@ const LivePanel = ({ open, compact = false }: LivePanelProps) => {
         <span className="absolute inset-0 rounded-full border-2 border-primary/20 animate-ping" />
       </div>
       <div className="text-center">
-        <h3 className="font-display text-xl font-bold text-foreground">LIVE</h3>
+        <h3 className="text-xl font-bold text-foreground">LIVE</h3>
         <p className="mt-1 text-sm text-muted-foreground">Coming soon</p>
         <p className="mt-2 max-w-[220px] text-xs text-muted-foreground/70">
           Live trip tracking, weather, and real-time updates

@@ -42,7 +42,7 @@ const Live = () => {
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
             <Radio className="h-8 w-8 text-primary" />
           </div>
-          <h2 className="font-display text-xl font-bold">Live View</h2>
+          <h2 className="text-xl font-bold">Live View</h2>
           <p className="mt-1 text-sm text-muted-foreground">Coming Soon</p>
         </div>
       </div>
