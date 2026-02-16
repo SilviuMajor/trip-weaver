@@ -26,6 +26,11 @@ const formatDuration = (startIso: string, endIso: string): string => {
   return `${h}h ${m}m`;
 };
 
+const extractHue = (hslString: string): number => {
+  const match = hslString.match(/hsl\((\d+)/);
+  return match ? parseInt(match[1]) : 260;
+};
+
 const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, onTouchDragStart, usageCount, isFlight }: SidebarEntryCardProps) => {
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -37,6 +42,8 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
   const emoji = cat?.emoji ?? '📌';
   const color = cat?.color ?? option.category_color ?? 'hsl(260, 50%, 55%)';
   const firstImage = option.images?.[0]?.image_url;
+  const hue = extractHue(color);
+  const isDark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
 
   const isScheduled = entry.is_scheduled !== false;
   const dayLabel = isScheduled
@@ -47,6 +54,25 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
 
   // Flights that are scheduled cannot be dragged
   const isDraggable = !(isFlight && isScheduled);
+
+  // Glossy backgrounds
+  const glossyBg = isDark
+    ? `linear-gradient(145deg, hsl(${hue}, 30%, 16%), hsl(${hue}, 15%, 9%))`
+    : `linear-gradient(145deg, hsl(${hue}, 25%, 92%), hsl(${hue}, 15%, 86%))`;
+  const glassBg = isDark
+    ? 'linear-gradient(152deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.02) 40%, transparent 55%)'
+    : 'linear-gradient(152deg, rgba(255,255,255,0.6) 25%, rgba(255,255,255,0.3) 40%, transparent 55%)';
+  const glossyBorder = isDark ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.06)';
+
+  const textColor = firstImage ? 'text-white' : isDark ? 'text-white' : 'text-foreground';
+  const subTextColor = firstImage ? 'text-white/70' : isDark ? 'text-white/60' : 'text-muted-foreground';
+
+  // Duration pill style
+  const durPillStyle: React.CSSProperties = firstImage
+    ? { background: 'rgba(255,255,255,0.22)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' }
+    : isDark
+      ? { background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff' }
+      : { background: 'rgba(0,0,0,0.06)', border: '1px solid rgba(0,0,0,0.08)', color: 'hsl(25, 30%, 20%)' };
 
   return (
     <div
@@ -83,160 +109,117 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
         }
       }}
       className={cn(
-        'group relative flex flex-col rounded-xl border border-border overflow-hidden transition-all',
+        'group relative flex flex-col rounded-[14px] overflow-hidden transition-all',
         isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
         firstImage ? 'h-[144px]' : 'min-h-[100px]',
         'hover:shadow-lg',
       )}
       style={{
         opacity: isScheduled ? 0.7 : 1,
-        ...((!firstImage) ? { borderLeftWidth: 3, borderLeftColor: color } : {}),
         WebkitUserSelect: 'none',
         userSelect: 'none',
         WebkitTouchCallout: 'none',
         touchAction: 'manipulation',
       } as React.CSSProperties}
     >
+      {/* Background */}
+      {firstImage ? (
+        <>
+          <img src={firstImage} alt={option.name} className="absolute inset-0 h-full w-full object-cover" />
+          <div className="absolute inset-0 z-[5]" style={{ background: 'linear-gradient(152deg, transparent 25%, rgba(10,8,6,0.3) 35%, rgba(10,8,6,0.7) 50%, rgba(10,8,6,0.92) 65%)' }} />
+        </>
+      ) : (
+        <>
+          <div className="absolute inset-0" style={{ background: glossyBg, border: glossyBorder }} />
+          <div className="absolute inset-0 z-[5]" style={{ background: glassBg }} />
+        </>
+      )}
+
+      {/* Corner flag */}
+      <div
+        className="absolute top-0 left-0 z-20 flex items-center justify-center"
+        style={{ background: color, padding: '5px 7px', borderRadius: '14px 0 8px 0' }}
+      >
+        <span className="text-white" style={{ fontSize: 13, lineHeight: 1 }}>{emoji}</span>
+      </div>
+
+      {/* Duration pill — top-right */}
+      <div
+        className="absolute top-2 right-2 z-20 rounded-full text-[11px] font-bold px-2.5 py-1"
+        style={durPillStyle}
+      >
+        {duration}
+      </div>
+
       {/* Usage count badge */}
       {usageCount != null && usageCount > 1 && (
-        <div className="absolute top-1.5 right-1.5 z-20">
+        <div className="absolute top-8 right-2 z-20">
           <Badge
             variant="secondary"
-            className={cn(
-              'text-[9px] px-1.5 py-0 h-4 font-bold',
-              firstImage
-                ? 'bg-white/25 text-white border-white/20'
-                : 'bg-primary/15 text-primary border-primary/20'
-            )}
+            className="text-[9px] px-1.5 py-0 h-4 font-bold bg-white/25 text-white border-white/20"
           >
             x{usageCount}
           </Badge>
         </div>
       )}
 
-      {/* Image background */}
-      {firstImage && (
-        <div className="absolute inset-0">
-          <img src={firstImage} alt={option.name} className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/50 to-black/30" />
-        </div>
-      )}
-
-      {/* Content */}
+      {/* Content — bottom-right */}
       <div className={cn(
-        'relative z-10 flex w-full flex-1 flex-col justify-between px-3 py-2.5',
-        firstImage ? 'text-white' : 'text-foreground',
+        'absolute bottom-0 right-0 z-10 text-right max-w-[75%] px-3 py-2.5',
+        textColor,
       )}>
-        <div className="flex items-start gap-2">
-          {isDraggable ? (
-            <GripVertical className={cn(
-              'h-3.5 w-3.5 shrink-0 mt-0.5',
-              firstImage ? 'text-white/40' : 'text-muted-foreground/30'
-            )} />
-          ) : (
-            <Check className={cn(
-              'h-3.5 w-3.5 shrink-0 mt-0.5',
-              firstImage ? 'text-white/50' : 'text-muted-foreground/40'
-            )} />
+        <p className="truncate text-sm font-bold leading-tight" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
+          {option.name}
+        </p>
+        {option.location_name && (
+          <p className={cn('truncate text-[10px] leading-tight mt-0.5', subTextColor)}>
+            📍 {option.location_name}
+          </p>
+        )}
+        {(option as any).rating != null && (
+          <p className={cn('text-[10px] leading-tight mt-0.5', subTextColor)}>
+            ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
+          </p>
+        )}
+      </div>
+
+      {/* Bottom-left: day label + actions */}
+      <div className="absolute bottom-2 left-2 z-10 flex items-center gap-1.5">
+        <Badge
+          variant={isScheduled ? 'default' : 'secondary'}
+          className={cn(
+            'text-[9px] px-1.5 py-0 h-4 font-medium',
+            'bg-white/20 text-white border-white/20 hover:bg-white/20'
           )}
+        >
+          {dayLabel}
+        </Badge>
+      </div>
 
-          {!firstImage && (
-            <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sm"
-              style={{ backgroundColor: `${color}20`, color }}
-            >
-              {emoji}
-            </span>
-          )}
-
-          <div className="min-w-0 flex-1">
-            <p className={cn(
-              'truncate text-sm font-semibold leading-tight',
-              firstImage && 'text-white drop-shadow-sm'
-            )}>
-              {firstImage && <span className="mr-1">{emoji}</span>}
-              {option.name}
-            </p>
-            {option.location_name && (
-              <p className={cn(
-                'truncate text-[10px] leading-tight mt-0.5',
-                firstImage ? 'text-white/70' : 'text-muted-foreground'
-              )}>
-                📍 {option.location_name}
-              </p>
-            )}
-            {(option as any).rating != null && (
-              <p className={cn(
-                'text-[10px] leading-tight mt-0.5',
-                firstImage ? 'text-white/70' : 'text-muted-foreground'
-              )}>
-                ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between mt-2">
-          <div className="flex items-center gap-1.5">
-            <Badge
-              variant={isScheduled ? 'default' : 'secondary'}
-              className={cn(
-                'text-[9px] px-1.5 py-0 h-4 font-medium',
-                firstImage
-                  ? isScheduled
-                    ? 'bg-white/20 text-white border-white/20 hover:bg-white/20'
-                    : 'bg-white/10 text-white/80 hover:bg-white/10'
-                  : isScheduled
-                    ? 'bg-primary/15 text-primary border-primary/20 hover:bg-primary/15'
-                    : 'bg-muted text-muted-foreground hover:bg-muted'
-              )}
-            >
-              {dayLabel}
-            </Badge>
-            <span className={cn(
-              'text-[10px] font-bold',
-              firstImage ? 'text-white/60' : 'text-muted-foreground/60'
-            )}>
-              {duration}
-            </span>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {onInsert && isDraggable && (
+      {/* Action buttons */}
+      <div className="absolute bottom-2 right-2 z-20 flex shrink-0 items-center gap-1">
+        {isDraggable && (
+          <div className={cn('flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all')}>
+            {onInsert && (
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onInsert(entry);
-                }}
-                className={cn(
-                  'h-6 w-6 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all',
-                  firstImage
-                    ? 'text-white/60 hover:bg-white/20 hover:text-white'
-                    : 'text-muted-foreground/50 hover:bg-accent hover:text-foreground'
-                )}
+                onClick={(e) => { e.stopPropagation(); onInsert(entry); }}
+                className="h-6 w-6 rounded-md flex items-center justify-center text-white/60 hover:bg-white/20 hover:text-white"
                 title="Insert on day"
               >
                 <ArrowRightToLine className="h-3 w-3" />
               </button>
             )}
-            {onDuplicate && isDraggable && (
+            {onDuplicate && (
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDuplicate(entry);
-                }}
-                className={cn(
-                  'h-6 w-6 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all',
-                  firstImage
-                    ? 'text-white/60 hover:bg-white/20 hover:text-white'
-                    : 'text-muted-foreground/50 hover:bg-accent hover:text-foreground'
-                )}
+                onClick={(e) => { e.stopPropagation(); onDuplicate(entry); }}
+                className="h-6 w-6 rounded-md flex items-center justify-center text-white/60 hover:bg-white/20 hover:text-white"
                 title="Duplicate entry"
               >
                 <Copy className="h-3 w-3" />
               </button>
             )}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
