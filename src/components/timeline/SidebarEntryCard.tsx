@@ -14,6 +14,7 @@ interface SidebarEntryCardProps {
   onTouchDragStart?: (entry: EntryWithOptions, initialPosition: { x: number; y: number }) => void;
   usageCount?: number;
   isFlight?: boolean;
+  compact?: boolean;
 }
 
 const formatDuration = (startIso: string, endIso: string): string => {
@@ -31,7 +32,7 @@ const extractHue = (hslString: string): number => {
   return match ? parseInt(match[1]) : 260;
 };
 
-const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, onTouchDragStart, usageCount, isFlight }: SidebarEntryCardProps) => {
+const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, onTouchDragStart, usageCount, isFlight, compact }: SidebarEntryCardProps) => {
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -111,7 +112,7 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
       className={cn(
         'group relative flex flex-col rounded-[14px] overflow-hidden transition-all',
         isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
-        firstImage ? 'h-[144px]' : 'min-h-[100px]',
+        compact ? 'h-[80px]' : (firstImage ? 'h-[144px]' : 'min-h-[100px]'),
         'hover:shadow-lg',
       )}
       style={{
@@ -168,15 +169,15 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
         'absolute bottom-0 right-0 z-10 text-right max-w-[75%] px-3 py-2.5',
         textColor,
       )}>
-        <p className="truncate text-sm font-bold leading-tight" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
+        <p className={cn('truncate font-bold leading-tight', compact ? 'text-xs' : 'text-sm')} style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
           {option.name}
         </p>
-        {option.location_name && (
+        {!compact && option.location_name && (
           <p className={cn('truncate text-[10px] leading-tight mt-0.5', subTextColor)}>
             📍 {option.location_name}
           </p>
         )}
-        {(option as any).rating != null && (
+        {!compact && (option as any).rating != null && (
           <p className={cn('text-[10px] leading-tight mt-0.5', subTextColor)}>
             ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
           </p>
