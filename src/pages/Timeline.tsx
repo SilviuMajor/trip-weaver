@@ -5,6 +5,7 @@ import { addDays, parseISO, startOfDay, format, isPast, isToday } from 'date-fns
 import { getDateInTimezone, localToUTC, resolveDropTz } from '@/lib/timezoneUtils';
 import { findCategory } from '@/lib/categories';
 import { inferCategoryFromTypes } from '@/lib/placeTypeMapping';
+import { checkOpeningHoursConflict } from '@/lib/entryHelpers';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGeolocation } from '@/hooks/useGeolocation';
@@ -346,6 +347,14 @@ const Timeline = () => {
       toast({ title: `Added ${place.name} at ${timeStr}` });
       await fetchData();
       if (trip) await autoExtendTripIfNeeded(tripId, endTime, trip, fetchData);
+
+      // Check if venue is closed on the scheduled day
+      if (place.openingHours) {
+        const { isConflict, message } = checkOpeningHoursConflict(place.openingHours as string[], startTime);
+        if (isConflict) {
+          toast({ title: '⚠️ Venue may be closed', description: message, variant: 'destructive' });
+        }
+      }
     } catch (err: any) {
       toast({ title: 'Failed to add', description: err.message, variant: 'destructive' });
     }
@@ -1451,6 +1460,15 @@ const Timeline = () => {
 
     // Auto-extend trip if entry goes past final day
     if (trip) await autoExtendTripIfNeeded(tripId!, endIso, trip, fetchData);
+
+    // Check if venue is closed on the scheduled day
+    const droppedOpt = entry.options?.[0];
+    if (droppedOpt?.opening_hours) {
+      const { isConflict, message } = checkOpeningHoursConflict(droppedOpt.opening_hours as string[], startIso);
+      if (isConflict) {
+        toast({ title: '⚠️ Venue may be closed', description: message, variant: 'destructive' });
+      }
+    }
 
     // Proximity toast for magnet snap suggestion
     checkProximityAndPrompt(placedEntryId);

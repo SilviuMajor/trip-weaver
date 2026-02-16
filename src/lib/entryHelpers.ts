@@ -33,6 +33,23 @@ export const formatPriceLevel = (level: string | null): string | null => {
 
 export const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+export const checkOpeningHoursConflict = (
+  openingHours: string[] | null,
+  startTime: string
+): { isConflict: boolean; message: string | null } => {
+  if (!openingHours || openingHours.length === 0) return { isConflict: false, message: null };
+  const d = new Date(startTime);
+  const jsDay = d.getDay();
+  const googleIndex = jsDay === 0 ? 6 : jsDay - 1;
+  const dayHours = openingHours[googleIndex];
+  if (!dayHours) return { isConflict: false, message: null };
+  if (dayHours.toLowerCase().includes('closed')) {
+    const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    return { isConflict: true, message: `This place is closed on ${dayNames[googleIndex]}` };
+  }
+  return { isConflict: false, message: null };
+};
+
 export const getEntryDayHours = (hours: string[] | null, entryStartTime?: string): { text: string | null; dayName: string; googleIndex: number } => {
   const d = entryStartTime ? new Date(entryStartTime) : new Date();
   const jsDay = d.getDay();
