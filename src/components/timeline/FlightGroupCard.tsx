@@ -88,27 +88,32 @@ const FlightGroupCard = ({
         isShaking && 'animate-shake',
       )}
     >
-      {/* Check-in section */}
+      {/* Check-in — timeline dot style */}
       {checkinEntry && (
         <div
-          className="flex items-center gap-2 px-3 text-[11px] min-h-0 overflow-hidden rounded-t-[14px]"
-          style={{ flex: checkinFraction, background: `${catColor}0A` }}
+          className="flex items-center gap-3 px-3 min-h-0 overflow-hidden"
+          style={{ flex: checkinFraction }}
         >
-          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: catColor }} />
-          <span className="font-semibold text-muted-foreground/70 shrink-0">Check-in</span>
-          <span className="text-muted-foreground/50 truncate">
-            {depCode}{flightOption.departure_terminal ? ` T${flightOption.departure_terminal}` : ''}
-          </span>
-          <span className="ml-auto text-muted-foreground/50 flex items-center gap-1 shrink-0">
-            <Clock className="h-2.5 w-2.5" />
-            {formatTimeOnly(checkinEntry.start_time, flightOption.departure_tz)} – {formatTimeOnly(checkinEntry.end_time, flightOption.departure_tz)}
-          </span>
+          {/* Timeline dot + dashed line going down */}
+          <div className="flex flex-col items-center self-stretch py-1">
+            <div className="w-2.5 h-2.5 rounded-full border-2 shrink-0"
+              style={{ borderColor: catColor, backgroundColor: `${catColor}30` }} />
+            <div className="flex-1 w-0 border-l-2 border-dashed"
+              style={{ borderColor: `${catColor}40` }} />
+          </div>
+          {/* Content */}
+          <div className="flex-1 flex items-center justify-between min-w-0 py-1">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold text-foreground/70">Check-in</p>
+              <p className="text-[10px] text-muted-foreground truncate">
+                {depCode}{flightOption.departure_terminal ? ` T${flightOption.departure_terminal}` : ''}
+              </p>
+            </div>
+            <span className="text-[10px] text-muted-foreground shrink-0 ml-2">
+              {formatTimeOnly(checkinEntry.start_time, flightOption.departure_tz)} – {formatTimeOnly(checkinEntry.end_time, flightOption.departure_tz)}
+            </span>
+          </div>
         </div>
-      )}
-
-      {/* Divider: check-in → flight */}
-      {checkinEntry && (
-        <div className="h-px shrink-0 bg-border" />
       )}
 
       {/* Main flight section — diagonal fade */}
@@ -153,20 +158,18 @@ const FlightGroupCard = ({
           {flightDuration}
         </div>
 
-        {/* Content — LEFT-aligned (boarding pass style) */}
-        <div className="relative z-10 p-3 h-full flex flex-col justify-end">
-          {/* Flight name/number */}
-          <h3 className="text-base font-bold text-white leading-tight truncate mb-1">
+        {/* Content — RIGHT-aligned at bottom */}
+        <div className="relative z-10 p-3 h-full flex flex-col justify-end text-right text-white">
+          <h3 className="text-base font-bold leading-tight truncate mb-1"
+            style={{ textShadow: '0 1px 3px rgba(0,0,0,0.3)' }}>
             {flightOption.name}
           </h3>
-
-          {/* Route: DEP TIME → ARR TIME */}
-          <div className="flex items-center gap-2 text-xs text-white/80 font-medium">
+          <div className="flex items-center gap-2 text-xs text-white/80 font-medium justify-end">
             <span className="shrink-0">
               {depCode}{flightOption.departure_terminal ? ` T${flightOption.departure_terminal}` : ''}{' '}
               {formatTimeOnly(flightEntry.start_time, flightOption.departure_tz)}
             </span>
-            <ArrowRight className="h-3 w-3 shrink-0" />
+            <ArrowRight className="h-3 w-3 shrink-0 text-white/50" />
             <span className="shrink-0">
               {arrCode}{flightOption.arrival_terminal ? ` T${flightOption.arrival_terminal}` : ''}{' '}
               {formatTimeOnly(flightEntry.end_time, flightOption.arrival_tz)}
@@ -175,26 +178,31 @@ const FlightGroupCard = ({
         </div>
       </div>
 
-      {/* Divider: flight → checkout */}
-      {checkoutEntry && (
-        <div className="h-px shrink-0 bg-border" />
-      )}
-
-      {/* Checkout section */}
+      {/* Checkout — timeline dot style */}
       {checkoutEntry && (
         <div
-          className="flex items-center gap-2 px-3 text-[11px] min-h-0 overflow-hidden rounded-b-[14px]"
-          style={{ flex: checkoutFraction, background: `${catColor}0A` }}
+          className="flex items-center gap-3 px-3 min-h-0 overflow-hidden"
+          style={{ flex: checkoutFraction }}
         >
-          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: catColor }} />
-          <span className="font-semibold text-muted-foreground/70 shrink-0">Checkout</span>
-          <span className="text-muted-foreground/50 truncate">
-            {arrCode}{flightOption.arrival_terminal ? ` T${flightOption.arrival_terminal}` : ''}
-          </span>
-          <span className="ml-auto text-muted-foreground/50 flex items-center gap-1 shrink-0">
-            <Clock className="h-2.5 w-2.5" />
-            {formatTimeOnly(checkoutEntry.start_time, flightOption.arrival_tz)} – {formatTimeOnly(checkoutEntry.end_time, flightOption.arrival_tz)}
-          </span>
+          {/* Dashed line coming from above + dot at bottom */}
+          <div className="flex flex-col items-center self-stretch py-1">
+            <div className="flex-1 w-0 border-l-2 border-dashed"
+              style={{ borderColor: `${catColor}40` }} />
+            <div className="w-2.5 h-2.5 rounded-full border-2 shrink-0"
+              style={{ borderColor: catColor, backgroundColor: `${catColor}30` }} />
+          </div>
+          {/* Content */}
+          <div className="flex-1 flex items-center justify-between min-w-0 py-1">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold text-foreground/70">Checkout</p>
+              <p className="text-[10px] text-muted-foreground truncate">
+                {arrCode}{flightOption.arrival_terminal ? ` T${flightOption.arrival_terminal}` : ''}
+              </p>
+            </div>
+            <span className="text-[10px] text-muted-foreground shrink-0 ml-2">
+              {formatTimeOnly(checkoutEntry.start_time, flightOption.arrival_tz)} – {formatTimeOnly(checkoutEntry.end_time, flightOption.arrival_tz)}
+            </span>
+          </div>
         </div>
       )}
     </motion.div>
