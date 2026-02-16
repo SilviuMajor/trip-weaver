@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { ArrowLeft, MapPin, ClipboardList, List, Map } from 'lucide-react';
+import { ArrowLeft, MapPin, ClipboardList, List, Map as MapIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -8,7 +8,7 @@ import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { findCategory, type CategoryDef } from '@/lib/categories';
+import { findCategory, TRAVEL_MODES, type CategoryDef } from '@/lib/categories';
 import { CATEGORY_TO_PLACE_TYPES, getCategorySearchPlaceholder } from '@/lib/placeTypeMapping';
 import { cn } from '@/lib/utils';
 import ExploreCard from './ExploreCard';
@@ -148,6 +148,9 @@ const ExploreView = ({
   const [addedPlaceIds, setAddedPlaceIds] = useState<Set<string>>(new Set());
   const [selectedPlace, setSelectedPlace] = useState<ExploreResult | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [travelMode, setTravelMode] = useState('walk');
+  const [travelTimes, setTravelTimes] = useState<Map<string, number>>(new Map());
+  const fetchAbortRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const initialLoadDone = useRef(false);
   const isMobile = useIsMobile();
@@ -281,6 +284,65 @@ const ExploreView = ({
     setDetailOpen(true);
   }, []);
 
+  // ─── Travel time fetching ───
+
+  const MODE_SHORT_LABELS: Record<string, string> = { walk: 'Walk', transit: 'Transit', drive: 'Drive', cycle: 'Cycle' };
+
+  const fetchTravelTimes = useCallback(async (
+    resultsList: ExploreResult[],
+    origin: { lat: number; lng: number },
+    mode: string,
+    generation: number,
+  ) => {
+    const times = new Map<string, number>();
+    const batchSize = 5;
+
+    for (let i = 0; i < resultsList.length; i += batchSize) {
+      if (fetchAbortRef.current !== generation) return;
+      const batch = resultsList.slice(i, i + batchSize);
+      await Promise.all(batch.map(async (result) => {
+        if (!result.lat || !result.lng) return;
+        try {
+          const { data } = await supabase.functions.invoke('google-directions', {
+            body: {
+              fromAddress: `${origin.lat},${origin.lng}`,
+              toAddress: `${result.lat},${result.lng}`,
+              mode,
+            },
+          });
+          if (data?.duration_min != null) {
+            times.set(result.placeId, Math.round(data.duration_min));
+          }
+        } catch (err) {
+          console.error('Travel time fetch failed for', result.name, err);
+        }
+      }));
+      if (fetchAbortRef.current !== generation) return;
+      setTravelTimes(new Map(times));
+      if (i + batchSize < resultsList.length) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+  }, []);
+
+  // Trigger travel time fetch
+  useEffect(() => {
+    if (!originLocation || results.length === 0) return;
+    setTravelTimes(new Map());
+    const generation = ++fetchAbortRef.current;
+    fetchTravelTimes(results, originLocation, travelMode, generation);
+  }, [results, travelMode, originLocation, fetchTravelTimes]);
+
+  // Sort results by travel time
+  const sortedResults = useMemo(() => {
+    if (travelTimes.size === 0) return results;
+    return [...results].sort((a, b) => {
+      const timeA = travelTimes.get(a.placeId) ?? 9999;
+      const timeB = travelTimes.get(b.placeId) ?? 9999;
+      return timeA - timeB;
+    });
+  }, [results, travelTimes]);
+
   if (!open) return null;
 
   // Detail sheet content
@@ -339,7 +401,7 @@ const ExploreView = ({
             className="h-7 w-7 text-muted-foreground"
             onClick={() => toast({ title: 'Map view coming soon' })}
           >
-            <Map className="h-3.5 w-3.5" />
+            <MapIcon className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
@@ -363,6 +425,26 @@ const ExploreView = ({
         </div>
       )}
 
+      {/* Travel mode pills */}
+      {originLocation && (
+        <div className="flex items-center gap-1.5 px-4 py-1 overflow-x-auto">
+          {TRAVEL_MODES.map((mode) => (
+            <button
+              key={mode.id}
+              className={cn(
+                'rounded-full px-3 py-1 text-xs font-medium border transition-colors whitespace-nowrap',
+                travelMode === mode.id
+                  ? 'bg-primary/10 text-primary border-primary/20'
+                  : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted'
+              )}
+              onClick={() => setTravelMode(mode.id)}
+            >
+              {mode.emoji} {MODE_SHORT_LABELS[mode.id] ?? mode.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Results */}
       <ScrollArea className="flex-1">
         <div className="px-3 py-2 space-y-2">
@@ -380,8 +462,12 @@ const ExploreView = ({
             </div>
           )}
 
-          {!loading && results.map((place) => {
+          {!loading && sortedResults.map((place) => {
             const inTrip = existingPlaceIds.has(place.placeId) || addedPlaceIds.has(place.placeId);
+            const minutes = travelTimes.get(place.placeId);
+            const modeEmoji = TRAVEL_MODES.find(m => m.id === travelMode)?.emoji ?? '🚶';
+            const travelTimeStr = minutes != null ? `${modeEmoji} ${minutes}m` : undefined;
+            const travelTimeLoading = !!originLocation && minutes == null && results.length > 0;
             return (
               <ExploreCard
                 key={place.placeId}
@@ -390,7 +476,8 @@ const ExploreView = ({
                 onAddToPlanner={() => handleAdd(place)}
                 onTap={() => handleCardTap(place)}
                 isInTrip={inTrip}
-                travelTime={null}
+                travelTime={travelTimeStr ?? null}
+                travelTimeLoading={travelTimeLoading}
                 compactHours={null}
               />
             );

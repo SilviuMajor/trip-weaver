@@ -12,6 +12,7 @@ interface ExploreCardProps {
   onAddToPlanner: () => void;
   onTap: () => void;
   travelTime?: string | null;
+  travelTimeLoading?: boolean;
   isInTrip?: boolean;
   compactHours?: string | null;
 }
@@ -21,7 +22,7 @@ const extractHue = (hslString: string): number => {
   return match ? parseInt(match[1]) : 260;
 };
 
-const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, isInTrip, compactHours }: ExploreCardProps) => {
+const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, travelTimeLoading, isInTrip, compactHours }: ExploreCardProps) => {
   const [photoUrl, setPhotoUrl] = useState<string | null>(place.photoUrl ?? null);
 
   const cat = findCategory(categoryId ?? '');
@@ -95,14 +96,19 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, isI
       </div>
 
       {/* Travel time pill — top-right */}
-      {travelTime && (
+      {travelTime ? (
         <div
           className="absolute top-2 right-2 z-20 rounded-full text-[11px] font-bold px-2.5 py-1"
           style={durPillStyle}
         >
           {travelTime}
         </div>
-      )}
+      ) : travelTimeLoading ? (
+        <div
+          className="absolute top-2 right-2 z-20 w-10 h-5 rounded-full animate-pulse"
+          style={{ ...durPillStyle, opacity: 0.5 }}
+        />
+      ) : null}
 
       {/* Content — bottom area */}
       <div className={cn('absolute bottom-0 left-0 right-0 z-10 px-3 py-2.5 flex items-end justify-between gap-2')}>
