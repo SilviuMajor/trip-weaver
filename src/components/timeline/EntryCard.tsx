@@ -29,10 +29,10 @@ const extractHue = (hslString: string): number => {
 };
 
 const DIAGONAL_GRADIENTS = {
-  full: 'linear-gradient(152deg, transparent 30%, rgba(10,8,6,0.3) 40%, rgba(10,8,6,0.72) 50%, rgba(10,8,6,0.94) 60%)',
-  condensed: 'linear-gradient(155deg, transparent 22%, rgba(10,8,6,0.25) 32%, rgba(10,8,6,0.68) 42%, rgba(10,8,6,0.92) 52%)',
-  medium: 'linear-gradient(158deg, transparent 18%, rgba(10,8,6,0.3) 28%, rgba(10,8,6,0.78) 40%, rgba(10,8,6,0.96) 52%)',
-  compact: 'linear-gradient(160deg, transparent 12%, rgba(10,8,6,0.25) 22%, rgba(10,8,6,0.75) 34%, rgba(10,8,6,0.96) 46%)',
+  full: 'linear-gradient(148deg, transparent 15%, rgba(10,8,6,0.20) 25%, rgba(10,8,6,0.65) 38%, rgba(10,8,6,0.96) 50%)',
+  condensed: 'linear-gradient(148deg, transparent 10%, rgba(10,8,6,0.20) 20%, rgba(10,8,6,0.65) 33%, rgba(10,8,6,0.96) 45%)',
+  tight: 'linear-gradient(148deg, transparent 5%, rgba(10,8,6,0.25) 14%, rgba(10,8,6,0.70) 26%, rgba(10,8,6,0.97) 38%)',
+  compact: 'linear-gradient(148deg, transparent 0%, rgba(10,8,6,0.30) 8%, rgba(10,8,6,0.78) 18%, rgba(10,8,6,0.97) 28%)',
 };
 
 interface EntryCardProps {
@@ -54,9 +54,7 @@ interface EntryCardProps {
   isLocked?: boolean;
   isProcessing?: boolean;
   linkedType?: string | null;
-  isCompact?: boolean;
-  isMedium?: boolean;
-  isCondensed?: boolean;
+  height?: number;
   canEdit?: boolean;
   overlapMinutes?: number;
   overlapPosition?: 'top' | 'bottom';
@@ -122,9 +120,7 @@ const EntryCard = ({
   isLocked,
   isProcessing,
   linkedType,
-  isCompact,
-  isMedium,
-  isCondensed,
+  height: heightProp,
   canEdit,
   overlapMinutes = 0,
   overlapPosition,
@@ -148,17 +144,20 @@ const EntryCard = ({
   const isDark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
   const hue = extractHue(catColor);
 
-  const handleLockClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onToggleLock?.();
-  };
-
   const durationLabel = formatDuration(startTime, endTime);
-  const durationMin = Math.round(
-    (new Date(endTime).getTime() - new Date(startTime).getTime()) / 60000
-  );
-  const isShortEntry = durationMin <= 30;
-  const isMicroEntry = durationMin <= 20;
+
+  // ─── 5-tier pixel-based system ───
+  const h = heightProp ?? 200;
+  const isMicro = h < 30;
+  const isCompactTier = h >= 30 && h < 72;
+  const isTight = h >= 72 && h < 86;
+  const isCondensedTier = h >= 86 && h < 116;
+  const isFull = h >= 116;
+
+  // Transport tier mapping (transport cards have different visual needs)
+  const isCompact = h < 72;
+  const isMedium = h >= 40 && h < 72;
+  const isCondensed = h >= 72 && h < 116;
 
   // Overlap red tint calculation
   const totalMs = new Date(endTime).getTime() - new Date(startTime).getTime();
@@ -245,11 +244,11 @@ const EntryCard = ({
   };
 
   const fmtDurShort = (min: number): string => {
-    const h = Math.floor(min / 60);
-    const m = min % 60;
-    if (h === 0) return `${m}m`;
-    if (m === 0) return `${h}h`;
-    return `${h}h ${m}m`;
+    const hh = Math.floor(min / 60);
+    const mm = min % 60;
+    if (hh === 0) return `${mm}m`;
+    if (mm === 0) return `${hh}h`;
+    return `${hh}h ${mm}m`;
   };
 
   const refreshModeEmoji: Record<string, string> = { walk: '🚶', transit: '🚌', drive: '🚗', bicycle: '🚲' };
@@ -306,25 +305,24 @@ const EntryCard = ({
     : 'linear-gradient(152deg, rgba(255,255,255,0.6) 25%, rgba(255,255,255,0.3) 40%, transparent 55%)';
   const glossyBorder = isDark ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.06)';
 
-  // ─── Duration pill styles ───
-  const durationPillStyle = (size: 'l' | 'm' | 's' | 'xs', centered = false) => {
-    const sizes = {
-      l: { fontSize: 10, padding: '2px 6px', top: 8, right: 8 },
-      m: { fontSize: 10, padding: '2px 6px', top: 7, right: 7 },
-      s: { fontSize: 10, padding: '2px 6px', top: 5, right: 5 },
-      xs: { fontSize: 9, padding: '2px 5px', top: 3, right: 4 },
-    };
-    const s = sizes[size];
+  // ─── Uniform duration pill ───
+  const pillStyle = (): React.CSSProperties => {
     const base: React.CSSProperties = {
       position: 'absolute', zIndex: 20,
-      borderRadius: 20, fontSize: s.fontSize, padding: s.padding,
-      fontWeight: 700, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      borderRadius: 20, fontSize: 10, padding: '3px 10px',
+      fontWeight: 700, backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
       display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer',
-      ...(centered
-        ? { top: '50%', transform: 'translateY(-50%)', right: 5 }
-        : { top: s.top, right: s.right }
-      ),
     };
+    // Position: top-right for full/condensed/tight, center-right for compact/micro
+    if (isFull || isCondensedTier || isTight) {
+      Object.assign(base, { top: 7, right: 7 });
+    } else {
+      Object.assign(base, { top: '50%', transform: 'translateY(-50%)', right: 7 });
+    }
+    // Lock state styling
+    if (isLocked) {
+      return { ...base, background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)', color: '#fff' };
+    }
     if (firstImage) {
       return { ...base, background: 'rgba(255,255,255,0.22)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' };
     }
@@ -334,32 +332,62 @@ const EntryCard = ({
     return { ...base, background: 'rgba(0,0,0,0.06)', border: '1px solid rgba(0,0,0,0.08)', color: 'hsl(25, 30%, 20%)' };
   };
 
-  // ─── Corner flag ───
-  const cornerFlag = (_emojiSize: number, _pad: string) => (
+  const durationPill = (
     <div
-      className="absolute z-20 flex items-center justify-center"
-      style={{
-        background: catColor,
-        padding: '4px 6px',
-        fontSize: 12,
-        lineHeight: 1,
-        ...(isMicroEntry
-          ? { left: 5, top: '50%', transform: 'translateY(-50%)', borderRadius: 999 }
-          : { left: 0, top: 0, borderRadius: '14px 0 8px 0' }
-        ),
-      }}
+      style={pillStyle()}
+      onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
+      onMouseDown={(e) => { e.stopPropagation(); }}
+      onTouchStart={(e) => { e.stopPropagation(); }}
+      onPointerDown={(e) => { e.stopPropagation(); }}
     >
-      <span className="text-white" style={{ lineHeight: 1 }}>{catEmoji}</span>
+      {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
+      <span>{durationLabel}</span>
     </div>
   );
 
-  // ─── Transport connector card (all variants) — UNCHANGED ───
+  // ─── Corner flag ───
+  const cornerFlag = () => {
+    if (isMicro) {
+      // Centred circle for micro
+      return (
+        <div
+          className="absolute z-20 flex items-center justify-center"
+          style={{
+            left: 0, top: '50%', transform: 'translateY(-50%)',
+            backgroundColor: catColor, borderRadius: 999,
+            padding: '4px 6px', fontSize: 11, lineHeight: 1,
+          }}
+        >
+          <span className="text-white" style={{ lineHeight: 1 }}>{catEmoji}</span>
+        </div>
+      );
+    }
+    const flagStyle = isFull
+      ? { padding: '5px 7px', fontSize: 13 }
+      : (isCondensedTier || isTight)
+        ? { padding: '4px 6px', fontSize: 12 }
+        : { padding: '3px 5px', fontSize: 11 };
+    return (
+      <div
+        className="absolute z-20 flex items-center justify-center"
+        style={{
+          background: catColor, left: 0, top: 0,
+          borderRadius: '14px 0 8px 0', lineHeight: 1,
+          ...flagStyle,
+        }}
+      >
+        <span className="text-white" style={{ lineHeight: 1 }}>{catEmoji}</span>
+      </div>
+    );
+  };
+
+  // ─── Transport connector card (all variants) — uses internal isCompact/isMedium/isCondensed ───
   if (isTransfer) {
     const mode = detectTransportMode(option.name);
     const optionDistanceKm = (option as any).distance_km as number | null | undefined;
     const distStr = formatDistanceVal(optionDistanceKm);
 
-    if (isCompact) {
+    if (h < 40) {
       return (
         <div
           onClick={onClick}
@@ -383,7 +411,7 @@ const EntryCard = ({
       );
     }
 
-    if (isMedium) {
+    if (h >= 40 && h < 72) {
       return (
         <div
           onClick={onClick}
@@ -408,7 +436,7 @@ const EntryCard = ({
       );
     }
 
-    if (isCondensed) {
+    if (h >= 72 && h < 116) {
       return (
         <div
           onClick={onClick}
@@ -444,7 +472,7 @@ const EntryCard = ({
       );
     }
 
-    // Full transport card
+    // Full transport card (h >= 116)
     return (
       <div
         onClick={onClick}
@@ -517,8 +545,11 @@ const EntryCard = ({
     />
   ) : null;
 
+  // ─── Determine gradient tier ───
+  const gradientTier = isFull ? 'full' : isCondensedTier ? 'condensed' : isTight ? 'tight' : 'compact';
+
   // ─── Shared card wrapper for all non-transfer tiers ───
-  const cardBase = (tier: 'full' | 'condensed' | 'medium' | 'compact', children: React.ReactNode, overflowVisible = false) => (
+  const cardBase = (children: React.ReactNode) => (
     <div
       onClick={onClick}
       onMouseDown={onDragStart}
@@ -526,8 +557,8 @@ const EntryCard = ({
       onTouchMove={onTouchDragMove}
       onTouchEnd={onTouchDragEnd}
       className={cn(
-        'group relative rounded-[14px] shadow-sm transition-all hover:shadow-md',
-        overflowVisible ? 'overflow-visible' : 'overflow-hidden',
+        'group relative rounded-[14px] shadow-sm transition-all hover:shadow-md border border-white/[0.06]',
+        (isCompactTier || isMicro) && h < 45 ? 'overflow-visible' : 'overflow-hidden',
         isEntryPast && 'opacity-50 grayscale-[30%]',
         isDragging ? 'cursor-grabbing ring-2 ring-primary scale-[1.03] shadow-xl z-50 transition-transform duration-100' : onDragStart ? 'cursor-grab' : 'cursor-pointer',
         isShaking && 'animate-shake',
@@ -535,12 +566,12 @@ const EntryCard = ({
       )}
       style={{ touchAction: 'none' }}
     >
-      {/* Background clipping container — always clips to rounded corners */}
+      {/* Inner background — ALWAYS clips to rounded corners */}
       <div className="absolute inset-0 overflow-hidden rounded-[14px]">
         {firstImage ? (
           <>
             <img src={firstImage} alt={option.name} className="absolute inset-0 w-full h-full object-cover" />
-            <div className="absolute inset-0 z-[5]" style={{ background: DIAGONAL_GRADIENTS[tier] }} />
+            <div className="absolute inset-0 z-[5]" style={{ background: DIAGONAL_GRADIENTS[gradientTier] }} />
           </>
         ) : (
           <>
@@ -568,70 +599,60 @@ const EntryCard = ({
   const subTextColor = firstImage ? 'text-white/75' : isDark ? 'text-white/60' : 'text-muted-foreground';
   const faintTextColor = firstImage ? 'text-white/40' : isDark ? 'text-white/40' : 'text-muted-foreground/60';
 
-  // ═══ COMPACT (<40px) ═══
-  if (isCompact) {
-    return cardBase('compact', (
+  // ═══ MICRO (<30px) ═══
+  if (isMicro) {
+    return cardBase(
       <>
-        {cornerFlag(9, '2px 4px')}
-        <div
-          style={{
-            ...durationPillStyle('xs', isShortEntry),
-            ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
-          }}
-          onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
-          onMouseDown={(e) => { e.stopPropagation(); }}
-          onTouchStart={(e) => { e.stopPropagation(); }}
-          onPointerDown={(e) => { e.stopPropagation(); }}
-        >
-          {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
-          <span>{durationLabel}</span>
-        </div>
+        {cornerFlag()}
+        {durationPill}
         <div
           className={cn('absolute z-10 text-right', textColor)}
-          style={{ top: '50%', left: isMicroEntry ? 30 : 10, right: 54, transform: 'translateY(-50%)', pointerEvents: 'none' }}
+          style={{ top: '50%', left: 30, right: 70, transform: 'translateY(-50%)', pointerEvents: 'none' }}
         >
           <span className="text-sm font-bold truncate block" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{option.name}</span>
+        </div>
+      </>
+    );
+  }
+
+  // ═══ COMPACT (30–71px) ═══
+  if (isCompactTier) {
+    return cardBase(
+      <>
+        {cornerFlag()}
+        {durationPill}
+        <div
+          className={cn('absolute z-10 text-right', textColor)}
+          style={{ top: '50%', left: 10, right: 70, transform: 'translateY(-50%)', pointerEvents: 'none' }}
+        >
+          <span className="text-sm font-bold truncate block" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{displayName}</span>
+          {h >= 45 && (
+            <span className={cn('text-[10px] block', faintTextColor)}>
+              {formatTime(startTime)} — {formatTime(endTime)}
+            </span>
+          )}
         </div>
         {isCheckOut && (
           <span className={cn('absolute bottom-0.5 left-7 z-10 text-[8px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
         )}
       </>
-    ), isShortEntry);
+    );
   }
 
-  // ═══ MEDIUM (40-79px) ═══
-  if (isMedium) {
-    return cardBase('medium', (
+  // ═══ TIGHT (72–85px) ═══
+  if (isTight) {
+    return cardBase(
       <>
-        {cornerFlag(11, '3px 5px')}
-        <div
-          style={{
-            ...durationPillStyle('s', isShortEntry),
-            ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
-          }}
-          onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
-          onMouseDown={(e) => { e.stopPropagation(); }}
-          onTouchStart={(e) => { e.stopPropagation(); }}
-          onPointerDown={(e) => { e.stopPropagation(); }}
-        >
-          {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
-          <span>{durationLabel}</span>
+        {cornerFlag()}
+        {durationPill}
+        <div className={cn('absolute bottom-0 right-0 z-10 text-right flex flex-col items-end', textColor)} style={{ padding: '6px 10px', pointerEvents: 'none' }}>
+          <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
+            {displayName}
+          </h3>
+          <span className={cn('text-[10px]', faintTextColor)}>
+            {formatTime(startTime)} — {formatTime(endTime)}
+          </span>
         </div>
-        {isShortEntry ? (
-          <div
-            className={cn('absolute z-10 text-right', textColor)}
-            style={{ top: '50%', left: isMicroEntry ? 30 : 10, right: 54, transform: 'translateY(-50%)', pointerEvents: 'none' }}
-          >
-            <span className="text-sm font-bold truncate block" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{displayName}</span>
-          </div>
-        ) : (
-          <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[72%] px-2.5 py-1.5 pr-12', textColor)}>
-            <span className="text-sm font-bold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{displayName}</span>
-            <span className={cn('text-[10px]', faintTextColor)}>
-              {formatTime(startTime)} — {formatTime(endTime)}
-            </span>
-          </div>
-        )}
         {isCheckIn && (
           <span className={cn('absolute bottom-1 left-8 z-10 text-[8px] uppercase tracking-wider font-semibold', faintTextColor)}>CHECK-IN</span>
         )}
@@ -639,153 +660,102 @@ const EntryCard = ({
           <span className={cn('absolute bottom-1 left-8 z-10 text-[8px] uppercase tracking-wider font-semibold', faintTextColor)}>checkout</span>
         )}
       </>
-    ), isShortEntry);
+    );
   }
 
-  // ═══ CONDENSED (80-159px) ═══
-  if (isCondensed) {
-    return cardBase('condensed', (
+  // ═══ CONDENSED (86–115px) ═══
+  if (isCondensedTier) {
+    return cardBase(
       <>
-        {cornerFlag(13, '5px 7px')}
-        <div
-          style={{
-            ...durationPillStyle('m', isShortEntry),
-            ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
-          }}
-          onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
-          onMouseDown={(e) => { e.stopPropagation(); }}
-          onTouchStart={(e) => { e.stopPropagation(); }}
-          onPointerDown={(e) => { e.stopPropagation(); }}
-        >
-          {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
-          <span>{durationLabel}</span>
+        {cornerFlag()}
+        {durationPill}
+        <div className={cn('absolute bottom-0 right-0 z-10 text-right flex flex-col items-end', textColor)} style={{ padding: 10, pointerEvents: 'none' }}>
+          {isCheckIn && (
+            <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-0.5', faintTextColor)}>CHECK-IN</span>
+          )}
+          <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
+            {displayName}
+          </h3>
+          {(option as any).rating != null && (
+            <p className={cn('text-[10px] truncate', subTextColor)}>
+              ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
+            </p>
+          )}
+          <span className={cn('text-[10px]', faintTextColor)}>
+            {formatTime(startTime)} — {formatTime(endTime)}
+          </span>
         </div>
-        {isShortEntry ? (
-          <div
-            className={cn('absolute z-10 text-right', textColor)}
-            style={{ top: '50%', left: 10, right: 54, transform: 'translateY(-50%)', pointerEvents: 'none' }}
-          >
-            <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
-              {displayName}
-            </h3>
-            {/* No time on short entries */}
-          </div>
-        ) : (
-          <div className={cn('absolute bottom-0 right-0 z-10 text-right p-3', textColor)} style={{ pointerEvents: 'none' }}>
-            {isCheckIn && (
-              <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-0.5', faintTextColor)}>CHECK-IN</span>
-            )}
-            <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
-              {displayName}
-            </h3>
-            {(option as any).rating != null && (
-              <p className={cn('text-[10px] truncate', subTextColor)}>
-                ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
-              </p>
-            )}
-            <span className={cn('text-[10px]', faintTextColor)}>
-              {formatTime(startTime)} — {formatTime(endTime)}
-            </span>
-          </div>
-        )}
         {isCheckOut && (
           <span className={cn('absolute bottom-1 left-2.5 z-10 text-[10px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
         )}
       </>
-    ), isShortEntry);
+    );
   }
 
-  // ═══ FULL (≥160px) ═══
-  return cardBase('full', (
+  // ═══ FULL (≥116px) ═══
+  return cardBase(
     <>
-      {cornerFlag(16, '5px 7px')}
-      <div
-        style={{
-          ...durationPillStyle('l', isShortEntry),
-          ...(isLocked ? { background: 'rgba(224, 138, 58, 0.85)', border: '1px solid rgba(224, 138, 58, 0.4)' } : {}),
-        }}
-          onClick={(e) => { e.stopPropagation(); onToggleLock?.(); }}
-          onMouseDown={(e) => { e.stopPropagation(); }}
-          onTouchStart={(e) => { e.stopPropagation(); }}
-          onPointerDown={(e) => { e.stopPropagation(); }}
+      {cornerFlag()}
+      {durationPill}
+
+      {/* Content — bottom-right */}
+      <div className={cn('absolute bottom-0 right-0 z-10 text-right flex flex-col items-end p-3', textColor)} style={{ pointerEvents: 'none' }}>
+        {isCheckIn && (
+          <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-1', faintTextColor)}>CHECK-IN</span>
+        )}
+        {totalOptions > 1 && (
+          <span className={cn('text-[10px] font-medium block mb-1', subTextColor)}>
+            {optionIndex + 1}/{totalOptions}
+          </span>
+        )}
+        <h3
+          className="text-sm font-bold leading-tight mb-1"
+          style={{ textShadow: firstImage ? '0 1px 4px rgba(0,0,0,0.3)' : undefined }}
         >
-          {isLocked ? <Lock className="h-2.5 w-2.5" /> : <LockOpen className="h-2.5 w-2.5 opacity-60" />}
-          <span>{durationLabel}</span>
+          {displayName}
+        </h3>
+        {!isTransfer && !isProcessing && (option as any).rating != null && (
+          <p className={cn('text-[10px] mb-0.5', subTextColor)}>
+            ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
+          </p>
+        )}
+        {!isTransfer && !isProcessing && option.location_name && (
+          <p className={cn('text-[9px] truncate mb-0.5', subTextColor)}>
+            📍 {option.location_name}
+          </p>
+        )}
+        {notes && !isTransfer && !isProcessing && (
+          <p className={cn('text-[10px] line-clamp-2 mb-0.5', subTextColor)}>
+            {notes}
+          </p>
+        )}
+
+        {/* Flight info */}
+        {option.category === 'flight' && option.departure_location ? (
+          <p className={cn('text-[10px]', faintTextColor)}>
+            {option.departure_location?.split(' - ')[0]}{option.departure_terminal ? ` T${option.departure_terminal}` : ''} → {option.arrival_location?.split(' - ')[0]}{option.arrival_terminal ? ` T${option.arrival_terminal}` : ''}
+          </p>
+        ) : !isProcessing && (
+          <p className={cn('text-[10px] mt-0.5', faintTextColor)}>
+            {formatTime(startTime)} — {formatTime(endTime)}
+          </p>
+        )}
+
+        {/* Processing time */}
+        {isProcessing && (
+          <p className={cn('text-[10px]', faintTextColor)}>
+            {formatTime(startTime)} — {formatTime(endTime)}
+          </p>
+        )}
+      </div>
+
+      {/* Distance (bottom-left) */}
+      {!isProcessing && distanceKm !== null && distanceKm !== undefined && (
+        <div className={cn('absolute bottom-4 left-4 z-10 flex items-center gap-1 text-[10px]', faintTextColor)}>
+          <MapPin className="h-3 w-3" />
+          <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
         </div>
-
-      {isShortEntry ? (
-        <div
-          className={cn('absolute z-10 text-right', textColor)}
-          style={{ top: '50%', left: 10, right: 54, transform: 'translateY(-50%)', pointerEvents: 'none' }}
-        >
-          <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
-            {displayName}
-          </h3>
-          {/* No time on short entries */}
-        </div>
-      ) : (
-        <>
-          {/* Content — bottom-right */}
-          <div className={cn('absolute bottom-0 right-0 z-10 text-right p-3', textColor)} style={{ pointerEvents: 'none' }}>
-            {isCheckIn && (
-              <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-1', faintTextColor)}>CHECK-IN</span>
-            )}
-            {totalOptions > 1 && (
-              <span className={cn('text-[10px] font-medium block mb-1', subTextColor)}>
-                {optionIndex + 1}/{totalOptions}
-              </span>
-            )}
-            <h3
-              className="text-sm font-bold leading-tight mb-1"
-              style={{ textShadow: firstImage ? '0 1px 4px rgba(0,0,0,0.3)' : undefined }}
-            >
-              {displayName}
-            </h3>
-            {!isTransfer && !isProcessing && (option as any).rating != null && (
-              <p className={cn('text-[10px] mb-0.5', subTextColor)}>
-                ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
-              </p>
-            )}
-            {!isTransfer && !isProcessing && option.location_name && (
-              <p className={cn('text-[10px] truncate mb-0.5', subTextColor)}>
-                📍 {option.location_name}
-              </p>
-            )}
-            {notes && !isTransfer && !isProcessing && (
-              <p className={cn('text-[10px] line-clamp-2 mb-0.5', subTextColor)}>
-                {notes}
-              </p>
-            )}
-
-            {/* Flight info */}
-            {option.category === 'flight' && option.departure_location ? (
-              <p className={cn('text-[10px]', faintTextColor)}>
-                {option.departure_location?.split(' - ')[0]}{option.departure_terminal ? ` T${option.departure_terminal}` : ''} → {option.arrival_location?.split(' - ')[0]}{option.arrival_terminal ? ` T${option.arrival_terminal}` : ''}
-              </p>
-            ) : !isProcessing && (
-              <p className={cn('text-[10px] mt-0.5', faintTextColor)}>
-                {formatTime(startTime)} — {formatTime(endTime)}
-              </p>
-            )}
-
-            {/* Processing time */}
-            {isProcessing && (
-              <p className={cn('text-[10px]', faintTextColor)}>
-                {formatTime(startTime)} — {formatTime(endTime)}
-              </p>
-            )}
-          </div>
-
-          {/* Distance (bottom-left) */}
-          {!isProcessing && distanceKm !== null && distanceKm !== undefined && (
-            <div className={cn('absolute bottom-4 left-4 z-10 flex items-center gap-1 text-[10px]', faintTextColor)}>
-              <MapPin className="h-3 w-3" />
-              <span>{distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}</span>
-            </div>
-          )}
-        </>
       )}
-
 
       {/* Mini route map on transport cards */}
       {isTransfer && (option as any).route_polyline && (
@@ -804,7 +774,7 @@ const EntryCard = ({
         <span className={cn('absolute bottom-1 left-3 z-10 text-[10px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
       )}
     </>
-  ), isShortEntry);
+  );
 };
 
 export default EntryCard;
