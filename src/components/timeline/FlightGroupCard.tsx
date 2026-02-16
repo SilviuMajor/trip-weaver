@@ -108,7 +108,7 @@ const FlightGroupCard = ({
 
       {/* Divider: check-in → flight */}
       {checkinEntry && (
-        <div className="h-[2px] shrink-0" style={{ backgroundColor: catColor, opacity: 0.4 }} />
+        <div className="h-px shrink-0 bg-border" />
       )}
 
       {/* Main flight section — diagonal fade */}
@@ -177,7 +177,7 @@ const FlightGroupCard = ({
 
       {/* Divider: flight → checkout */}
       {checkoutEntry && (
-        <div className="h-[2px] shrink-0" style={{ backgroundColor: catColor, opacity: 0.4 }} />
+        <div className="h-px shrink-0 bg-border" />
       )}
 
       {/* Checkout section */}

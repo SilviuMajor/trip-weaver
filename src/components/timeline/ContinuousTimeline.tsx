@@ -366,7 +366,7 @@ const ContinuousTimeline = ({
   }, [showCardHint]);
 
   const [shakeEntryId, setShakeEntryId] = useState<string | null>(null);
-  const [refreshingTransportId, setRefreshingTransportId] = useState<string | null>(null);
+  
   const [magnetLoadingId, setMagnetLoadingId] = useState<string | null>(null);
   
   const handleLockedAttempt = useCallback((entryId: string) => {
@@ -1350,37 +1350,7 @@ const ContinuousTimeline = ({
                         height={height}
                         fromLabel={primaryOption.departure_location || undefined}
                         toLabel={primaryOption.arrival_location || undefined}
-                        isRefreshing={refreshingTransportId === entry.id}
-                        onInfoTap={() => onCardTap(entry, primaryOption)}
-                        onModeSelect={async (mode, durationMin, distanceKm, polyline) => {
-                          if (onModeSwitchConfirm) {
-                            await onModeSwitchConfirm(entry.id, mode, durationMin, distanceKm, polyline);
-                          }
-                        }}
-                        onRefresh={async () => {
-                          setRefreshingTransportId(entry.id);
-                          try {
-                            const { data, error } = await supabase.functions.invoke('google-directions', {
-                              body: {
-                                fromAddress: primaryOption.departure_location,
-                                toAddress: primaryOption.arrival_location,
-                                modes: ['walk', 'transit', 'drive', 'bicycle'],
-                                departureTime: entry.start_time,
-                              },
-                            });
-                            if (!error && data?.results) {
-                              await supabase.from('entry_options').update({
-                                transport_modes: data.results,
-                              } as any).eq('id', primaryOption.id);
-                              onVoteChange();
-                            }
-                          } catch (err) {
-                            console.error('Transport refresh failed:', err);
-                          } finally {
-                            setRefreshingTransportId(null);
-                          }
-                        }}
-                        onDelete={onDeleteTransport ? () => onDeleteTransport(entry.id) : undefined}
+                        onTap={() => onCardTap(entry, primaryOption)}
                       />
                       {/* Magnet snap icon on transport connector */}
                       {magnetState.showMagnet && (
@@ -1523,7 +1493,7 @@ const ContinuousTimeline = ({
                   )}
 
                   {/* Bottom resize handle — not for transport */}
-                  {canDrag && !flightGroup && !isTransport && !isCompact && (
+                  {canDrag && !flightGroup && !isTransport && (
                     <div
                       data-resize-handle
                       className="absolute -bottom-1 left-0 right-0 z-20 h-5 cursor-ns-resize group/resize touch-none"
@@ -1532,19 +1502,19 @@ const ContinuousTimeline = ({
                       onTouchMove={onTouchMove}
                       onTouchEnd={onTouchEnd}
                     >
-                      {!hasEntryDirectlyBelow && (
+                      {!hasEntryDirectlyBelow && !isCompact && (
                         <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-2 rounded-full bg-muted-foreground/30 group-hover/resize:bg-primary/60 transition-colors" />
                       )}
                     </div>
                   )}
-                  {!canDrag && isLocked && !flightGroup && !isTransport && !isCompact && (
+                  {!canDrag && isLocked && !flightGroup && !isTransport && (
                     <div
                       data-resize-handle
                       className="absolute -bottom-1 left-0 right-0 z-20 h-5 cursor-not-allowed touch-none"
                       onMouseDown={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                       onTouchStart={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
                     >
-                      {!hasEntryDirectlyBelow && (
+                      {!hasEntryDirectlyBelow && !isCompact && (
                         <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-2 rounded-full bg-muted-foreground/10" />
                       )}
                     </div>
