@@ -304,10 +304,10 @@ const EntryCard = ({
   // ─── Duration pill styles ───
   const durationPillStyle = (size: 'l' | 'm' | 's' | 'xs') => {
     const sizes = {
-      l: { fontSize: 14, padding: '5px 14px', top: 10, right: 10 },
-      m: { fontSize: 12, padding: '4px 11px', top: 7, right: 7 },
-      s: { fontSize: 11, padding: '3px 9px', top: 5, right: 5 },
-      xs: { fontSize: 10, padding: '2px 7px', top: 3, right: 4 },
+      l: { fontSize: 10, padding: '2px 6px', top: 8, right: 8 },
+      m: { fontSize: 10, padding: '2px 6px', top: 7, right: 7 },
+      s: { fontSize: 10, padding: '2px 6px', top: 5, right: 5 },
+      xs: { fontSize: 9, padding: '2px 5px', top: 3, right: 4 },
     };
     const s = sizes[size];
     const base: React.CSSProperties = {
@@ -551,9 +551,11 @@ const EntryCard = ({
     return cardBase('compact', (
       <>
         {cornerFlag(9, '2px 4px')}
-        <div style={durationPillStyle('xs')}>{durationLabel}</div>
         <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[75%] px-2', textColor)}>
-          <span className="text-[12px] font-bold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{option.name}</span>
+          <span className="text-[11px] font-semibold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{option.name}</span>
+          <span className={cn('text-[9px] whitespace-nowrap shrink-0', faintTextColor)}>
+            {formatTime(startTime)} <span className="font-bold">{durationLabel}</span>
+          </span>
         </div>
         {isCheckOut && (
           <span className={cn('absolute bottom-0.5 left-7 z-10 text-[8px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
@@ -567,11 +569,11 @@ const EntryCard = ({
     return cardBase('medium', (
       <>
         {cornerFlag(11, '3px 5px')}
-        <div style={durationPillStyle('s')}>{durationLabel}</div>
         <div className={cn('absolute bottom-0 right-0 top-0 z-10 text-right flex flex-col justify-center max-w-[72%] px-2.5 py-1.5', textColor)}>
-          <span className="text-[13px] font-bold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{displayName}</span>
+          <span className="text-xs font-semibold truncate" style={{ textShadow: firstImage ? '0 1px 2px rgba(0,0,0,0.2)' : undefined }}>{displayName}</span>
           <span className={cn('text-[10px]', faintTextColor)}>
             {formatTime(startTime)} — {formatTime(endTime)}
+            <span className="ml-1 font-bold">{durationLabel}</span>
           </span>
         </div>
         {isCheckIn && (
@@ -589,12 +591,11 @@ const EntryCard = ({
     return cardBase('condensed', (
       <>
         {cornerFlag(13, '5px 7px')}
-        <div style={durationPillStyle('m')}>{durationLabel}</div>
         <div className={cn('absolute bottom-0 right-0 z-10 text-right max-w-[68%] px-3 py-2.5', textColor)} style={{ pointerEvents: 'none' }}>
           {isCheckIn && (
             <span className={cn('text-[8px] uppercase tracking-wider font-semibold block mb-0.5', faintTextColor)}>CHECK-IN</span>
           )}
-          <h3 className="text-[14px] font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
+          <h3 className="text-sm font-bold leading-tight truncate" style={{ textShadow: firstImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
             {displayName}
           </h3>
           {(option as any).rating != null && (
@@ -602,9 +603,17 @@ const EntryCard = ({
               ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
             </p>
           )}
-          <p className={cn('text-[10px]', faintTextColor)}>
-            {formatTime(startTime)} — {formatTime(endTime)}
-          </p>
+          <div className="flex items-center justify-between gap-1">
+            <span className={cn('text-[10px]', faintTextColor)}>
+              {formatTime(startTime)} — {formatTime(endTime)}
+            </span>
+            <span className={cn(
+              'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+              firstImage ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
+            )}>
+              {durationLabel}
+            </span>
+          </div>
         </div>
         {isCheckOut && (
           <span className={cn('absolute bottom-1 left-2.5 z-10 text-[10px] font-semibold uppercase tracking-wider', faintTextColor)}>checkout</span>
@@ -630,13 +639,13 @@ const EntryCard = ({
           </span>
         )}
         <h3
-          className="text-[17px] font-bold leading-tight mb-1"
+          className="text-lg font-bold leading-tight mb-1"
           style={{ textShadow: firstImage ? '0 1px 4px rgba(0,0,0,0.3)' : undefined }}
         >
           {displayName}
         </h3>
         {!isTransfer && !isProcessing && (option as any).rating != null && (
-          <p className={cn('text-[11px] mb-0.5', subTextColor)}>
+          <p className={cn('text-[10px] mb-0.5', subTextColor)}>
             ⭐ {(option as any).rating} ({Number((option as any).user_rating_count ?? 0).toLocaleString()})
           </p>
         )}

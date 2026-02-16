@@ -18,7 +18,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import AIRPORTS from '@/lib/airports';
-import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, AlertTriangle, RefreshCw, Phone, ChevronDown, Navigation, Car } from 'lucide-react';
+import { Loader2, Upload, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, AlertTriangle, RefreshCw, Phone, ChevronDown, ChevronLeft, ChevronRight, Navigation, Car } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
@@ -296,6 +296,7 @@ const EntrySheet = ({
   const [viewApplying, setViewApplying] = useState(false);
   const [notesValue, setNotesValue] = useState('');
   const [notesDirty, setNotesDirty] = useState(false);
+  const [heroIndex, setHeroIndex] = useState(0);
 
   useEffect(() => {
     if (mode === 'view' && entry) {
@@ -1215,23 +1216,49 @@ const EntrySheet = ({
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
         <DrawerContent className="max-h-[90vh] overflow-y-auto">
-          {/* Hero image gallery at top */}
-          <div className="w-full">
-            {images.length > 0 ? (
-              <div className="relative">
-                <ImageGallery images={images} />
-                {isEditor && option.category !== 'transfer' && (
-                  <div className="absolute bottom-3 right-3 z-30">
-                    <ImageUploader optionId={option.id} currentCount={images.length} onUploaded={onSaved} />
+          {/* Hero image gallery at top — fixed 200px height */}
+          {images.length > 0 ? (
+            <div className="relative w-full overflow-hidden" style={{ height: 200 }}>
+              {(() => {
+                const sorted = [...images].sort((a, b) => a.sort_order - b.sort_order);
+                const idx = heroIndex < sorted.length ? heroIndex : 0;
+                return (
+                  <img
+                    src={sorted[idx]?.image_url}
+                    alt="Hero"
+                    className="h-full w-full object-cover"
+                  />
+                );
+              })()}
+              {images.length > 1 && (
+                <>
+                  <button onClick={() => setHeroIndex(prev => prev > 0 ? prev - 1 : images.length - 1)}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-foreground/40 p-1 text-background backdrop-blur-sm">
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button onClick={() => setHeroIndex(prev => prev < images.length - 1 ? prev + 1 : 0)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-foreground/40 p-1 text-background backdrop-blur-sm">
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                  <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1">
+                    {images.map((_, i) => (
+                      <button key={i} onClick={() => setHeroIndex(i)}
+                        className={cn('h-1.5 rounded-full transition-all', i === heroIndex ? 'w-4 bg-white' : 'w-1.5 bg-white/50')} />
+                    ))}
                   </div>
-                )}
-              </div>
-            ) : isEditor && option.category !== 'transfer' ? (
-              <div className="w-full aspect-[16/9] bg-muted/30 flex items-center justify-center">
-                <ImageUploader optionId={option.id} currentCount={0} onUploaded={onSaved} />
-              </div>
-            ) : null}
-          </div>
+                </>
+              )}
+              {isEditor && option.category !== 'transfer' && (
+                <div className="absolute bottom-3 right-3 z-30">
+                  <ImageUploader optionId={option.id} currentCount={images.length} onUploaded={onSaved} />
+                </div>
+              )}
+            </div>
+          ) : isEditor && option.category !== 'transfer' ? (
+            <div className="w-full bg-muted/30 flex items-center justify-center" style={{ height: 120 }}>
+              <ImageUploader optionId={option.id} currentCount={0} onUploaded={onSaved} />
+            </div>
+          ) : null}
 
           <div className="px-4 pb-4 pt-2 space-y-4">
             {/* Category badge + title */}
