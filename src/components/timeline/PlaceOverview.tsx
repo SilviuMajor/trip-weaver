@@ -11,7 +11,7 @@ import { toast } from '@/hooks/use-toast';
 import { utcToLocal, localToUTC } from '@/lib/timezoneUtils';
 import { haversineKm } from '@/lib/distance';
 import { cn } from '@/lib/utils';
-import { Loader2, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, RefreshCw, Phone, ChevronDown, Navigation, Car } from 'lucide-react';
+import { Loader2, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, RefreshCw, Phone, ChevronDown, Navigation, Car, AlertTriangle } from 'lucide-react';
 import InlineField from './InlineField';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import ImageGallery from './ImageGallery';
@@ -19,7 +19,7 @@ import ImageUploader from './ImageUploader';
 import MapPreview from './MapPreview';
 import RouteMapPreview from './RouteMapPreview';
 import VoteButton from './VoteButton';
-import { decodePolylineEndpoint, formatPriceLevel, getEntryDayHours, formatTimeInTz, getTzAbbr } from '@/lib/entryHelpers';
+import { decodePolylineEndpoint, formatPriceLevel, getEntryDayHours, checkOpeningHoursConflict, formatTimeInTz, getTzAbbr } from '@/lib/entryHelpers';
 import type { Trip, EntryWithOptions, EntryOption } from '@/types/trip';
 
 // ─── Place Details Section ───
@@ -36,6 +36,13 @@ const PlaceDetailsSection = ({ option, entryStartTime }: { option: EntryOption; 
   const priceLevelDisplay = formatPriceLevel(priceLevel);
   const { text: entryDayHoursText, dayName, googleIndex } = getEntryDayHours(openingHours, entryStartTime);
 
+  // Closed-day warning: only for entries with a real scheduled time (not 2099 reference)
+  const closedWarning = (() => {
+    if (!entryStartTime || entryStartTime.startsWith('2099')) return null;
+    const { isConflict, message } = checkOpeningHoursConflict(openingHours, entryStartTime);
+    return isConflict ? message : null;
+  })();
+
   return (
     <div className="space-y-2">
       {(rating != null || priceLevelDisplay) && (
@@ -51,6 +58,13 @@ const PlaceDetailsSection = ({ option, entryStartTime }: { option: EntryOption; 
           {priceLevelDisplay && (
             <span className="text-sm">{priceLevelDisplay}</span>
           )}
+        </div>
+      )}
+
+      {closedWarning && (
+        <div className="flex items-center gap-2 rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive font-medium">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span>{closedWarning}</span>
         </div>
       )}
 
