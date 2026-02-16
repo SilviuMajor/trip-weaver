@@ -108,6 +108,10 @@
 
 }
 
+/* Scrollbar hide utility */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
 /* Prevent text selection and callout on timeline interactions */
 [data-timeline-area],
 [data-timeline-area] *,
