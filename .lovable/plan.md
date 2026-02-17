@@ -1,46 +1,76 @@
 
-# Transport Recalculation After Chain Shift
+
+# Group Drop + Transport Recalculation
 
 ## Overview
-After a chain shift (from bottom-edge resize), transport entries have moved to new times. Their routes may differ based on departure time. This adds a background recalculation that updates transport durations and optionally shifts entries further if transport grows longer.
+When a group drag (from Prompt 5) is released, all entries in the block move together by the same time delta. Transports within the group are recalculated in the background. Snap detection also works for group edges.
 
 ## Changes
 
-### File: `src/pages/Timeline.tsx`
+### 1. `ContinuousTimeline.tsx` -- Add `onGroupDrop` prop and group commit logic
 
-**1. Add `recalculateTransports` callback (~after `handleChainShift`, line 1040)**
+**Props interface (line ~72):**
+- Add `onGroupDrop?: (entryIds: string[], deltaMs: number) => void;`
 
-A new `useCallback` that:
-- Takes an array of transport entry IDs
-- For each transport, reads its `departure_location` and `arrival_location` from `options[0]`
-- Calls `google-directions` edge function with the new `start_time` as departure time, requesting all modes
-- On response, rounds duration to nearest 5 minutes, updates `entries.end_time` and `entry_options` (distance, polyline, transport_modes)
-- If the new transport end time overlaps the next entry in the block, shifts subsequent entries forward (expanding only, never contracting)
-- Calls `fetchData()` at the end to refresh UI
-- Errors are logged but don't block the user
+**Destructure the new prop (line ~117)**
 
-**2. Call `recalculateTransports` at end of `handleChainShift` (line 1039)**
+**`handleDragCommit` (line ~260):**
+- Add an early check: if `dragState.dragMode === 'group'` and `dragState.blockEntryIds.length > 0`:
+  - Compute `deltaHours = newStartGH - dragState.originalStartHour`
+  - Compute `deltaMs = deltaHours * 3600000`
+  - Call `onGroupDrop?.(dragState.blockEntryIds, deltaMs)`
+  - Return early (skip individual move logic)
 
-After the existing `await fetchData()` call:
-- Filter `entryIdsToShift` to find transport entries (those with `options[0]?.category === 'transfer'`)
-- If any exist, call `recalculateTransports(transportIds)` without awaiting (non-blocking)
+**Snap detection (`snapTarget` useMemo, line ~524):**
+- When `dragState.dragMode === 'group'`, compute group bounds instead of single-card bounds:
+  - Find the first and last entries in `dragState.blockEntryIds` from `sortedEntries`
+  - Calculate group start/end global hours plus the drag delta
+  - Use group top edge for "snap above" and group bottom edge for "snap below" detection
+  - This allows the entire block's edges to snap to nearby cards
 
-**3. Import `getBlock` and `getEntriesAfterInBlock`**
+**Snap release for groups (line ~282):**
+- When `dragState.dragMode === 'group'` and `snapTargetRef.current` is active:
+  - For `side === 'below'`: use the LAST entry in the block as the dragged entry for `onSnapRelease`
+  - For `side === 'above'`: use the FIRST entry in the block as the dragged entry for `onSnapRelease`
+  - Still call `onGroupDrop` for the positional shift of all entries
+  - Then call `onSnapRelease` for transport creation at the snap edge
 
-Add import from `@/lib/blockDetection` (may already be imported for chain shift logic -- will verify and add if needed).
+**Ghost/floating visuals (lines ~1811-1903):**
+- When `dragState.dragMode === 'group'`:
+  - Ghost outline covers entire block height (first entry start to last entry end, shifted by delta)
+  - Floating card area covers the full block height
 
-## Behavior
+### 2. `Timeline.tsx` -- Implement `handleGroupDrop`
+
+**New callback (after `handleChainShift`/`recalculateTransports`, around line 1115):**
+
+```
+handleGroupDrop(entryIds: string[], deltaMs: number)
+```
+
+- For each entry ID, find the current entry and compute new start/end by adding `deltaMs`
+- Batch update all entries in the database
+- Register undo/redo action storing old and new times for all entries
+- Call `fetchData()` to refresh
+- Fire-and-forget: filter transport entries from `entryIds` and call `recalculateTransports` for them
+
+**Pass prop (in the ContinuousTimeline JSX):**
+- Add `onGroupDrop={handleGroupDrop}`
+
+### 3. `useDragResize.ts` -- Expose `dragMode` and `blockEntryIds`
+
+Note: Prompt 5 adds `dragMode` and `blockEntryIds` to `DragState`. This prompt assumes those fields exist. If Prompt 5 has not been implemented yet, the `dragMode` field will default to `undefined`, and all group-related code paths will be skipped (safe fallback). The group drop logic only activates when `dragState.dragMode === 'group'`.
+
+## Behavior Summary
 
 | Scenario | Result |
 |----------|--------|
-| Resize shifts a transport | Transport duration recalculated in background |
-| Transport becomes longer | Entries after it shift further down automatically |
-| Transport becomes shorter | Gap shrinks but entries don't move back (no contraction) |
-| Multiple transports in block | All recalculate in sequence |
-| API error | Logged to console, no user-facing error |
+| Group drag released (no snap) | All entries shift by deltaMs, transports recalculate |
+| Group drag released near a card (snap) | Entries shift to snapped position + transport created at snap edge |
+| Ctrl+Z after group drop | All entries return to original positions |
+| Individual drag (dragMode !== 'group') | Existing behavior unchanged |
 
-## No changes to:
-- `ContinuousTimeline.tsx`
-- `blockDetection.ts`
-- Database schema
-- Edge functions
+## Files Modified
+- `src/components/timeline/ContinuousTimeline.tsx` -- new prop, group commit/snap logic, group ghost visuals
+- `src/pages/Timeline.tsx` -- new `handleGroupDrop` callback
+- No changes to `useDragResize.ts`, `blockDetection.ts`, or edge functions
