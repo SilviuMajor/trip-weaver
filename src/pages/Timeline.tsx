@@ -1004,6 +1004,41 @@ const Timeline = () => {
     }
   }, [entries, tripId, trip, fetchData, pushAction]);
 
+  // ─── Chain Shift handler (block resize) ───
+  const handleChainShift = useCallback(async (resizedEntryId: string, entryIdsToShift: string[], deltaMs: number) => {
+    const updates = entryIdsToShift.map(id => {
+      const entry = entries.find(e => e.id === id);
+      if (!entry) return null;
+      return {
+        id,
+        oldStart: entry.start_time,
+        oldEnd: entry.end_time,
+        newStart: new Date(new Date(entry.start_time).getTime() + deltaMs).toISOString(),
+        newEnd: new Date(new Date(entry.end_time).getTime() + deltaMs).toISOString(),
+      };
+    }).filter(Boolean) as { id: string; oldStart: string; oldEnd: string; newStart: string; newEnd: string }[];
+
+    for (const u of updates) {
+      await supabase.from('entries').update({ start_time: u.newStart, end_time: u.newEnd }).eq('id', u.id);
+    }
+
+    pushAction({
+      description: 'Chain resize',
+      undo: async () => {
+        for (const u of updates) {
+          await supabase.from('entries').update({ start_time: u.oldStart, end_time: u.oldEnd }).eq('id', u.id);
+        }
+      },
+      redo: async () => {
+        for (const u of updates) {
+          await supabase.from('entries').update({ start_time: u.newStart, end_time: u.newEnd }).eq('id', u.id);
+        }
+      },
+    });
+
+    await fetchData();
+  }, [entries, pushAction, fetchData]);
+
   // ─── Proximity toast helper ───
   const checkProximityAndPrompt = useCallback((droppedEntryId: string) => {
     const sorted = [...scheduledEntries].sort(
@@ -2556,8 +2591,9 @@ const Timeline = () => {
                   onCurrentDayChange={setCurrentDayIndex}
                   onTrimDay={handleTrimDay}
                   onMagnetSnap={handleMagnetSnap}
-                  onSnapRelease={handleSnapRelease}
-                  pixelsPerHour={pixelsPerHour}
+                   onSnapRelease={handleSnapRelease}
+                   onChainShift={handleChainShift}
+                   pixelsPerHour={pixelsPerHour}
                   onResetZoom={() => setZoomLevel(1.0)}
                   binRef={binRef}
                   onDragActiveChange={(active, entryId) => {
