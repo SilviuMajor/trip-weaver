@@ -54,6 +54,7 @@ interface ExploreViewProps {
   onAddAtTime?: (place: ExploreResult, startTime: string, endTime: string) => void;
   initialOrigin?: { name: string; lat: number; lng: number } | null;
   embedded?: boolean;
+  initialSearchQuery?: string | null;
 }
 
 // ─── Explore categories (exclude transport types) ───
@@ -188,6 +189,7 @@ const ExploreView = ({
   onAddAtTime,
   initialOrigin,
   embedded = false,
+  initialSearchQuery,
 }: ExploreViewProps) => {
   const [results, setResults] = useState<ExploreResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -269,6 +271,13 @@ const ExploreView = ({
     }
     return [...types];
   }, [selectedCategories]);
+
+  // Apply initial search query from parent
+  useEffect(() => {
+    if (initialSearchQuery && open) {
+      setSearchQuery(initialSearchQuery);
+    }
+  }, [initialSearchQuery, open]);
 
   // Resolve origin
   useEffect(() => {

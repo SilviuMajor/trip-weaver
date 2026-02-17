@@ -17,7 +17,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import AIRPORTS from '@/lib/airports';
-import { Loader2, Upload, Check, Clock, AlertTriangle } from 'lucide-react';
+import { Loader2, Upload, Check, Clock, AlertTriangle, Search } from 'lucide-react';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import PhotoStripPicker from './PhotoStripPicker';
 import RouteMapPreview from './RouteMapPreview';
@@ -77,7 +77,7 @@ interface EntrySheetProps {
   gapContext?: { fromName: string; toName: string; fromAddress: string; toAddress: string } | null;
   onTransportConflict?: (blockDuration: number, gapMinutes: number) => void;
   onHotelSelected?: () => void;
-  onExploreRequest?: (categoryId: string) => void;
+  onExploreRequest?: (categoryId: string | null, searchQuery?: string) => void;
 }
 
 type Step = 'category' | 'details';
@@ -917,6 +917,21 @@ const EntrySheet = ({
                   </div>
                 </button>
               )}
+
+              {/* Quick search bar — goes straight to Explore */}
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Search for a place..."
+                  className="w-full rounded-xl border border-border bg-card px-4 py-3 pl-10 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                      onExploreRequest?.(null, e.currentTarget.value.trim());
+                    }
+                  }}
+                />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              </div>
 
               <div className="grid grid-cols-3 gap-2">
                 {allCategories.map((cat) => (
