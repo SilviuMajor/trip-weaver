@@ -1,85 +1,64 @@
 
 
-# Replace TransportConnector with Thin Inline Connectors
+# Remove Magnet System + Transport Gap Buttons
 
 ## Overview
-Rewrite TransportConnector.tsx as a minimal inline text connector (dot-line + emoji + duration + destination + cog icon). Then add auto-connector rendering in ContinuousTimeline so connectors appear between ALL adjacent scheduled cards, and hide transport entries from the card list entirely.
+Remove the entire magnet/snap system and transport gap buttons from both Timeline.tsx and ContinuousTimeline.tsx. The auto-connector system (from Prompt 2) replaces their function.
 
 ## Changes
 
-### 1. TransportConnector.tsx -- Complete rewrite
+### Timeline.tsx
 
-Delete all existing content. Replace with a stateless component that accepts simple props:
-- `mode: string` -- transport mode key
-- `durationMin: number` -- travel duration
-- `destinationName: string` -- where you're going (first part before comma)
-- `distanceKm?: number | null`
-- `isLoading?: boolean` -- shows "Calculating..." when no transport data exists
-- `onCogTap: () => void` -- opens the transport entry detail
-- `height?: number` -- defaults to 24px, min 20px
+**1. Delete `handleMagnetSnap` (lines 705-919)**
+The entire `useCallback` that handles magnet snap logic (transport-source path, transport-exists case, no-transport case with directions API call). ~215 lines removed.
 
-Layout: horizontal flex row with:
-1. Dot-line connector (thin vertical line + dot, 8px wide, 40% opacity)
-2. Info text: mode emoji + bold duration + "to [shortDest]" (all 10-11px, muted)
-3. Settings cog icon (ml-auto, 3x3, very subtle)
+**2. Delete `checkProximityAndPrompt` (lines 1179-1227)**
+The proximity toast callback that asks "Generate transport & snap?" ~49 lines removed.
 
-No colored background strip. No pill with shadow. Just inline text.
+**3. Remove `checkProximityAndPrompt` call sites:**
+- Line 1631: Delete `checkProximityAndPrompt(entryId);` from `handleEntryTimeChange`
+- Line 1910: Delete `checkProximityAndPrompt(placedEntryId);` from `handleDropOnTimeline`
 
-### 2. ContinuousTimeline.tsx -- Add `connectorData` memo
+**4. Delete `handleAddTransport` (lines 1336-1365)**
+Opens EntrySheet for manual transport creation from gap buttons. No longer needed.
 
-After the existing `visibleEntries` memo (line ~528), add a new `connectorData` useMemo that iterates `visibleEntries` pairs and for each adjacent pair:
+**5. Delete `handleGenerateTransportDirect` (lines 1367-1483)**
+Auto-generates transport from gap buttons. No longer needed.
 
-- Checks if a transport entry exists between them (using `sortedEntries.find` where `category === 'transfer'` and `from_entry_id`/`to_entry_id` match)
-- If transport entry exists: extract mode (from option name), duration (from timestamps), destination name, distance, and store the `transportEntryId`
-- If no transport entry: create a placeholder connector with `durationMin: 0` and `isLoading: true`
+**6. Remove prop passing to ContinuousTimeline (lines 2815-2816, 2836):**
+- Delete `onAddTransport={handleAddTransport}`
+- Delete `onGenerateTransport={handleGenerateTransportDirect}`
+- Delete `onMagnetSnap={handleMagnetSnap}`
 
-Returns an array of connector objects with `fromEntryId`, `toEntryId`, `fromEndGH`, `toStartGH`, mode, duration, destination, distance, and optional `transportEntryId`.
+### ContinuousTimeline.tsx
 
-### 3. ContinuousTimeline.tsx -- Render connectors
+**7. Remove from interface + destructuring:**
+- `onAddTransport` prop (line 47)
+- `onGenerateTransport` prop (line 48)
+- `onMagnetSnap` prop (line 62)
+- Corresponding destructuring lines (98-99, 113)
 
-After the gap buttons section (line ~1231) and before the entry cards section, render the `connectorData` array as absolutely-positioned TransportConnector elements:
+**8. Delete `magnetLoadingId` state (line 465)**
 
-- Position: `top = fromEndGH * pixelsPerHour`, height = gap in pixels (min 20px)
-- If gap is tiny, center the connector vertically around the boundary
-- Each connector gets `z-[12]` so it sits between the gap buttons and card layer
-- `onCogTap` opens the transport entry via `onCardTap` if a `transportEntryId` exists
+**9. Delete the `magnetState` IIFE (lines 1383-1431)**
+The entire computation block that determines whether to show magnet buttons, checks for transport entries after, locked state, etc.
 
-### 4. ContinuousTimeline.tsx -- Hide transport entries from card rendering
+**10. Delete magnet button on flight groups (lines 1598-1626)**
+The `{magnetState.showMagnet && (` block inside the flight group card rendering.
 
-At the top of the card render loop (line ~1287, after `const isTransport = isTransportEntry(entry)`), add an early return:
+**11. Delete magnet button on regular cards (lines 1687-1714)**
+The `{magnetState.showMagnet && (` block inside the regular card rendering.
 
-```
-if (isTransport) return null;
-```
+**12. Replace transport gap button with "+ Add something" (lines 1229-1245)**
+Remove the `isTransportGap` variable and the Bus button branch. Replace the ternary so all gaps just show "+ Add something" button(s):
+- Gaps > 6 hours: dual buttons (top and bottom) -- already exists
+- Gaps <= 6 hours: single centered button -- already exists
+- Remove the transport-specific branch entirely
 
-This removes the entire old transport card rendering branch (the colored strip TransportConnector + magnet button). Transport entries are now represented only by the inline connectors from step 3.
-
-### 5. ContinuousTimeline.tsx -- Clean up gap buttons
-
-In the gap buttons section (line ~1162), remove the `hasTransferBetween` check that skips rendering gap buttons when a transport entry exists. Since transport entries are now inline connectors, gap buttons should still appear where appropriate. Actually -- we should keep the check but also skip gaps where a connector already exists (they overlap visually). The connectors replace the transport button, so modify the gap logic:
-- When `hasTransferBetween` returns true, skip the gap entirely (connector handles it)
-- When `gapMin <= 5`, skip (too small)
-- Otherwise render gap buttons as before
-
-This is the existing behavior, so no change needed here.
-
-### 6. Import cleanup
-
-- Remove unused imports from TransportConnector.tsx (cn, EntryWithOptions, EntryOption, TransportMode)
-- Add `Settings` import from lucide-react in TransportConnector.tsx
-- In ContinuousTimeline.tsx, the existing TransportConnector import stays but now points to the new component
-
-## Technical Details
-
-**Transport detection for connectors**: Uses the same `isTransportEntry` helper that checks for 'transfer' category and transport-related option names.
-
-**Mode detection**: Same logic as old TransportConnector -- checks if option name starts with walk/drive/transit/cycle/bicycle.
-
-**Connector height**: Uses actual gap pixels between cards. Minimum 20px ensures visibility even when cards are nearly adjacent.
-
-**No magnet button on connectors**: The old transport card had a magnet snap button. This is removed -- magnet remains only on regular entry cards. The cog icon on the connector opens the transport entry detail where users can edit transport.
+**13. Clean up lucide-react import (line 9):**
+Remove `Bus`, `Magnet`, `Loader2` from the import. Keep `Plus`, `Lock`, `LockOpen`, `Trash2`.
 
 ## Files Modified
-- `src/components/timeline/TransportConnector.tsx` -- complete rewrite with new props/UI
-- `src/components/timeline/ContinuousTimeline.tsx` -- add connectorData memo, render connectors, hide transport cards from card loop
+- `src/pages/Timeline.tsx` -- delete handleMagnetSnap, checkProximityAndPrompt, handleAddTransport, handleGenerateTransportDirect; remove prop passing
+- `src/components/timeline/ContinuousTimeline.tsx` -- remove magnet state/buttons, transport gap button, unused imports and props
 
