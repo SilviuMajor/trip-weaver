@@ -1114,6 +1114,54 @@ const Timeline = () => {
     await fetchData();
   }, [entries, trip, fetchData]);
 
+  // ─── Group drop handler ───
+  const handleGroupDrop = useCallback(async (entryIds: string[], deltaMs: number) => {
+    if (deltaMs === 0) return;
+
+    const updates = entryIds.map(id => {
+      const entry = entries.find(e => e.id === id);
+      if (!entry) return null;
+      return {
+        id,
+        oldStart: entry.start_time,
+        oldEnd: entry.end_time,
+        newStart: new Date(new Date(entry.start_time).getTime() + deltaMs).toISOString(),
+        newEnd: new Date(new Date(entry.end_time).getTime() + deltaMs).toISOString(),
+      };
+    }).filter(Boolean) as { id: string; oldStart: string; oldEnd: string; newStart: string; newEnd: string }[];
+
+    if (updates.length === 0) return;
+
+    for (const u of updates) {
+      await supabase.from('entries').update({ start_time: u.newStart, end_time: u.newEnd }).eq('id', u.id);
+    }
+
+    pushAction({
+      description: 'Move group',
+      undo: async () => {
+        for (const u of updates) {
+          await supabase.from('entries').update({ start_time: u.oldStart, end_time: u.oldEnd }).eq('id', u.id);
+        }
+      },
+      redo: async () => {
+        for (const u of updates) {
+          await supabase.from('entries').update({ start_time: u.newStart, end_time: u.newEnd }).eq('id', u.id);
+        }
+      },
+    });
+
+    await fetchData();
+
+    // Recalculate transports in the group (background)
+    const transportIds = entryIds.filter(id => {
+      const entry = entries.find(e => e.id === id);
+      return entry?.options[0]?.category === 'transfer';
+    });
+    if (transportIds.length > 0) {
+      recalculateTransports(transportIds);
+    }
+  }, [entries, pushAction, fetchData, recalculateTransports]);
+
   // ─── Proximity toast helper ───
   const checkProximityAndPrompt = useCallback((droppedEntryId: string) => {
     const sorted = [...scheduledEntries].sort(
@@ -2668,7 +2716,8 @@ const Timeline = () => {
                   onMagnetSnap={handleMagnetSnap}
                    onSnapRelease={handleSnapRelease}
                    onChainShift={handleChainShift}
-                   pixelsPerHour={pixelsPerHour}
+                   onGroupDrop={handleGroupDrop}
+                    pixelsPerHour={pixelsPerHour}
                   onResetZoom={() => setZoomLevel(1.0)}
                   binRef={binRef}
                   onDragActiveChange={(active, entryId) => {
