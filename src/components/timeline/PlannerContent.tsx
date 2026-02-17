@@ -20,6 +20,9 @@ interface PlannerContentProps {
   onDuplicate?: (entry: EntryWithOptions) => void;
   onInsert?: (entry: EntryWithOptions) => void;
   onTouchDragStart?: (entry: EntryWithOptions, initialPosition: { x: number; y: number }) => void;
+  onSidebarDragStart?: (entry: EntryWithOptions, position: { x: number; y: number }) => void;
+  onSidebarDragMove?: (x: number, y: number) => void;
+  onSidebarDragEnd?: () => void;
 }
 
 interface DeduplicatedEntry {
@@ -42,6 +45,9 @@ const PlannerContent = ({
   onDuplicate,
   onInsert,
   onTouchDragStart,
+  onSidebarDragStart,
+  onSidebarDragMove,
+  onSidebarDragEnd,
 }: PlannerContentProps) => {
   const isMobile = useIsMobile();
   const { toast } = useToast();
@@ -225,6 +231,9 @@ const PlannerContent = ({
                     onDuplicate={isFlight ? undefined : onDuplicate}
                     onInsert={isFlight ? undefined : onInsert}
                     onTouchDragStart={onTouchDragStart}
+                    onSidebarDragStart={onSidebarDragStart}
+                    onSidebarDragMove={onSidebarDragMove}
+                    onSidebarDragEnd={onSidebarDragEnd}
                     usageCount={usageCount}
                     isFlight={isFlight}
                     compact={isCompact}
@@ -259,6 +268,9 @@ const PlannerContent = ({
                 onDuplicate={isFlight ? undefined : onDuplicate}
                 onInsert={isFlight ? undefined : onInsert}
                 onTouchDragStart={onTouchDragStart}
+                onSidebarDragStart={onSidebarDragStart}
+                onSidebarDragMove={onSidebarDragMove}
+                onSidebarDragEnd={onSidebarDragEnd}
                 usageCount={usageCount}
                 isFlight={isFlight}
               />

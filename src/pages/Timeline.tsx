@@ -153,13 +153,16 @@ const Timeline = () => {
   // Floating place for "Add to Timeline" mode
   const [floatingPlaceForTimeline, setFloatingPlaceForTimeline] = useState<ExploreResult | null>(null);
 
-  // Touch drag state (mobile planner → timeline)
-  const [touchDragEntry, setTouchDragEntry] = useState<EntryWithOptions | null>(null);
-  const [touchDragPosition, setTouchDragPosition] = useState<{ x: number; y: number } | null>(null);
-  const [touchDragGlobalHour, setTouchDragGlobalHour] = useState<number | null>(null);
-  const [touchDragHidePlanner, setTouchDragHidePlanner] = useState(false);
-  
-  const touchDragTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Unified sidebar drag state (replaces old touch drag)
+  const [sidebarDrag, setSidebarDrag] = useState<{
+    entry: EntryWithOptions;
+    clientX: number;
+    clientY: number;
+    globalHour: number | null;
+  } | null>(null);
+  const [sidebarDragHidePlanner, setSidebarDragHidePlanner] = useState(false);
+  const sidebarDragTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sidebarDragRef = useRef<typeof sidebarDrag>(null);
 
   // Travel calculation
   const { calculateTravel } = useTravelCalculation();
@@ -1968,103 +1971,75 @@ const Timeline = () => {
     setFloatingPlaceForTimeline(place);
   }, []);
 
-  // Touch drag from planner sidebar (mobile)
-  const touchDragGlobalHourRef = useRef<number | null>(null);
-  const touchDragEntryRef = useRef<EntryWithOptions | null>(null);
-
-  // Keep refs in sync with state
+  // Unified sidebar drag callbacks
   useEffect(() => {
-    touchDragGlobalHourRef.current = touchDragGlobalHour;
-  }, [touchDragGlobalHour]);
-  useEffect(() => {
-    touchDragEntryRef.current = touchDragEntry;
-  }, [touchDragEntry]);
+    sidebarDragRef.current = sidebarDrag;
+  }, [sidebarDrag]);
 
-  const handleTouchDragStart = useCallback((entry: EntryWithOptions, initialPosition: { x: number; y: number }) => {
-    setTouchDragEntry(entry);
-    setTouchDragPosition(initialPosition);
-    setTouchDragHidePlanner(true);
+  const handleSidebarDragStartUnified = useCallback((entry: EntryWithOptions, pos: { x: number; y: number }) => {
+    setSidebarDrag({ entry, clientX: pos.x, clientY: pos.y, globalHour: null });
+    setSidebarDragHidePlanner(true);
     // 5-second cancel timeout
-    if (touchDragTimeoutRef.current) clearTimeout(touchDragTimeoutRef.current);
-    touchDragTimeoutRef.current = setTimeout(() => {
-      cleanupTouchDrag();
+    if (sidebarDragTimeoutRef.current) clearTimeout(sidebarDragTimeoutRef.current);
+    sidebarDragTimeoutRef.current = setTimeout(() => {
+      setSidebarDrag(null);
+      setSidebarDragHidePlanner(false);
+      setSidebarOpen(false);
     }, 5000);
   }, []);
 
-  const cleanupTouchDrag = useCallback(() => {
-    setTouchDragEntry(null);
-    setTouchDragPosition(null);
-    setTouchDragGlobalHour(null);
-    setTouchDragHidePlanner(false);
+  const handleSidebarDragMoveUnified = useCallback((x: number, y: number) => {
+    // Reset cancel timeout on movement
+    if (sidebarDragTimeoutRef.current) {
+      clearTimeout(sidebarDragTimeoutRef.current);
+      sidebarDragTimeoutRef.current = null;
+    }
+
+    // Calculate which global hour the pointer is over
+    const timelineEl = document.querySelector('[data-timeline-area]');
+    let globalHour: number | null = null;
+    if (timelineEl) {
+      const rect = timelineEl.getBoundingClientRect();
+      const relativeY = y - rect.top;
+      const rawGlobalHour = relativeY / pixelsPerHour;
+      const currentDrag = sidebarDragRef.current;
+      const entryDurationHours = currentDrag?.entry
+        ? (new Date(currentDrag.entry.end_time).getTime() -
+           new Date(currentDrag.entry.start_time).getTime()) / 3600000
+        : 1;
+      const centredHour = rawGlobalHour - (entryDurationHours / 2);
+      const snapped = Math.round(centredHour * 4) / 4;
+      globalHour = snapped >= 0 ? snapped : 0;
+    }
+
+    setSidebarDrag(prev => prev ? { ...prev, clientX: x, clientY: y, globalHour } : null);
+
+    // Auto-scroll near edges
+    const SCROLL_ZONE = 80;
+    const SCROLL_SPEED = 8;
+    const scrollEl = mainScrollRef.current;
+    if (scrollEl) {
+      if (y < SCROLL_ZONE) {
+        scrollEl.scrollBy(0, -SCROLL_SPEED);
+      } else if (y > window.innerHeight - SCROLL_ZONE) {
+        scrollEl.scrollBy(0, SCROLL_SPEED);
+      }
+    }
+  }, [pixelsPerHour]);
+
+  const handleSidebarDragEndUnified = useCallback(() => {
+    const drag = sidebarDragRef.current;
+    if (drag && drag.globalHour !== null) {
+      handleDropOnTimeline(drag.entry.id, drag.globalHour);
+    }
+    setSidebarDrag(null);
+    setSidebarDragHidePlanner(false);
     setSidebarOpen(false);
-    if (touchDragTimeoutRef.current) {
-      clearTimeout(touchDragTimeoutRef.current);
-      touchDragTimeoutRef.current = null;
+    if (sidebarDragTimeoutRef.current) {
+      clearTimeout(sidebarDragTimeoutRef.current);
+      sidebarDragTimeoutRef.current = null;
     }
   }, []);
-  // Document-level touch listeners for drag (survives sidebar unmount)
-  useEffect(() => {
-    if (!touchDragEntry) return;
-
-    const handleTouchMove = (e: TouchEvent) => {
-      e.preventDefault();
-      const touch = e.touches[0];
-      setTouchDragPosition({ x: touch.clientX, y: touch.clientY });
-
-      // Reset cancel timeout on movement
-      if (touchDragTimeoutRef.current) {
-        clearTimeout(touchDragTimeoutRef.current);
-        touchDragTimeoutRef.current = null;
-      }
-
-      // Calculate which global hour the finger is over
-      const timelineEl = document.querySelector('[data-timeline-area]');
-      if (timelineEl) {
-        const rect = timelineEl.getBoundingClientRect();
-        const relativeY = touch.clientY - rect.top;
-        const rawGlobalHour = relativeY / pixelsPerHour;
-        const entryDurationHours = touchDragEntryRef.current
-          ? (new Date(touchDragEntryRef.current.end_time).getTime() -
-             new Date(touchDragEntryRef.current.start_time).getTime()) / 3600000
-          : 1;
-        const centredHour = rawGlobalHour - (entryDurationHours / 2);
-        const snapped = Math.round(centredHour * 4) / 4;
-        setTouchDragGlobalHour(snapped >= 0 ? snapped : 0);
-      } else {
-        setTouchDragGlobalHour(null);
-      }
-
-      // Auto-scroll near edges
-      const SCROLL_ZONE = 80;
-      const SCROLL_SPEED = 8;
-      const scrollEl = mainScrollRef.current;
-      if (scrollEl) {
-        if (touch.clientY < SCROLL_ZONE) {
-          scrollEl.scrollBy(0, -SCROLL_SPEED);
-        } else if (touch.clientY > window.innerHeight - SCROLL_ZONE) {
-          scrollEl.scrollBy(0, SCROLL_SPEED);
-        }
-      }
-    };
-
-    const handleTouchEnd = () => {
-      const entry = touchDragEntryRef.current;
-      if (touchDragGlobalHourRef.current !== null && entry) {
-        handleDropOnTimeline(entry.id, touchDragGlobalHourRef.current);
-      }
-      cleanupTouchDrag();
-    };
-
-    document.addEventListener('touchmove', handleTouchMove, { passive: false });
-    document.addEventListener('touchend', handleTouchEnd);
-    document.addEventListener('touchcancel', handleTouchEnd);
-
-    return () => {
-      document.removeEventListener('touchmove', handleTouchMove);
-      document.removeEventListener('touchend', handleTouchEnd);
-      document.removeEventListener('touchcancel', handleTouchEnd);
-    };
-  }, [touchDragEntry, cleanupTouchDrag]);
 
   // Pinch-to-zoom gesture (mobile)
   const lastPinchDistRef = useRef<number | null>(null);
@@ -2908,7 +2883,9 @@ const Timeline = () => {
                 }}
                 onDuplicate={handleDuplicate}
                 onInsert={handleInsert}
-                onTouchDragStart={handleTouchDragStart}
+                onSidebarDragStart={handleSidebarDragStartUnified}
+                onSidebarDragMove={handleSidebarDragMoveUnified}
+                onSidebarDragEnd={handleSidebarDragEndUnified}
                 compact={liveOpen && sidebarOpen}
                 exploreOpen={exploreOpen}
                 exploreContent={trip ? (
@@ -2968,8 +2945,10 @@ const Timeline = () => {
               }}
               onDuplicate={handleDuplicate}
               onInsert={handleInsert}
-              onTouchDragStart={handleTouchDragStart}
-              hiddenForDrag={touchDragHidePlanner}
+              onSidebarDragStart={handleSidebarDragStartUnified}
+              onSidebarDragMove={handleSidebarDragMoveUnified}
+              onSidebarDragEnd={handleSidebarDragEndUnified}
+              hiddenForDrag={sidebarDragHidePlanner}
             />
           )}
           <EntrySheet
@@ -3149,27 +3128,25 @@ const Timeline = () => {
         </>
       )}
 
-      {/* Touch drag ghost overlay (mobile planner → timeline) — purely visual, pointer-events-none */}
-      {touchDragEntry && touchDragPosition && (
+      {/* Unified sidebar drag floating card (planner → timeline) */}
+      {sidebarDrag && (
         <div className="fixed inset-0 z-[100] pointer-events-none">
           <div
             className="pointer-events-none absolute z-[101]"
             style={{
-              left: touchDragPosition.x - (window.innerWidth * 0.3 - 12),
-              top: touchDragPosition.y - 55,
-              width: 'calc(60vw - 24px)',
-              minWidth: 256,
-              opacity: 0.8,
-              transform: 'scale(0.85)',
+              left: sidebarDrag.clientX - 100,
+              top: sidebarDrag.clientY - 40,
+              width: 200,
+              opacity: 0.9,
               filter: 'drop-shadow(0 8px 16px rgba(0,0,0,0.2))',
             }}
           >
-            <SidebarEntryCard entry={touchDragEntry} />
-            {touchDragGlobalHour !== null && touchDragGlobalHour >= 0 && (
+            <SidebarEntryCard entry={sidebarDrag.entry} compact />
+            {sidebarDrag.globalHour !== null && sidebarDrag.globalHour >= 0 && (
               <div className="mt-1 flex justify-center">
                 <span className="rounded-full bg-primary px-2.5 py-0.5 text-[11px] font-bold text-primary-foreground shadow-md">
-                  {String(Math.floor((touchDragGlobalHour % 24))).padStart(2, '0')}:
-                  {String(Math.round(((touchDragGlobalHour % 1) * 60))).padStart(2, '0')}
+                  {String(Math.floor((sidebarDrag.globalHour % 24))).padStart(2, '0')}:
+                  {String(Math.round(((sidebarDrag.globalHour % 1) * 60))).padStart(2, '0')}
                 </span>
               </div>
             )}
