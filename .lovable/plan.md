@@ -1,120 +1,65 @@
 
 
-# Map View for Explore
+# ExploreCard Redesign and Planner Icon Update
 
 ## Overview
-Replace the "coming soon" map toggle with a working map view that shows a static map image with colored markers (blue for scheduled entries, gold for explore results) and a horizontally scrollable card row beneath it.
+Two changes: (1) Redesign ExploreCard to match the visual language of EntryCard/SidebarEntryCard with a new layout, and (2) Replace the LayoutGrid icon with ClipboardList in Timeline.tsx.
 
-## Changes
+---
 
-### 1. Extend `supabase/functions/static-map/index.ts`
+## Change 1: ExploreCard Redesign
 
-Add support for a `markers` query parameter containing a JSON-encoded array of `{ lat, lng, color }` objects. The function will:
+**File: `src/components/timeline/ExploreCard.tsx`**
 
-- Parse the `markers` param
-- Group markers by color
-- Build a Google Static Maps URL with multiple marker groups
-- Use `center` and `zoom` params (or auto-center on first marker)
-- Accept this as an alternative to the existing single `lat`/`lng` marker flow
+Complete rewrite of the card layout to match EntryCard/SidebarEntryCard visual language:
 
-The validation at the top changes to allow `markers` as a third alternative (alongside `path` and `lat`/`lng`).
+**Background:** Replace the current diagonal fade gradient with the same one used in SidebarEntryCard:
+```
+linear-gradient(148deg, transparent 15%, rgba(10,8,6,0.20) 25%, rgba(10,8,6,0.65) 38%, rgba(10,8,6,0.96) 50%)
+```
+No-image fallback keeps the existing glossy hue-based gradient.
 
-### 2. Add `viewMode` state and map rendering in `src/components/timeline/ExploreView.tsx`
+**Corner flag (top-left):** Unchanged -- category emoji on colored rounded corner.
 
-**New state:**
-```typescript
-const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+**Planner button (top-right):** Replace the old bottom-right rating+icon combo. New 32px circle at `top-2 right-2`:
+- Default state: `bg-orange-400/35 backdrop-blur-sm border border-orange-400/30`, ClipboardList icon (14px, white, opacity-0.9)
+- Added state: `bg-orange-500 shadow-lg shadow-orange-500/30 scale-105`, Check icon (14px, white, strokeWidth 3)
+
+**Remove:** The "Added" text badge and the old planner icon from the bottom area.
+
+**Travel time pill (bottom-left):** Move from top-right to `bottom-2.5 left-2.5`. Use the same pill style as SidebarEntryCard duration pill:
+```
+background: rgba(255,255,255,0.12), backdropFilter: blur(8px), border: 1px solid rgba(255,255,255,0.08)
 ```
 
-**Wire toggle buttons (lines 780-792):**
-Replace the hardcoded active/inactive styles and the "coming soon" toast with actual toggle logic:
-- List button: active when `viewMode === 'list'`, sets `viewMode` to `'list'`
-- Map button: active when `viewMode === 'map'`, sets `viewMode` to `'map'`
+**Content area (bottom-right, right-aligned, max-width 72%):**
 
-**Build map URL function:**
-```typescript
-const mapImageUrl = useMemo(() => {
-  if (viewMode !== 'map' || !originLat || !originLng) return null;
-  const markers = [];
+Stack in this order (all right-aligned):
+1. Opening hours (text-[9px] text-white/55, red if closed) -- only if data exists
+2. Name (text-sm font-bold text-white, truncated, text-shadow)
+3. Address + price (text-[10px] text-white/60, format: "pin Address dot price")
+4. Rating (text-[13px] font-bold text-amber-300 for star+number, text-[10px] text-white/45 for count)
+5. Cross-trip indicator if applicable
 
-  // Blue: scheduled entries with coordinates
-  entries.forEach(entry => {
-    const opt = entry.options[0];
-    if (opt?.latitude && opt?.longitude && entry.is_scheduled) {
-      markers.push({ lat: opt.latitude, lng: opt.longitude, color: '0x4285F4' });
-    }
-  });
+**Card height:** h-[140px], same as current.
 
-  // Gold: explore results
-  sortedResults.forEach(result => {
-    if (result.lat && result.lng) {
-      markers.push({ lat: result.lat, lng: result.lng, color: '0xFFD700' });
-    }
-  });
+---
 
-  if (markers.length === 0) return null;
-  const markersParam = encodeURIComponent(JSON.stringify(markers));
-  const center = `${originLat},${originLng}`;
-  return `${supabaseUrl}/functions/v1/static-map?center=${center}&zoom=14&size=800x600&markers=${markersParam}`;
-}, [viewMode, originLat, originLng, entries, sortedResults]);
-```
+## Change 2: Planner Icon in Timeline.tsx
 
-**Conditional rendering in the results area (lines 1070-1204):**
-When `viewMode === 'map'`, render:
-- A map image container (50% height, min 300px) with the static map
-- A horizontal card scroll row beneath it with 200px-wide ExploreCard components
-- The "Load more" and "Add manually" links below
+**File: `src/pages/Timeline.tsx`**
 
-When `viewMode === 'list'`, keep the existing ScrollArea with vertical card list.
+- Line 19: Change import from `{ Trash2, LayoutGrid }` to `{ Trash2, ClipboardList }`
+- Line 2273: Change `<LayoutGrid className="h-5 w-5" />` to `<ClipboardList className="h-5 w-5" />`
 
-The filters, search bar, origin picker, and travel mode pills all stay visible above regardless of view mode.
+This makes ClipboardList the consistent planner icon across: Timeline toggle, TripNavBar, EntrySheet, CategorySidebar, and ExploreCard.
 
-### 3. Map view layout (within ExploreView render)
-
-```tsx
-{viewMode === 'map' ? (
-  <div className="flex-1 flex flex-col overflow-hidden">
-    {/* Map image */}
-    <div className="relative w-full flex-1 min-h-[250px] bg-muted">
-      {mapImageUrl ? (
-        <img src={mapImageUrl} alt="Map" className="w-full h-full object-cover" />
-      ) : loading ? (
-        <div className="flex items-center justify-center h-full">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        </div>
-      ) : (
-        <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-          No results to show on map
-        </div>
-      )}
-      {/* Legend */}
-      <div className="absolute bottom-2 left-2 flex gap-2 text-[10px] bg-background/80 backdrop-blur-sm rounded-md px-2 py-1">
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> Your plans</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400" /> Suggestions</span>
-      </div>
-    </div>
-    {/* Horizontal card scroll */}
-    <div className="border-t border-border">
-      <div className="flex gap-2 overflow-x-auto p-3 scrollbar-hide">
-        {sortedResults.map(place => (
-          <div key={place.placeId} className="w-[200px] shrink-0">
-            <ExploreCard ... />
-          </div>
-        ))}
-      </div>
-    </div>
-  </div>
-) : (
-  <ScrollArea className="flex-1">
-    {/* existing list view */}
-  </ScrollArea>
-)}
-```
+---
 
 ## Files Summary
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/static-map/index.ts` | Add multi-marker support via `markers` query param |
-| `src/components/timeline/ExploreView.tsx` | Add `viewMode` state, wire toggle buttons, build map URL, conditional map/list rendering |
+| `src/components/timeline/ExploreCard.tsx` | Full layout redesign: diagonal fade, orange planner btn top-right, travel pill bottom-left, right-aligned content stack, larger amber rating |
+| `src/pages/Timeline.tsx` | Replace LayoutGrid with ClipboardList (import + usage) |
 
