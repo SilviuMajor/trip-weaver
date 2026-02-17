@@ -1,59 +1,49 @@
 
-# Performance Fixes for App Freezing
+# Fix: Timeline Freezes Due to 26,600-Day Loop
 
-## Overview
-Five targeted performance fixes to eliminate the "page unresponsive" freezes caused by realtime sync cascades and unoptimized queries.
+## Root Cause
 
----
+The trip's `end_date` was corrupted to `2099-01-01` (the reference date used for unscheduled entries). The `autoExtendTripIfNeeded` function doesn't filter out unscheduled entries, so when one is created with a timestamp at `2099-01-01`, it extends `end_date` to that date.
 
-## Fix 1: Debounce Realtime Sync (500ms)
+The `days` useMemo then loops from `2026-02-21` to `2099-01-01`, creating ~26,600 Date objects and attempting to render them all -- freezing the browser instantly.
 
-### `src/hooks/useRealtimeSync.ts`
-Replace the direct `onSync` callback with a 500ms debounced version using `useRef` and `useCallback`. This collapses rapid-fire database events into a single sync call.
+## Fix 1: Guard `autoExtendTripIfNeeded` against reference dates
 
----
+In `autoExtendTripIfNeeded` (line 44-51), skip entries whose date matches or exceeds the reference date:
 
-## Fix 2: Filter `option_images` by Option IDs (Two-Step Query)
+```typescript
+const entryDateStr = format(new Date(entryEndIso), 'yyyy-MM-dd');
+if (entryDateStr >= REFERENCE_DATE_STR) return; // Don't extend for unscheduled entries
+```
 
-### `src/pages/Timeline.tsx` (lines 229-249)
-Restructure `fetchData` into two sequential steps:
-- **Step 1**: Fetch `entries` and `weather_cache` in parallel
-- **Step 2**: Extract entry IDs, fetch `entry_options` filtered by those IDs
-- **Step 3**: Extract option IDs, fetch `option_images` (filtered by option IDs) and `votes` in parallel
+This prevents the corruption from happening again.
 
-This prevents loading every image from every trip in the database.
+## Fix 2: Cap the `days` array as a safety net
 
----
+In the `days` useMemo (line 489-504), add a safety cap so even if bad data exists, the app won't freeze:
 
-## Fix 3: SKIP
-Photo inserts are already batched. No changes.
+```typescript
+const end = parseISO(trip.end_date!);
+const maxEnd = addDays(start, 60); // Safety cap: max 60 days
+const cappedEnd = end < maxEnd ? end : maxEnd;
+```
 
----
+Use `cappedEnd` instead of `end` in the while loop.
 
-## Fix 4: Memoize `getDays()`
+## Fix 3: Repair the corrupted data
 
-### `src/pages/Timeline.tsx`
-- Replace the `getDays()` function (lines 472-487) with a `useMemo` block producing a `days` variable
-- Remove `const days = getDays()` on line 2234 (already replaced by memoized variable)
-- Update all internal callers:
-  - `handleTrimDay` (line 491): use `days` directly
-  - `dayTimezoneMap` useMemo (line 541): use `days` directly
-  - `dayLocationMap` useMemo (line 610): use `days` directly
-  - `handleDropExploreCard` (line 1594): use `days` directly
-  - `dayLabels` useMemo (line 2047): use `days` directly
+Run a database update to fix the current trip's `end_date`. The last scheduled entry is on `2026-02-23`, so `end_date` should be `2026-02-23`:
 
----
+```sql
+UPDATE trips
+SET end_date = '2026-02-23'
+WHERE id = '561a31b0-7657-47b4-adba-30b87df48741'
+  AND end_date = '2099-01-01';
+```
 
-## Fix 5: Concurrent Fetch Guard
+## Files Changed
 
-### `src/pages/Timeline.tsx`
-Add a `fetchingRef = useRef(false)` guard at the top of `fetchData`. If a fetch is already in progress, skip. Reset in a `finally` block.
-
----
-
-## Files Summary
-
-| File | Changes |
-|------|---------|
-| `src/hooks/useRealtimeSync.ts` | Add 500ms debounce with useRef timer |
-| `src/pages/Timeline.tsx` | Two-step query for option_images; memoize getDays(); add fetchingRef guard |
+| File | Change |
+|------|--------|
+| `src/pages/Timeline.tsx` | Add reference date guard in `autoExtendTripIfNeeded`; add safety cap in `days` useMemo |
+| Database | Fix corrupted `end_date` for the affected trip |
