@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ClipboardList, Check } from 'lucide-react';
+import { ClipboardList, Check, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { findCategory } from '@/lib/categories';
 import { formatPriceLevel } from '@/lib/entryHelpers';
@@ -16,6 +16,7 @@ interface ExploreCardProps {
   isInTrip?: boolean;
   compactHours?: string | null;
   crossTripName?: string | null;
+  isLoading?: boolean;
 }
 
 const extractHue = (hslString: string): number => {
@@ -23,7 +24,7 @@ const extractHue = (hslString: string): number => {
   return match ? parseInt(match[1]) : 260;
 };
 
-const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, travelTimeLoading, isInTrip, compactHours, crossTripName }: ExploreCardProps) => {
+const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, travelTimeLoading, isInTrip, compactHours, crossTripName, isLoading }: ExploreCardProps) => {
   const [photoUrl, setPhotoUrl] = useState<string | null>(place.photoUrl ?? null);
 
   const cat = findCategory(categoryId ?? '');
@@ -101,6 +102,13 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
         >
           <ClipboardList className="h-3.5 w-3.5 text-white opacity-90" />
         </button>
+      )}
+
+      {/* Loading overlay */}
+      {isLoading && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 rounded-[14px]">
+          <Loader2 className="h-6 w-6 text-white animate-spin" />
+        </div>
       )}
 
       {/* Travel time pill — bottom-left */}

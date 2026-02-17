@@ -119,6 +119,7 @@ export interface PlaceOverviewProps {
   onSaved: () => void;
   onClose: () => void;
   onMoveToIdeas?: (entryId: string) => void;
+  preloadedReviews?: { text: string; rating: number | null; author: string; relativeTime: string }[] | null;
 }
 
 const PlaceOverview = ({
@@ -137,6 +138,7 @@ const PlaceOverview = ({
   onSaved,
   onClose,
   onMoveToIdeas,
+  preloadedReviews,
 }: PlaceOverviewProps) => {
   const homeTimezone = trip?.home_timezone ?? 'Europe/London';
   const defaultCheckinHours = trip?.default_checkin_hours ?? 2;
@@ -179,8 +181,14 @@ const PlaceOverview = ({
     }
   }, [deleting, option?.hotel_id]);
 
-  // Fetch review on-demand
+  // Fetch review on-demand (skip if preloaded)
   useEffect(() => {
+    if (preloadedReviews && preloadedReviews.length > 0) {
+      const best = [...preloadedReviews].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))[0];
+      setTopReview(best);
+      setReviewLoading(false);
+      return;
+    }
     if (!option.google_place_id || option.category === 'flight' || option.category === 'transfer') return;
     setReviewLoading(true);
     supabase.functions.invoke('google-places', {
@@ -191,7 +199,7 @@ const PlaceOverview = ({
         setTopReview(best);
       }
     }).catch(() => {}).finally(() => setReviewLoading(false));
-  }, [option.google_place_id, option.category]);
+  }, [option.google_place_id, option.category, preloadedReviews]);
 
   useEffect(() => {
     if (option?.category === 'transfer' && !viewModesPreloaded) {

@@ -82,7 +82,7 @@ function resolveOriginFromEntries(
   return closest ? { name: closest.name, lat: closest.lat, lng: closest.lng } : null;
 }
 
-function buildTempEntry(place: ExploreResult, tripId: string, categoryId: string | null, resolvedPhotoUrl: string | null): { entry: EntryWithOptions; option: EntryOption } {
+function buildTempEntry(place: ExploreResult, tripId: string, categoryId: string | null, resolvedPhotoUrl: string | null, detailPhotos?: string[]): { entry: EntryWithOptions; option: EntryOption } {
   const now = new Date().toISOString();
   const fakeEntryId = `explore-${place.placeId}`;
   const fakeOptionId = `explore-opt-${place.placeId}`;
@@ -118,7 +118,17 @@ function buildTempEntry(place: ExploreResult, tripId: string, categoryId: string
     created_at: now,
     updated_at: now,
     vote_count: 0,
-    images: resolvedPhotoUrl ? [{ id: 'temp', option_id: fakeOptionId, image_url: resolvedPhotoUrl, sort_order: 0, created_at: now }] : [],
+    images: detailPhotos && detailPhotos.length > 0
+      ? detailPhotos.map((url, i) => ({
+          id: `temp-img-${i}`,
+          option_id: fakeOptionId,
+          image_url: url,
+          sort_order: i,
+          created_at: now,
+        }))
+      : resolvedPhotoUrl
+        ? [{ id: 'temp', option_id: fakeOptionId, image_url: resolvedPhotoUrl, sort_order: 0, created_at: now }]
+        : [],
   };
 
   const entry: EntryWithOptions = {
@@ -213,6 +223,9 @@ const ExploreView = ({
   const [yourPlaces, setYourPlaces] = useState<GlobalPlace[]>([]);
   const [canLoadMore, setCanLoadMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [detailLoading, setDetailLoading] = useState<string | null>(null);
+  const [detailReviews, setDetailReviews] = useState<any[] | null>(null);
+  const [detailPhotos, setDetailPhotos] = useState<string[]>([]);
   // Multi-select categories
   const [selectedCategories, setSelectedCategories] = useState<string[]>(() => {
     if (categoryId) return [categoryId];
@@ -564,9 +577,28 @@ const ExploreView = ({
     });
   }, [onAddToPlanner]);
 
-  const handleCardTap = useCallback((place: ExploreResult) => {
-    setSelectedPlace(place);
-    setDetailOpen(true);
+  const handleCardTap = useCallback(async (place: ExploreResult) => {
+    setDetailLoading(place.placeId);
+    try {
+      const { data: details } = await supabase.functions.invoke('google-places', {
+        body: { action: 'details', placeId: place.placeId },
+      });
+      setDetailPhotos(details?.photos ?? []);
+      setDetailReviews(details?.reviews ?? []);
+      // Enrich place with details data
+      if (details?.website) place.website = details.website;
+      if (details?.phone) place.phone = details.phone;
+      setSelectedPlace(place);
+      setDetailOpen(true);
+    } catch (err) {
+      console.error('Failed to fetch place details:', err);
+      setDetailPhotos([]);
+      setDetailReviews(null);
+      setSelectedPlace(place);
+      setDetailOpen(true);
+    } finally {
+      setDetailLoading(null);
+    }
   }, []);
 
   const handleOriginChange = useCallback((name: string, lat: number, lng: number) => {
@@ -748,7 +780,7 @@ const ExploreView = ({
   // Detail sheet content
   const detailContent = selectedPlace ? (() => {
     const inferredCat = isMultiCategory ? inferCategoryFromTypes(selectedPlace.types) : selectedCategories[0];
-    const { entry: tempEntry, option: tempOption } = buildTempEntry(selectedPlace, trip?.id || 'global', inferredCat ?? null, selectedPlace.photoUrl ?? null);
+    const { entry: tempEntry, option: tempOption } = buildTempEntry(selectedPlace, trip?.id || 'global', inferredCat ?? null, selectedPlace.photoUrl ?? null, detailPhotos);
     const placeIsInTrip = existingPlaceIds.has(selectedPlace.placeId) || addedPlaceIds.has(selectedPlace.placeId);
     return (
       <div className="overflow-y-auto max-h-[85vh]">
@@ -799,6 +831,7 @@ const ExploreView = ({
           isEditor={false}
           onSaved={() => {}}
           onClose={() => setDetailOpen(false)}
+          preloadedReviews={detailReviews}
         />
       </div>
     );
@@ -1151,6 +1184,7 @@ const ExploreView = ({
                       onTap={() => handleCardTap(place)}
                       isInTrip={inTrip}
                       travelTime={travelTimeStr ?? null}
+                      isLoading={detailLoading === place.placeId}
                     />
                   </div>
                 );
@@ -1258,6 +1292,7 @@ const ExploreView = ({
                           onAddToPlanner={() => handleAdd(asExplore)}
                           onTap={() => handleCardTap(asExplore)}
                           isInTrip={inTrip}
+                          isLoading={detailLoading === asExplore.placeId}
                         />
                       </div>
                     );
@@ -1286,6 +1321,7 @@ const ExploreView = ({
                   travelTimeLoading={travelTimeLoading}
                   compactHours={hours.text}
                   crossTripName={crossTripMatches.get(place.placeId) || null}
+                  isLoading={detailLoading === place.placeId}
                 />
               );
             })}
@@ -1316,14 +1352,14 @@ const ExploreView = ({
 
       {/* Detail sheet */}
       {isMobile ? (
-        <Drawer open={detailOpen} onOpenChange={setDetailOpen}>
+        <Drawer open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setDetailReviews(null); setDetailPhotos([]); } }}>
           <DrawerContent className="max-h-[92vh]">
             <DrawerTitle className="sr-only">Place Details</DrawerTitle>
             {detailContent}
           </DrawerContent>
         </Drawer>
       ) : (
-        <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setDetailReviews(null); setDetailPhotos([]); } }}>
           <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto p-0">
             <DialogTitle className="sr-only">Place Details</DialogTitle>
             {detailContent}
