@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -42,39 +42,54 @@ const Planner = () => {
     if (!currentUser) navigate(tripId ? `/trip/${tripId}` : '/');
   }, [currentUser, navigate, tripId]);
 
+  const fetchingRef = useRef(false);
+
   const fetchData = useCallback(async () => {
     if (!tripId) return;
-    const { data: tripData } = await supabase.from('trips').select('*').eq('id', tripId).single();
-    if (tripData) setTrip(tripData as unknown as Trip);
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
 
-    const { data: entriesData } = await supabase.from('entries').select('*').eq('trip_id', tripId).order('start_time');
-    if (!entriesData || entriesData.length === 0) { setEntries([]); setLoading(false); return; }
+    try {
+      const { data: tripData } = await supabase.from('trips').select('*').eq('id', tripId).single();
+      if (tripData) setTrip(tripData as unknown as Trip);
 
-    const entryIds = entriesData.map(e => e.id);
-    const [optionsRes, imagesRes, votesRes] = await Promise.all([
-      supabase.from('entry_options').select('*').in('entry_id', entryIds),
-      supabase.from('option_images').select('*').order('sort_order'),
-      supabase.from('votes').select('option_id, user_id'),
-    ]);
+      const { data: entriesData } = await supabase.from('entries').select('*').eq('trip_id', tripId).order('start_time');
+      if (!entriesData || entriesData.length === 0) { setEntries([]); setLoading(false); return; }
 
-    const options = (optionsRes.data ?? []) as unknown as EntryOption[];
-    const images = imagesRes.data ?? [];
-    const votes = votesRes.data ?? [];
-    const voteCounts: Record<string, number> = {};
-    votes.forEach(v => { voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1; });
-    if (currentUser) setUserVotes(votes.filter(v => v.user_id === currentUser.id).map(v => v.option_id));
+      const entryIds = entriesData.map(e => e.id);
+      const [optionsRes] = await Promise.all([
+        supabase.from('entry_options').select('*').in('entry_id', entryIds),
+      ]);
 
-    const optionsWithImages = options.map(o => ({
-      ...o,
-      vote_count: voteCounts[o.id] || 0,
-      images: images.filter(img => img.option_id === o.id),
-    }));
+      const optionIds = (optionsRes.data ?? []).map((o: any) => o.id);
+      const [imagesRes, votesRes] = await Promise.all([
+        optionIds.length > 0
+          ? supabase.from('option_images').select('*').in('option_id', optionIds).order('sort_order')
+          : Promise.resolve({ data: [] as any[] }),
+        supabase.from('votes').select('option_id, user_id'),
+      ]);
 
-    setEntries((entriesData as Entry[]).map(entry => ({
-      ...entry,
-      options: optionsWithImages.filter(o => o.entry_id === entry.id),
-    })));
-    setLoading(false);
+      const options = (optionsRes.data ?? []) as unknown as EntryOption[];
+      const images = imagesRes.data ?? [];
+      const votes = votesRes.data ?? [];
+      const voteCounts: Record<string, number> = {};
+      votes.forEach(v => { voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1; });
+      if (currentUser) setUserVotes(votes.filter(v => v.user_id === currentUser.id).map(v => v.option_id));
+
+      const optionsWithImages = options.map(o => ({
+        ...o,
+        vote_count: voteCounts[o.id] || 0,
+        images: images.filter(img => img.option_id === o.id),
+      }));
+
+      setEntries((entriesData as Entry[]).map(entry => ({
+        ...entry,
+        options: optionsWithImages.filter(o => o.entry_id === entry.id),
+      })));
+      setLoading(false);
+    } finally {
+      fetchingRef.current = false;
+    }
   }, [tripId, currentUser]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
