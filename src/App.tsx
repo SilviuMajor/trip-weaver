@@ -15,6 +15,7 @@ import TripSettings from "./pages/TripSettings";
 import Live from "./pages/Live";
 import Planner from "./pages/Planner";
 import GlobalPlanner from "./pages/GlobalPlanner";
+import GlobalExplore from "./pages/GlobalExplore";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -36,7 +37,7 @@ const App = () => (
             <Route path="/trip/:tripId/settings" element={<TripSettings />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/planner" element={<GlobalPlanner />} />
-            <Route path="/explore" element={<NotFound />} />
+            <Route path="/explore" element={<GlobalExplore />} />
             
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
