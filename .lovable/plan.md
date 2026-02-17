@@ -1,138 +1,116 @@
 
 
-# Fix Planner/Explore Drag Ghost Outline + Photos
+# Conflict Display — Horizontal Offset (Google Calendar Style)
 
 ## Overview
-Two issues to fix: (1) Planner and Explore drags don't show a ghost outline on the ContinuousTimeline grid, and (2) the floating card during sidebar drag uses a SidebarEntryCard instead of matching the timeline's EntryCard visual. Photos issue appears already fixed (filtered option_images query exists at line 273).
+Replace red ring + warning icon conflict display with Google Calendar-style side-by-side card layout. Overlapping cards will be horizontally offset so both are visible and tappable, with a thin red edge bar at the overlap boundary.
 
 ## Changes
 
-### 1. ContinuousTimeline.tsx -- Add `externalDragGlobalHour` and `externalDragDurationHours` props
+### 1. ContinuousTimeline.tsx — Use `computeOverlapLayout` for horizontal positioning
 
-Add two new optional props to `ContinuousTimelineProps`:
-- `externalDragGlobalHour?: number | null` -- the global hour where the external card would land
-- `externalDragDurationHours?: number | null` -- duration in hours of the externally-dragged card
+**Import** `computeOverlapLayout` from `@/lib/overlapLayout`.
 
-Destructure them in the component.
+**Add a new `overlapLayout` useMemo** (after the existing `overlapMap` at line ~554):
 
-After the existing ghost outline block (line ~1986, after the detached move ghost), render a new ghost outline for external drags:
-
-```
-{externalDragGlobalHour != null && externalDragDurationHours != null && (() => {
-  const ghostTop = externalDragGlobalHour * pixelsPerHour;
-  const ghostHeight = externalDragDurationHours * pixelsPerHour;
-  return (
-    <div
-      className="absolute left-0 right-0 z-[11] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 pointer-events-none transition-all duration-75"
-      style={{ top: ghostTop, height: Math.max(ghostHeight, 20) }}
-    >
-      <div className="absolute -left-[72px] top-0 z-[60] pointer-events-none">
-        <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">
-          {formatGlobalHourToDisplay(externalDragGlobalHour)}
-        </span>
-      </div>
-    </div>
-  );
-})()}
+```typescript
+const overlapLayout = useMemo(() => {
+  const layoutEntries = sortedEntries
+    .filter(e => !linkedEntryIds.has(e.id))
+    .map(e => {
+      const gh = getEntryGlobalHours(e);
+      return { id: e.id, startMinutes: gh.startGH * 60, endMinutes: gh.endGH * 60 };
+    });
+  const results = computeOverlapLayout(layoutEntries);
+  const map = new Map<string, { column: number; totalColumns: number }>();
+  for (const r of results) {
+    if (r.totalColumns > 1) {
+      map.set(r.entryId, { column: r.column, totalColumns: r.totalColumns });
+    }
+  }
+  return map;
+}, [sortedEntries, linkedEntryIds, getEntryGlobalHours]);
 ```
 
-This uses the exact same visual treatment (className, positioning math) as the existing timeline ghost at lines 1969-1983, ensuring visual consistency.
+This reuses the existing `computeOverlapLayout` algorithm that already handles clustering and column assignment.
 
-### 2. Timeline.tsx -- Pass external drag state to ContinuousTimeline
+### 2. ContinuousTimeline.tsx — Apply layout to card wrapper
 
-On the `<ContinuousTimeline>` component (line ~2795), add:
+In the card `style` block (lines 1376-1389), replace the hardcoded `left: '0%', width: '100%'` with computed values:
 
-```
-externalDragGlobalHour={
-  (sidebarDrag?.globalHour ?? exploreDrag?.globalHour) ?? null
-}
-externalDragDurationHours={
-  sidebarDrag
-    ? (new Date(sidebarDrag.entry.end_time).getTime() - new Date(sidebarDrag.entry.start_time).getTime()) / 3600000
-    : exploreDrag
-      ? 1
-      : null
-}
-```
-
-This covers both sidebar and explore drags. Sidebar drags use the entry's actual duration; explore drags default to 1 hour.
-
-### 3. Timeline.tsx -- Replace floating SidebarEntryCard with EntryCard during sidebar drag
-
-Replace the sidebar drag floating card (lines 3211-3235) to use `EntryCard` instead of `SidebarEntryCard`, matching the timeline's Stage 1 visual:
-
-```
-{sidebarDrag && (() => {
-  const opt = sidebarDrag.entry.options[0];
-  if (!opt) return null;
-  const durationMs = new Date(sidebarDrag.entry.end_time).getTime() - new Date(sidebarDrag.entry.start_time).getTime();
-  const durationHours = durationMs / 3600000;
-  const moveHeight = durationHours * pixelsPerHour;
-  const cardWidth = Math.min(window.innerWidth * 0.6, 300);
-  return (
-    <div className="fixed inset-0 z-[200] pointer-events-none">
-      <div
-        style={{
-          position: 'fixed',
-          left: sidebarDrag.clientX - cardWidth / 2,
-          top: sidebarDrag.clientY - 40,
-          width: cardWidth,
-          height: Math.max(moveHeight, 60),
-          willChange: 'transform',
-        }}
-      >
-        <div className="h-full ring-2 ring-primary/60 shadow-lg shadow-primary/20 rounded-2xl overflow-hidden">
-          <EntryCard
-            option={opt}
-            startTime={sidebarDrag.entry.start_time}
-            endTime={sidebarDrag.entry.end_time}
-            formatTime={(iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}
-            isPast={false}
-            optionIndex={0}
-            totalOptions={1}
-            votingLocked={votingLocked}
-            hasVoted={false}
-            onVoteChange={() => {}}
-            cardSizeClass="h-full"
-            height={Math.max(moveHeight, 60)}
-            notes={sidebarDrag.entry.notes}
-            isLocked={sidebarDrag.entry.is_locked}
-          />
-        </div>
-        {sidebarDrag.globalHour !== null && sidebarDrag.globalHour >= 0 && (
-          <div className="mt-1 flex justify-center">
-            <span className="rounded-full bg-primary px-2.5 py-0.5 text-[11px] font-bold text-primary-foreground shadow-md">
-              {String(Math.floor((sidebarDrag.globalHour % 24))).padStart(2, '0')}:
-              {String(Math.round(((sidebarDrag.globalHour % 1) * 60))).padStart(2, '0')}
-            </span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-})()}
+```typescript
+const cardLayout = overlapLayout.get(entry.id);
+// ...
+style={{
+  top,
+  height,
+  left: cardLayout ? `${(cardLayout.column / cardLayout.totalColumns) * 100}%` : '0%',
+  width: cardLayout ? `${(1 / cardLayout.totalColumns) * 100}%` : '100%',
+  zIndex: isDragged ? 30 : isTransport ? 20 : hasConflict ? 10 + index : 10,
+  // ... rest unchanged ...
+  transition: 'left 200ms ease, width 200ms ease, opacity 0.2s ease',
+}}
 ```
 
-This matches the Stage 1 in-timeline card (lines 1999-2025 of ContinuousTimeline) with ring-2 ring-primary/60, shadow-lg shadow-primary/20, rounded-2xl overflow-hidden.
+This gives equal-width columns: 2 overlapping cards each get 50% width, 3 get 33%, etc.
 
-Import `EntryCard` at the top of Timeline.tsx (add alongside the existing SidebarEntryCard import).
+### 3. ContinuousTimeline.tsx — Replace red ring + warning icon with thin edge bar
 
-### 4. Photos -- Verify current state
+**Delete** the two conflict indicator blocks (lines 1393-1399):
+- The `ring-2 ring-red-400/60` full overlay
+- The `AlertTriangle` circle badge
 
-The option_images query (lines 271-278) is already filtered by option IDs:
+**Replace with** a thin 4px red edge bar positioned at the overlap boundary:
+
+```jsx
+{hasConflict && !isDragged && (
+  <div
+    className="absolute z-20 rounded-sm pointer-events-none"
+    style={{
+      width: 4,
+      background: '#f87171',
+      ...(overlapMap.get(entry.id)?.position === 'bottom'
+        ? { right: -1, bottom: 0, height: '30%', borderRadius: '0 2px 2px 0' }
+        : { left: -1, top: 0, height: '30%', borderRadius: '2px 0 0 2px' }),
+    }}
+  />
+)}
 ```
-optionIds.length > 0
-  ? supabase.from('option_images').select('*').in('option_id', optionIds).order('sort_order')
-  : Promise.resolve({ data: [] as any[] }),
+
+### 4. ContinuousTimeline.tsx — Remove conflict toast
+
+**Delete** the conflict toast `useEffect` and `prevConflictCountRef` (lines 626-634). The horizontal offset makes conflicts visually obvious without a toast.
+
+### 5. EntryCard.tsx — Remove overlap overlay
+
+- **Delete** the `overlapFraction` calculation (lines 164-166)
+- **Delete** the `overlapOverlay` variable (lines 536-545)
+- **Delete** the `{overlapOverlay}` render (line 584)
+- Keep the `overlapMinutes` and `overlapPosition` props in the interface to avoid breaking any other references, but they become unused
+
+### 6. ContinuousTimeline.tsx — Remove overlapMinutes/overlapPosition from EntryCard props
+
+Remove the two prop passes at lines 1563-1564:
+```
+overlapMinutes={overlapMap.get(entry.id)?.minutes}
+overlapPosition={overlapMap.get(entry.id)?.position}
 ```
 
-This was fixed in a previous prompt. If photos still aren't appearing, it may be because:
-- The `handleAddAtTime` function (used by explore drag) creates the entry but the background photo fetch hasn't completed yet when `fetchData()` is called
-- This is expected behavior: the card appears immediately with name/rating, photos fill in moments later after the google-places details call completes
+### 7. ContinuousTimeline.tsx — Remove unused AlertTriangle import
 
-No code change needed for photos -- the current implementation is correct.
+Remove `AlertTriangle` from the lucide-react import (line 9) if no longer used elsewhere in the file.
+
+## Visual Result
+
+| Overlap Count | Layout |
+|---|---|
+| No overlap | Card at full width (100%) |
+| 2 cards overlap | Each card gets 50% width, side by side |
+| 3 cards overlap | Each card gets 33% width, side by side |
+| Overlap resolved | Cards animate back to full width (200ms transition) |
+
+Each overlapping card also shows a thin 4px red bar at the overlap edge as a subtle conflict indicator.
 
 ## Files Modified
-- `src/components/timeline/ContinuousTimeline.tsx` -- add `externalDragGlobalHour` and `externalDragDurationHours` props, render ghost outline
-- `src/pages/Timeline.tsx` -- pass external drag state to ContinuousTimeline, replace floating SidebarEntryCard with EntryCard, import EntryCard
-
+- `src/components/timeline/ContinuousTimeline.tsx` — import overlapLayout, compute layout, apply left/width, replace conflict indicators, remove toast
+- `src/components/timeline/EntryCard.tsx` — remove overlap overlay rendering
