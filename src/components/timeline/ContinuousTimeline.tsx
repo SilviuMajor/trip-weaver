@@ -461,6 +461,42 @@ const ContinuousTimeline = ({
     return map;
   }, [sortedEntries, linkedEntryIds, getEntryGlobalHours]);
 
+  // Snap detection during move drag
+  const snapTarget = useMemo(() => {
+    if (!dragState || dragState.type !== 'move') return null;
+
+    const dragStart = dragState.currentStartHour;
+    const dragEnd = dragState.currentEndHour;
+    const dragDuration = dragEnd - dragStart;
+    const SNAP_THRESHOLD_HOURS = 20 / 60; // 20 minutes
+
+    let bestSnap: { entryId: string; side: 'above' | 'below'; snapStartHour: number } | null = null;
+    let bestDist = SNAP_THRESHOLD_HOURS;
+
+    for (const entry of sortedEntries) {
+      if (entry.id === dragState.entryId) continue;
+      if (entry.options[0]?.category === 'transfer') continue;
+
+      const gh = getEntryGlobalHours(entry);
+
+      // Snap BELOW this entry (dragged card goes after it)
+      const distBelow = Math.abs(dragStart - gh.endGH);
+      if (distBelow < bestDist) {
+        bestDist = distBelow;
+        bestSnap = { entryId: entry.id, side: 'below', snapStartHour: gh.endGH };
+      }
+
+      // Snap ABOVE this entry (dragged card goes before it)
+      const distAbove = Math.abs(dragEnd - gh.startGH);
+      if (distAbove < bestDist) {
+        bestDist = distAbove;
+        bestSnap = { entryId: entry.id, side: 'above', snapStartHour: gh.startGH - dragDuration };
+      }
+    }
+
+    return bestSnap;
+  }, [dragState, sortedEntries, getEntryGlobalHours]);
+
   // Conflict toast
   const prevConflictCountRef = useRef(0);
   useEffect(() => {
@@ -1712,7 +1748,7 @@ const ContinuousTimeline = ({
           if (!entry) return null;
           const origGH = getEntryGlobalHours(entry);
           const durationGH = origGH.endGH - origGH.startGH;
-          const startGH = dragState.currentStartHour;
+          const startGH = snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour;
           const endGH = startGH + durationGH;
           const startTop = startGH * pixelsPerHour;
           const endTop = endGH * pixelsPerHour;
@@ -1747,13 +1783,48 @@ const ContinuousTimeline = ({
           if (!entry) return null;
           const origGH = getEntryGlobalHours(entry);
           const durationGH = origGH.endGH - origGH.startGH;
-          const ghostTop = dragState.currentStartHour * pixelsPerHour;
+          const ghostStartGH = snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour;
+          const ghostTop = ghostStartGH * pixelsPerHour;
           const ghostHeight = durationGH * pixelsPerHour;
+          const isSnapped = !!snapTarget;
           return (
-            <div
-              className="absolute left-0 right-0 z-[11] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 pointer-events-none"
-              style={{ top: ghostTop, height: ghostHeight }}
-            />
+            <>
+              {/* Green connector line when snapped */}
+              {isSnapped && (() => {
+                const targetEntry = sortedEntries.find(e => e.id === snapTarget!.entryId);
+                if (!targetEntry) return null;
+                const targetGH = getEntryGlobalHours(targetEntry);
+                const connectorTop = snapTarget!.side === 'below'
+                  ? targetGH.endGH * pixelsPerHour
+                  : ghostStartGH * pixelsPerHour + ghostHeight;
+                const connectorBottom = snapTarget!.side === 'below'
+                  ? ghostTop
+                  : targetGH.startGH * pixelsPerHour;
+                const connectorHeight = Math.abs(connectorBottom - connectorTop);
+                if (connectorHeight < 1) return null;
+                return (
+                  <div
+                    className="absolute left-1/2 z-[10] border-l-2 border-dashed border-green-400/60 pointer-events-none"
+                    style={{ top: Math.min(connectorTop, connectorBottom), height: connectorHeight }}
+                  />
+                );
+              })()}
+              <div
+                className={cn(
+                  "absolute left-0 right-0 z-[11] rounded-lg border-2 border-dashed pointer-events-none",
+                  isSnapped
+                    ? "border-green-400/70 bg-green-400/10"
+                    : "border-primary/50 bg-primary/5"
+                )}
+                style={{ top: ghostTop, height: ghostHeight }}
+              >
+                {isSnapped && (
+                  <div className="absolute top-1 left-2 flex items-center gap-1 text-[10px] font-semibold text-green-500">
+                    <span>✓</span><span>Snap</span>
+                  </div>
+                )}
+              </div>
+            </>
           );
         })()}
 
@@ -1765,7 +1836,8 @@ const ContinuousTimeline = ({
           if (!opt) return null;
           const origGH = getEntryGlobalHours(entry);
           const durationGH = origGH.endGH - origGH.startGH;
-          const moveTop = dragState.currentStartHour * pixelsPerHour;
+          const moveStartGH = snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour;
+          const moveTop = moveStartGH * pixelsPerHour;
           const moveHeight = durationGH * pixelsPerHour;
           return (
             <div
