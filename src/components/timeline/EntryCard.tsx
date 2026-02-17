@@ -159,11 +159,6 @@ const EntryCard = ({
   const isMedium = h >= 40 && h < 72;
   const isCondensed = h >= 72 && h < 116;
 
-  // Overlap red tint calculation
-  const totalMs = new Date(endTime).getTime() - new Date(startTime).getTime();
-  const overlapFraction = overlapMinutes > 0 && totalMs > 0
-    ? Math.min(1, (overlapMinutes * 60000) / totalMs)
-    : 0;
 
   // ─── Transport mode detection ───
   const detectTransportMode = (name: string) => {
@@ -532,18 +527,6 @@ const EntryCard = ({
     );
   }
 
-  // ─── Overlap overlay helper ───
-  const overlapOverlay = overlapFraction > 0 ? (
-    <div
-      className="absolute inset-x-0 z-[1] pointer-events-none rounded-[14px]"
-      style={{
-        background: 'linear-gradient(to right, hsla(0, 70%, 50%, 0.25), hsla(0, 70%, 50%, 0.1))',
-        ...(overlapPosition === 'top'
-          ? { top: 0, height: `${overlapFraction * 100}%` }
-          : { bottom: 0, height: `${overlapFraction * 100}%` }),
-      }}
-    />
-  ) : null;
 
   // ─── Determine gradient tier ───
   const gradientTier = isFull ? 'full' : isCondensedTier ? 'condensed' : isTight ? 'tight' : 'compact';
@@ -581,7 +564,6 @@ const EntryCard = ({
         )}
       </div>
       {children}
-      {overlapOverlay}
     </div>
   );
 
