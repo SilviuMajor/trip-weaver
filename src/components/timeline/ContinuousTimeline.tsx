@@ -4,6 +4,7 @@ import { calculateSunTimes } from '@/lib/sunCalc';
 import type { EntryWithOptions, EntryOption, WeatherData, TransportMode } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
+import { getBlock, getEntriesAfterInBlock } from '@/lib/blockDetection';
 import { localToUTC, getHourInTimezone, resolveEntryTz, getDateInTimezone, getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
 import { Plus, Bus, Lock, LockOpen, AlertTriangle, Magnet, Loader2, Trash2 } from 'lucide-react';
 import { useDragResize, type DragType } from '@/hooks/useDragResize';
@@ -67,6 +68,7 @@ interface ContinuousTimelineProps {
   onDragPhaseChange?: (phase: 'timeline' | 'detached' | null) => void;
   binRef?: React.RefObject<HTMLDivElement>;
   onSnapRelease?: (draggedEntryId: string, targetEntryId: string, side: 'above' | 'below') => void;
+  onChainShift?: (resizedEntryId: string, entryIdsToShift: string[], deltaMs: number) => void;
 }
 
 const ContinuousTimeline = ({
@@ -112,6 +114,7 @@ const ContinuousTimeline = ({
   onDragPhaseChange,
   binRef,
   onSnapRelease,
+  onChainShift,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
@@ -326,6 +329,33 @@ const ContinuousTimeline = ({
       const newEndIso = new Date(new Date(newStartIso).getTime() + origDurationMs).toISOString();
       onEntryTimeChange(entryId, newStartIso, newEndIso);
     } else {
+      // Resize path
+      // Chain shift for bottom-edge resize
+      if (dragType === 'resize-bottom' && onChainShift) {
+        const block = getBlock(entryId, allEntries);
+        const afterEntries = getEntriesAfterInBlock(entryId, block);
+        if (afterEntries.length > 0) {
+          const originalEndMs = new Date(entry.end_time).getTime();
+          const endDayIndex = Math.floor(newEndGH / 24);
+          const clampedEndDayIndex = Math.max(0, Math.min(endDayIndex, days.length - 1));
+          const endDateStr = format(days[clampedEndDayIndex], 'yyyy-MM-dd');
+          const newEndIso = localToUTC(endDateStr, toTimeStr(newEndGH), isFlight ? primaryOpt.arrival_tz! : (tz || tzInfo?.activeTz || homeTimezone));
+          const newEndMs = new Date(newEndIso).getTime();
+          const deltaMs = newEndMs - originalEndMs;
+
+          if (deltaMs !== 0) {
+            // Check if any entry after is locked
+            const lockedAfter = afterEntries.find(e => e.is_locked);
+            if (lockedAfter) {
+              const lockedName = lockedAfter.options[0]?.name || 'an entry';
+              toast.error(`Can't resize — ${lockedName} is locked`);
+              return;
+            }
+            onChainShift(entryId, afterEntries.map(e => e.id), deltaMs);
+          }
+        }
+      }
+
       // Resize: end might be on a different day
       const endDayIndex = Math.floor(newEndGH / 24);
       const clampedEndDayIndex = Math.max(0, Math.min(endDayIndex, days.length - 1));
@@ -366,7 +396,7 @@ const ContinuousTimeline = ({
         onEntryTimeChange(linked.id, newLinkedStartIso, newLinkedEndIso);
       });
     }
-  }, [onEntryTimeChange, sortedEntries, days, dayTimezoneMap, homeTimezone, allEntries, onDragCommitOverride, onSnapRelease]);
+  }, [onEntryTimeChange, sortedEntries, days, dayTimezoneMap, homeTimezone, allEntries, onDragCommitOverride, onSnapRelease, onChainShift]);
 
   const { dragState, wasDraggedRef, clientXRef, clientYRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
     pixelsPerHour,
