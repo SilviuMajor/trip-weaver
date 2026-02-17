@@ -120,6 +120,8 @@ export interface PlaceOverviewProps {
   onClose: () => void;
   onMoveToIdeas?: (entryId: string) => void;
   preloadedReviews?: { text: string; rating: number | null; author: string; relativeTime: string }[] | null;
+  preloadedEditorialSummary?: string | null;
+  preloadedCurrentOpeningHours?: string[] | null;
 }
 
 const PlaceOverview = ({
@@ -139,6 +141,8 @@ const PlaceOverview = ({
   onClose,
   onMoveToIdeas,
   preloadedReviews,
+  preloadedEditorialSummary,
+  preloadedCurrentOpeningHours,
 }: PlaceOverviewProps) => {
   const homeTimezone = trip?.home_timezone ?? 'Europe/London';
   const defaultCheckinHours = trip?.default_checkin_hours ?? 2;
@@ -876,6 +880,30 @@ const PlaceOverview = ({
           {/* Enriched Place Details (non-flight, non-transport) */}
           {option.category !== 'flight' && option.category !== 'transfer' && (
             <PlaceDetailsSection option={option} entryStartTime={entry.start_time} />
+          )}
+
+          {/* Editorial Summary */}
+          {option.category !== 'flight' && option.category !== 'transfer' && preloadedEditorialSummary && (
+            <p className="text-xs text-muted-foreground italic leading-relaxed px-1">
+              "{preloadedEditorialSummary}"
+            </p>
+          )}
+
+          {/* Modified Hours Warning */}
+          {option.category !== 'flight' && option.category !== 'transfer' && preloadedCurrentOpeningHours && option.opening_hours && (
+            (() => {
+              const regular = (option.opening_hours as string[]).join('|');
+              const current = preloadedCurrentOpeningHours.join('|');
+              if (regular !== current) {
+                return (
+                  <div className="flex items-center gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 font-medium">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    <span>⚠️ Modified hours today</span>
+                  </div>
+                );
+              }
+              return null;
+            })()
           )}
 
           {/* Top Review */}
