@@ -132,6 +132,37 @@ const Planner = () => {
 
       toast({ title: `Added ${place.name} to Planner` });
       fetchData();
+
+      // Background: fetch details and persist photos
+      if (place.placeId && !place.placeId.startsWith('manual-')) {
+        const entryId = d.id;
+        (async () => {
+          try {
+            const { data: details } = await supabase.functions.invoke('google-places', {
+              body: { action: 'details', placeId: place.placeId },
+            });
+            if (details?.photos?.length > 0) {
+              const optionRes = await supabase
+                .from('entry_options')
+                .select('id')
+                .eq('entry_id', entryId)
+                .single();
+              if (optionRes.data) {
+                for (let i = 0; i < details.photos.length; i++) {
+                  await supabase.from('option_images').insert({
+                    option_id: optionRes.data.id,
+                    image_url: details.photos[i],
+                    sort_order: i,
+                  });
+                }
+                fetchData();
+              }
+            }
+          } catch (e) {
+            console.error('Background photo fetch failed:', e);
+          }
+        })();
+      }
     } catch (err: any) {
       toast({ title: 'Failed to add', description: err.message, variant: 'destructive' });
     }

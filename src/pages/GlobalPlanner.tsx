@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, RefreshCw, Star, Loader2, ChevronRight, MapPin, Search } from 'lucide-react';
+import { ArrowLeft, Star, Loader2, ChevronRight, MapPin, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Drawer, DrawerContent } from '@/components/ui/drawer';
@@ -10,6 +10,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { toast } from '@/hooks/use-toast';
 import { findCategory } from '@/lib/categories';
+import { inferCategoryFromTypes } from '@/lib/placeTypeMapping';
 import PlaceOverview from '@/components/timeline/PlaceOverview';
 import SidebarEntryCard from '@/components/timeline/SidebarEntryCard';
 import ExploreView, { type ExploreResult } from '@/components/timeline/ExploreView';
@@ -94,7 +95,6 @@ const GlobalPlanner = () => {
   const { adminUser, isAdmin, loading: authLoading } = useAdminAuth();
   const [places, setPlaces] = useState<GlobalPlace[]>([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedPlace, setSelectedPlace] = useState<GlobalPlace | null>(null);
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
@@ -104,19 +104,7 @@ const GlobalPlanner = () => {
     if (!authLoading && !isAdmin) navigate('/auth');
   }, [authLoading, isAdmin, navigate]);
 
-  const fetchPlaces = useCallback(async () => {
-    if (!adminUser) return;
-    const { data } = await supabase
-      .from('global_places')
-      .select('*')
-      .eq('user_id', adminUser.id)
-      .order('name');
-    setPlaces((data ?? []) as unknown as GlobalPlace[]);
-    setLoading(false);
-    return data ?? [];
-  }, [adminUser]);
-
-  // Direct query fallback: get places from entries immediately
+  // Bug 6 fix: Only use direct query from entries/entry_options, no sync
   const fetchDirectPlaces = useCallback(async (): Promise<GlobalPlace[]> => {
     if (!adminUser) return [];
     const { data: trips } = await supabase
@@ -154,7 +142,6 @@ const GlobalPlanner = () => {
       const hasAddress = !!opt.address || !!opt.location_name;
       if (!hasCoords && !hasAddress) continue;
 
-      // Dedup key
       const dedupKey = opt.google_place_id || `${opt.name.toLowerCase()}|${opt.latitude?.toFixed(3)}|${opt.longitude?.toFixed(3)}`;
       if (seen.has(dedupKey)) continue;
       seen.add(dedupKey);
@@ -193,50 +180,21 @@ const GlobalPlanner = () => {
     return result;
   }, [adminUser]);
 
-  const syncPlaces = useCallback(async () => {
-    if (!adminUser) return;
-    setSyncing(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('sync-global-places', {
-        body: { userId: adminUser.id },
-      });
-      if (error) throw error;
-      toast({ title: `Synced ${data?.synced ?? 0} places, geocoded ${data?.geocoded ?? 0}` });
-      await fetchPlaces();
-    } catch (err: any) {
-      toast({ title: 'Sync failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setSyncing(false);
-    }
-  }, [adminUser, fetchPlaces]);
-
-  // Fix 1: Auto-sync on mount + Fix 6: Direct query fallback
+  // Load data on mount — only direct query, no sync
   useEffect(() => {
     if (!adminUser) return;
     (async () => {
-      // Fetch existing global_places + direct query in parallel
-      const [globalResult, directResult] = await Promise.all([
-        fetchPlaces(),
-        fetchDirectPlaces(),
-      ]);
-
-      // If global_places is empty but direct query has results, show those immediately
-      if ((!globalResult || globalResult.length === 0) && directResult.length > 0) {
-        setPlaces(directResult);
-        setLoading(false);
-      }
-
-      // Always sync in background
-      syncPlaces();
+      const directResult = await fetchDirectPlaces();
+      setPlaces(directResult);
+      setLoading(false);
     })();
-  }, [adminUser]);
+  }, [adminUser, fetchDirectPlaces]);
 
   const filtered = useMemo(
     () => statusFilter === 'all' ? places : places.filter(p => p.status === statusFilter),
     [places, statusFilter]
   );
 
-  // Fix 5 client-side: apply extractCityCountry fallback for grouping
   const grouped = useMemo(() => {
     const countryMap = new Map<string, Map<string, GlobalPlace[]>>();
     const unsorted: GlobalPlace[] = [];
@@ -245,7 +203,6 @@ const GlobalPlanner = () => {
       let city = place.city;
       let country = place.country;
 
-      // Fallback: derive from address if city/country missing
       if (!city || !country) {
         const parsed = extractCityCountry(place.address);
         city = city || parsed.city;
@@ -262,10 +219,8 @@ const GlobalPlanner = () => {
     return { countryMap, unsorted };
   }, [filtered]);
 
-  // Get places for the selected city
   const cityPlaces = useMemo(() => {
     if (!selectedCity) return [];
-    // Match against both stored city and address-derived city
     return filtered.filter(p => {
       if (p.city === selectedCity) return true;
       const parsed = extractCityCountry(p.address);
@@ -273,7 +228,6 @@ const GlobalPlanner = () => {
     });
   }, [filtered, selectedCity]);
 
-  // Group city places by category for Netflix rows
   const cityCategories = useMemo(() => {
     const catMap = new Map<string, GlobalPlace[]>();
     cityPlaces.forEach(p => {
@@ -296,11 +250,12 @@ const GlobalPlanner = () => {
 
   const handleCityExploreAdd = useCallback(async (place: ExploreResult) => {
     if (!adminUser) return;
+    const inferredCat = inferCategoryFromTypes(place.types);
     await supabase.from('global_places').upsert({
       user_id: adminUser.id,
       google_place_id: place.placeId,
       name: place.name,
-      category: null,
+      category: inferredCat,
       latitude: place.lat,
       longitude: place.lng,
       status: 'want_to_go',
@@ -311,8 +266,10 @@ const GlobalPlanner = () => {
       city: selectedCity,
     } as any, { onConflict: 'user_id,google_place_id' });
     toast({ title: `Saved ${place.name} to My Places` });
-    fetchPlaces();
-  }, [adminUser, selectedCity, fetchPlaces]);
+    // Refetch via direct query
+    const updated = await fetchDirectPlaces();
+    setPlaces(updated);
+  }, [adminUser, selectedCity, fetchDirectPlaces]);
 
   const filters: { label: string; value: StatusFilter }[] = [
     { label: 'All', value: 'all' },
@@ -352,16 +309,10 @@ const GlobalPlanner = () => {
             </h1>
           </div>
           <div className="flex items-center gap-2">
-            {syncing && <span className="text-xs text-muted-foreground">Syncing…</span>}
             {selectedCity && !cityExploreOpen && (
               <Button variant="outline" size="sm" onClick={() => setCityExploreOpen(true)}>
                 <Search className="h-3.5 w-3.5 mr-1.5" />
                 Explore
-              </Button>
-            )}
-            {!selectedCity && (
-              <Button variant="ghost" size="icon" onClick={syncPlaces} disabled={syncing}>
-                <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
               </Button>
             )}
           </div>
@@ -395,7 +346,6 @@ const GlobalPlanner = () => {
             ))}
           </div>
         ) : selectedCity ? (
-          /* ============ City Detail View — Netflix rows ============ */
           <div className="space-y-6">
             {cityPlaces.length === 0 ? (
               <p className="py-20 text-center text-sm text-muted-foreground">No places in this city.</p>
@@ -433,11 +383,10 @@ const GlobalPlanner = () => {
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-muted text-3xl">📍</div>
             <p className="text-sm text-muted-foreground">
-              {syncing ? 'Syncing places from your trips…' : statusFilter === 'all' ? 'No places synced yet. Tap sync to import from your trips.' : `No ${statusFilter === 'visited' ? 'visited' : 'planned'} places.`}
+              {statusFilter === 'all' ? 'No places found. Add entries to your trips to see them here.' : `No ${statusFilter === 'visited' ? 'visited' : 'planned'} places.`}
             </p>
           </div>
         ) : (
-          /* ============ Grouped Country → City View ============ */
           <div className="space-y-6">
             {Array.from(grouped.countryMap.entries())
               .sort(([a], [b]) => a.localeCompare(b))
@@ -469,7 +418,6 @@ const GlobalPlanner = () => {
                 </div>
               ))}
 
-            {/* Unsorted places (no city/country) */}
             {grouped.unsorted.length > 0 && (
               <div>
                 <h2 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Other</h2>
@@ -519,7 +467,6 @@ const GlobalPlanner = () => {
           </div>
         )}
       </main>
-
 
       {/* City Explore overlay */}
       {cityExploreOpen && cityCenter && selectedCity && (

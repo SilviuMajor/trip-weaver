@@ -1,17 +1,18 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { ArrowLeft, MapPin, ClipboardList, List, Map as MapIcon, Plus } from 'lucide-react';
+import { ArrowLeft, MapPin, ClipboardList, List, Map as MapIcon, Plus, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
-import { findCategory, TRAVEL_MODES, type CategoryDef } from '@/lib/categories';
-import { CATEGORY_TO_PLACE_TYPES, getCategorySearchPlaceholder } from '@/lib/placeTypeMapping';
+import { findCategory, TRAVEL_MODES, PICKER_CATEGORIES, type CategoryDef } from '@/lib/categories';
+import { CATEGORY_TO_PLACE_TYPES, getCategorySearchPlaceholder, inferCategoryFromTypes } from '@/lib/placeTypeMapping';
 import { haversineKm } from '@/lib/distance';
 import { cn } from '@/lib/utils';
 import ExploreCard from './ExploreCard';
@@ -53,6 +54,11 @@ interface ExploreViewProps {
   onAddAtTime?: (place: ExploreResult, startTime: string, endTime: string) => void;
   initialOrigin?: { name: string; lat: number; lng: number } | null;
 }
+
+// ─── Explore categories (exclude transport types) ───
+const EXPLORE_CATEGORIES = PICKER_CATEGORIES.filter(
+  c => !['flight', 'hotel', 'private_transfer', 'transfer', 'transport', 'airport_processing'].includes(c.id)
+);
 
 // ─── Helpers ───
 
@@ -201,15 +207,31 @@ const ExploreView = ({
   const [manualLocationQuery, setManualLocationQuery] = useState('');
   const [manualPlaceDetails, setManualPlaceDetails] = useState<PlaceDetails | null>(null);
   const [yourPlaces, setYourPlaces] = useState<GlobalPlace[]>([]);
+  const [canLoadMore, setCanLoadMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Multi-select categories
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(() => {
+    if (categoryId) return [categoryId];
+    return EXPLORE_CATEGORIES.map(c => c.id);
+  });
   const originManuallySet = useRef(false);
   const fetchAbortRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const initialLoadDone = useRef(false);
+  const textSearchRadiusRef = useRef(10000);
   const isMobile = useIsMobile();
   const { adminUser } = useAdminAuth();
 
-  const cat: CategoryDef | undefined = categoryId ? findCategory(categoryId) : undefined;
   const destination = trip?.destination || null;
+
+  // Derive header title
+  const headerTitle = useMemo(() => {
+    if (selectedCategories.length === 1) {
+      const cat = findCategory(selectedCategories[0]);
+      return cat ? `${cat.emoji} ${cat.name}` : '🔍 Explore';
+    }
+    return '🔍 Explore';
+  }, [selectedCategories]);
 
   // Existing place IDs in trip
   const existingPlaceIds = useMemo(() => {
@@ -232,11 +254,20 @@ const ExploreView = ({
     }).slice(0, 8);
   }, [entries]);
 
+  // Combined place types from selected categories
+  const combinedTypes = useMemo(() => {
+    const types = new Set<string>();
+    for (const catId of selectedCategories) {
+      const catTypes = CATEGORY_TO_PLACE_TYPES[catId];
+      if (catTypes) catTypes.forEach(t => types.add(t));
+    }
+    return [...types];
+  }, [selectedCategories]);
+
   // Resolve origin
   useEffect(() => {
     if (!open) return;
     if (originManuallySet.current) return;
-    // Use initialOrigin if provided (global explore mode)
     if (initialOrigin) {
       setOriginLocation(initialOrigin);
       setOriginResolved(true);
@@ -263,7 +294,7 @@ const ExploreView = ({
     }
   }, [open, entries, destination, initialOrigin]);
 
-  // Auto-focus search input
+  // Auto-focus search input + reset on open
   useEffect(() => {
     if (open) {
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -274,7 +305,16 @@ const ExploreView = ({
       setSelectedPriceLevels([]);
       setMinRating(null);
       setMaxTravelMinutes(null);
+      setCanLoadMore(false);
       initialLoadDone.current = false;
+      textSearchRadiusRef.current = 10000;
+      
+      // Reset categories from prop
+      if (categoryId) {
+        setSelectedCategories([categoryId]);
+      } else {
+        setSelectedCategories(EXPLORE_CATEGORIES.map(c => c.id));
+      }
       
       originManuallySet.current = false;
       setCrossTripMatches(new Map());
@@ -282,7 +322,7 @@ const ExploreView = ({
       setManualLocationQuery('');
       setManualPlaceDetails(null);
     }
-  }, [open]);
+  }, [open, categoryId]);
 
   // Fetch user's nearby global places
   const globalToExploreResult = useCallback((p: GlobalPlace): ExploreResult => ({
@@ -313,33 +353,43 @@ const ExploreView = ({
       const nearby = data.filter(p => {
         if (!p.latitude || !p.longitude) return false;
         if (haversineKm(originLocation.lat, originLocation.lng, Number(p.latitude), Number(p.longitude)) > 10) return false;
-        if (categoryId && p.category !== categoryId) return false;
+        // Filter by selected categories if only one selected
+        if (selectedCategories.length === 1 && p.category !== selectedCategories[0]) return false;
         return true;
       });
       setYourPlaces(nearby as unknown as GlobalPlace[]);
     })();
-  }, [open, originLocation, categoryId, adminUser]);
+  }, [open, originLocation, selectedCategories, adminUser]);
 
-  // Auto-load nearby search when category is set and origin resolved
+  // Auto-load nearby search when origin resolved and categories selected
   useEffect(() => {
-    if (!open || !categoryId || !originResolved || initialLoadDone.current) return;
+    if (!open || !originResolved || initialLoadDone.current) return;
     if (searchQuery.trim()) return;
-
-    const types = CATEGORY_TO_PLACE_TYPES[categoryId];
-    if (!types || !originLocation) {
+    if (combinedTypes.length === 0 || !originLocation) {
       initialLoadDone.current = true;
       return;
     }
 
     initialLoadDone.current = true;
-    performNearbySearch(originLocation.lat, originLocation.lng, types);
-  }, [open, categoryId, originResolved, originLocation, searchQuery]);
+    performNearbySearch(originLocation.lat, originLocation.lng, combinedTypes);
+  }, [open, originResolved, originLocation, searchQuery, combinedTypes]);
 
-  // Debounced text search
+  // Debounced text search — also reload nearby when search cleared
   useEffect(() => {
-    if (!open || !searchQuery.trim()) return;
+    if (!open) return;
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      // Search cleared — reload nearby if we had results before
+      if (initialLoadDone.current && originLocation && combinedTypes.length > 0) {
+        initialLoadDone.current = false;
+        setTravelTimes(new Map());
+        setCanLoadMore(false);
+        // The auto-load effect above will re-trigger
+      }
+      return;
+    }
     const timer = setTimeout(() => {
-      performTextSearch(searchQuery.trim());
+      performTextSearch(trimmed);
     }, 500);
     return () => clearTimeout(timer);
   }, [searchQuery, open]);
@@ -359,7 +409,6 @@ const ExploreView = ({
 
     (async () => {
       try {
-        // Step 1: find matching entry_options in other trips
         const { data: matchingOptions } = await supabase
           .from('entry_options')
           .select('google_place_id, entry_id')
@@ -405,6 +454,7 @@ const ExploreView = ({
 
   const performNearbySearch = useCallback(async (lat: number, lng: number, types: string[]) => {
     setLoading(true);
+    setCanLoadMore(false);
     try {
       const { data, error } = await supabase.functions.invoke('google-places', {
         body: { action: 'nearbySearch', latitude: lat, longitude: lng, types, maxResults: 20 },
@@ -419,28 +469,66 @@ const ExploreView = ({
     }
   }, []);
 
-  const performTextSearch = useCallback(async (query: string) => {
+  const performTextSearch = useCallback(async (query: string, radius?: number) => {
     setLoading(true);
+    setTravelTimes(new Map());
+    setCanLoadMore(false);
+    textSearchRadiusRef.current = radius || 10000;
     try {
-      const body: any = { action: 'textSearch', query };
+      const body: any = { action: 'textSearch', query, radius: textSearchRadiusRef.current };
       if (originLocation) {
         body.latitude = originLocation.lat;
         body.longitude = originLocation.lng;
       }
-      if (categoryId) {
-        const types = CATEGORY_TO_PLACE_TYPES[categoryId];
+      // Only pass types for single-category selection
+      if (selectedCategories.length === 1) {
+        const types = CATEGORY_TO_PLACE_TYPES[selectedCategories[0]];
         if (types?.length) body.types = types;
       }
       const { data, error } = await supabase.functions.invoke('google-places', { body });
       if (error) throw error;
-      setResults(data?.results ?? []);
+      const newResults = data?.results ?? [];
+      setResults(newResults);
+      setCanLoadMore(newResults.length >= 20);
     } catch (err: any) {
       console.error('Text search failed:', err);
       toast({ title: 'Search failed', description: err.message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [originLocation, categoryId]);
+  }, [originLocation, selectedCategories]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (!searchQuery.trim()) return;
+    setLoadingMore(true);
+    const newRadius = textSearchRadiusRef.current * 2;
+    textSearchRadiusRef.current = newRadius;
+    try {
+      const body: any = { action: 'textSearch', query: searchQuery.trim(), radius: newRadius };
+      if (originLocation) {
+        body.latitude = originLocation.lat;
+        body.longitude = originLocation.lng;
+      }
+      if (selectedCategories.length === 1) {
+        const types = CATEGORY_TO_PLACE_TYPES[selectedCategories[0]];
+        if (types?.length) body.types = types;
+      }
+      const { data, error } = await supabase.functions.invoke('google-places', { body });
+      if (error) throw error;
+      const moreResults = data?.results ?? [];
+      // Merge and deduplicate
+      setResults(prev => {
+        const existingIds = new Set(prev.map(r => r.placeId));
+        const unique = moreResults.filter((r: ExploreResult) => !existingIds.has(r.placeId));
+        return [...prev, ...unique];
+      });
+      setCanLoadMore(moreResults.length >= 20);
+    } catch (err: any) {
+      console.error('Load more failed:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [searchQuery, originLocation, selectedCategories]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -448,11 +536,9 @@ const ExploreView = ({
   };
 
   const handleAdd = useCallback((place: ExploreResult) => {
-    // Optimistic: mark as added + toast immediately
     setAddedPlaceIds(prev => new Set(prev).add(place.placeId));
     toast({ title: `Added ${place.name} to Planner` });
 
-    // Fire DB insert in background, rollback on failure
     Promise.resolve(onAddToPlanner(place)).catch(() => {
       setAddedPlaceIds(prev => {
         const next = new Set(prev);
@@ -468,18 +554,37 @@ const ExploreView = ({
     setDetailOpen(true);
   }, []);
 
-  // Handle manual origin change
   const handleOriginChange = useCallback((name: string, lat: number, lng: number) => {
     originManuallySet.current = true;
     setOriginLocation({ name, lat, lng });
     setOriginPopoverOpen(false);
     setOriginSearchQuery('');
-    // Re-trigger nearby search if we have a category
     initialLoadDone.current = false;
     setOriginResolved(true);
   }, []);
 
-  // Handle manual add from zero-results form
+  // Handle category toggle
+  const handleCategoryToggle = useCallback((catId: string) => {
+    setSelectedCategories(prev => {
+      if (prev.includes(catId)) {
+        if (prev.length <= 1) return prev; // Keep at least one
+        return prev.filter(c => c !== catId);
+      }
+      return [...prev, catId];
+    });
+    // Re-trigger nearby search
+    initialLoadDone.current = false;
+    setResults([]);
+    setTravelTimes(new Map());
+  }, []);
+
+  const handleSelectAllCategories = useCallback(() => {
+    setSelectedCategories(EXPLORE_CATEGORIES.map(c => c.id));
+    initialLoadDone.current = false;
+    setResults([]);
+    setTravelTimes(new Map());
+  }, []);
+
   const handleManualAdd = useCallback(() => {
     if (!manualName.trim()) return;
     const syntheticPlace: ExploreResult = {
@@ -596,9 +701,13 @@ const ExploreView = ({
 
   if (!open) return null;
 
+  // Determine if multi-category mode (for card category inference)
+  const isMultiCategory = selectedCategories.length !== 1;
+
   // Detail sheet content
   const detailContent = selectedPlace ? (() => {
-    const { entry: tempEntry, option: tempOption } = buildTempEntry(selectedPlace, trip?.id || 'global', categoryId ?? null, selectedPlace.photoUrl ?? null);
+    const inferredCat = isMultiCategory ? inferCategoryFromTypes(selectedPlace.types) : selectedCategories[0];
+    const { entry: tempEntry, option: tempOption } = buildTempEntry(selectedPlace, trip?.id || 'global', inferredCat ?? null, selectedPlace.photoUrl ?? null);
     const placeIsInTrip = existingPlaceIds.has(selectedPlace.placeId) || addedPlaceIds.has(selectedPlace.placeId);
     return (
       <div className="overflow-y-auto max-h-[85vh]">
@@ -663,7 +772,7 @@ const ExploreView = ({
         </Button>
         <div className="flex-1 min-w-0">
           <h2 className="text-sm font-semibold truncate">
-            {cat ? `${cat.emoji} ${cat.name}` : '🔍 Explore'}
+            {headerTitle}
           </h2>
         </div>
         <div className="flex items-center gap-1">
@@ -687,7 +796,7 @@ const ExploreView = ({
           ref={inputRef}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder={getCategorySearchPlaceholder(categoryId ?? null, destination)}
+          placeholder={getCategorySearchPlaceholder(selectedCategories.length === 1 ? selectedCategories[0] : null, destination)}
           className="h-9 text-sm"
         />
       </form>
@@ -762,140 +871,188 @@ const ExploreView = ({
       )}
 
       {/* Filter chips */}
-      {results.length > 0 && (
-        <div className="flex items-center gap-1.5 px-4 py-1 overflow-x-auto">
-          {/* Price filter */}
-          <Popover>
-            <PopoverTrigger asChild>
+      <div className="flex items-center gap-1.5 px-4 py-1 overflow-x-auto">
+        {/* Category filter chip */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              className={cn(
+                'rounded-full px-3 py-1 text-[11px] font-medium border transition-colors whitespace-nowrap',
+                selectedCategories.length < EXPLORE_CATEGORIES.length
+                  ? 'bg-primary/10 text-primary border-primary/20'
+                  : 'text-muted-foreground border-border/50'
+              )}
+            >
+              {selectedCategories.length === 1
+                ? `${findCategory(selectedCategories[0])?.emoji ?? '📌'} ${findCategory(selectedCategories[0])?.name ?? 'Category'}`
+                : selectedCategories.length === EXPLORE_CATEGORIES.length
+                  ? 'Category'
+                  : `${selectedCategories.length} categories`}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-56 p-2" align="start">
+            <div className="space-y-1">
               <button
-                className={cn(
-                  'rounded-full px-3 py-1 text-[11px] font-medium border transition-colors whitespace-nowrap',
-                  selectedPriceLevels.length > 0 && selectedPriceLevels.length < 4
-                    ? 'bg-primary/10 text-primary border-primary/20'
-                    : 'text-muted-foreground border-border/50'
-                )}
+                className="flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-xs hover:bg-accent/50 transition-colors text-left font-medium"
+                onClick={handleSelectAllCategories}
               >
-                {selectedPriceLevels.length > 0 && selectedPriceLevels.length < 4
-                  ? selectedPriceLevels.map(p => {
-                      if (p === 'PRICE_LEVEL_INEXPENSIVE') return '€';
-                      if (p === 'PRICE_LEVEL_MODERATE') return '€€';
-                      if (p === 'PRICE_LEVEL_EXPENSIVE') return '€€€';
-                      return '€€€€';
-                    }).join('–')
-                  : 'Price'}
+                <Check className={cn('h-3.5 w-3.5', selectedCategories.length === EXPLORE_CATEGORIES.length ? 'text-primary' : 'text-transparent')} />
+                All categories
               </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-2" align="start">
-              <div className="flex gap-1">
-                {([
-                  { value: 'PRICE_LEVEL_INEXPENSIVE', label: '€' },
-                  { value: 'PRICE_LEVEL_MODERATE', label: '€€' },
-                  { value: 'PRICE_LEVEL_EXPENSIVE', label: '€€€' },
-                  { value: 'PRICE_LEVEL_VERY_EXPENSIVE', label: '€€€€' },
-                ] as const).map(({ value, label }) => {
-                  const isSelected = selectedPriceLevels.includes(value);
-                  return (
+              <div className="border-t my-1" />
+              {EXPLORE_CATEGORIES.map(cat => {
+                const isSelected = selectedCategories.includes(cat.id);
+                return (
+                  <button
+                    key={cat.id}
+                    className="flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-xs hover:bg-accent/50 transition-colors text-left"
+                    onClick={() => handleCategoryToggle(cat.id)}
+                  >
+                    <Check className={cn('h-3.5 w-3.5', isSelected ? 'text-primary' : 'text-transparent')} />
+                    <span>{cat.emoji}</span>
+                    <span className="truncate">{cat.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        {/* Price filter */}
+        {results.length > 0 && (
+          <>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  className={cn(
+                    'rounded-full px-3 py-1 text-[11px] font-medium border transition-colors whitespace-nowrap',
+                    selectedPriceLevels.length > 0 && selectedPriceLevels.length < 4
+                      ? 'bg-primary/10 text-primary border-primary/20'
+                      : 'text-muted-foreground border-border/50'
+                  )}
+                >
+                  {selectedPriceLevels.length > 0 && selectedPriceLevels.length < 4
+                    ? selectedPriceLevels.map(p => {
+                        if (p === 'PRICE_LEVEL_INEXPENSIVE') return '€';
+                        if (p === 'PRICE_LEVEL_MODERATE') return '€€';
+                        if (p === 'PRICE_LEVEL_EXPENSIVE') return '€€€';
+                        return '€€€€';
+                      }).join('–')
+                    : 'Price'}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-2" align="start">
+                <div className="flex gap-1">
+                  {([
+                    { value: 'PRICE_LEVEL_INEXPENSIVE', label: '€' },
+                    { value: 'PRICE_LEVEL_MODERATE', label: '€€' },
+                    { value: 'PRICE_LEVEL_EXPENSIVE', label: '€€€' },
+                    { value: 'PRICE_LEVEL_VERY_EXPENSIVE', label: '€€€€' },
+                  ] as const).map(({ value, label }) => {
+                    const isSelected = selectedPriceLevels.includes(value);
+                    return (
+                      <button
+                        key={value}
+                        className={cn(
+                          'rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors',
+                          isSelected
+                            ? 'bg-primary/10 text-primary border-primary/20'
+                            : 'text-muted-foreground border-border/50 hover:bg-muted'
+                        )}
+                        onClick={() => {
+                          setSelectedPriceLevels(prev =>
+                            isSelected ? prev.filter(v => v !== value) : [...prev, value]
+                          );
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            {/* Rating filter */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  className={cn(
+                    'rounded-full px-3 py-1 text-[11px] font-medium border transition-colors whitespace-nowrap',
+                    minRating !== null
+                      ? 'bg-primary/10 text-primary border-primary/20'
+                      : 'text-muted-foreground border-border/50'
+                  )}
+                >
+                  {minRating !== null ? `${minRating}+` : 'Rating'}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-2" align="start">
+                <div className="flex gap-1">
+                  {([
+                    { value: 4.5, label: '4.5+' },
+                    { value: 4.0, label: '4.0+' },
+                    { value: 3.5, label: '3.5+' },
+                    { value: null as number | null, label: 'Any' },
+                  ]).map(({ value, label }) => (
                     <button
-                      key={value}
+                      key={label}
                       className={cn(
                         'rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors',
-                        isSelected
+                        minRating === value
                           ? 'bg-primary/10 text-primary border-primary/20'
                           : 'text-muted-foreground border-border/50 hover:bg-muted'
                       )}
-                      onClick={() => {
-                        setSelectedPriceLevels(prev =>
-                          isSelected ? prev.filter(v => v !== value) : [...prev, value]
-                        );
-                      }}
+                      onClick={() => setMinRating(value)}
                     >
                       {label}
                     </button>
-                  );
-                })}
-              </div>
-            </PopoverContent>
-          </Popover>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
 
-          {/* Rating filter */}
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                className={cn(
-                  'rounded-full px-3 py-1 text-[11px] font-medium border transition-colors whitespace-nowrap',
-                  minRating !== null
-                    ? 'bg-primary/10 text-primary border-primary/20'
-                    : 'text-muted-foreground border-border/50'
-                )}
-              >
-                {minRating !== null ? `${minRating}+` : 'Rating'}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-2" align="start">
-              <div className="flex gap-1">
-                {([
-                  { value: 4.5, label: '4.5+' },
-                  { value: 4.0, label: '4.0+' },
-                  { value: 3.5, label: '3.5+' },
-                  { value: null as number | null, label: 'Any' },
-                ]).map(({ value, label }) => (
-                  <button
-                    key={label}
-                    className={cn(
-                      'rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors',
-                      minRating === value
-                        ? 'bg-primary/10 text-primary border-primary/20'
-                        : 'text-muted-foreground border-border/50 hover:bg-muted'
-                    )}
-                    onClick={() => setMinRating(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
-
-          {/* Distance filter */}
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                className={cn(
-                  'rounded-full px-3 py-1 text-[11px] font-medium border transition-colors whitespace-nowrap',
-                  maxTravelMinutes !== null
-                    ? 'bg-primary/10 text-primary border-primary/20'
-                    : 'text-muted-foreground border-border/50'
-                )}
-              >
-                {maxTravelMinutes !== null ? `Under ${maxTravelMinutes}m` : 'Distance'}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-2" align="start">
-              <div className="flex gap-1">
-                {([
-                  { value: 10, label: 'Under 10m' },
-                  { value: 15, label: 'Under 15m' },
-                  { value: 30, label: 'Under 30m' },
-                  { value: null as number | null, label: 'Any' },
-                ]).map(({ value, label }) => (
-                  <button
-                    key={label}
-                    className={cn(
-                      'rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors',
-                      maxTravelMinutes === value
-                        ? 'bg-primary/10 text-primary border-primary/20'
-                        : 'text-muted-foreground border-border/50 hover:bg-muted'
-                    )}
-                    onClick={() => setMaxTravelMinutes(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
-        </div>
-      )}
+            {/* Distance filter */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  className={cn(
+                    'rounded-full px-3 py-1 text-[11px] font-medium border transition-colors whitespace-nowrap',
+                    maxTravelMinutes !== null
+                      ? 'bg-primary/10 text-primary border-primary/20'
+                      : 'text-muted-foreground border-border/50'
+                  )}
+                >
+                  {maxTravelMinutes !== null ? `Under ${maxTravelMinutes}m` : 'Distance'}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-2" align="start">
+                <div className="flex gap-1">
+                  {([
+                    { value: 10, label: 'Under 10m' },
+                    { value: 15, label: 'Under 15m' },
+                    { value: 30, label: 'Under 30m' },
+                    { value: null as number | null, label: 'Any' },
+                  ]).map(({ value, label }) => (
+                    <button
+                      key={label}
+                      className={cn(
+                        'rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors',
+                        maxTravelMinutes === value
+                          ? 'bg-primary/10 text-primary border-primary/20'
+                          : 'text-muted-foreground border-border/50 hover:bg-muted'
+                      )}
+                      onClick={() => setMaxTravelMinutes(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </>
+        )}
+      </div>
 
       {/* Result count */}
       {!loading && results.length > 0 && (
@@ -1003,11 +1160,13 @@ const ExploreView = ({
             const travelTimeStr = minutes != null ? `${modeEmoji} ${minutes}m` : undefined;
             const travelTimeLoading = !!originLocation && minutes == null && results.length > 0;
             const hours = getCompactHours(place.openingHours);
+            // Infer category per card in multi-category mode
+            const cardCategoryId = isMultiCategory ? inferCategoryFromTypes(place.types) : selectedCategories[0];
             return (
               <ExploreCard
                 key={place.placeId}
                 place={place}
-                categoryId={categoryId ?? null}
+                categoryId={cardCategoryId}
                 onAddToPlanner={() => handleAdd(place)}
                 onTap={() => handleCardTap(place)}
                 isInTrip={inTrip}
@@ -1018,6 +1177,17 @@ const ExploreView = ({
               />
             );
           })}
+
+          {/* Load more button */}
+          {!loading && canLoadMore && (
+            <button
+              className="w-full py-3 text-sm text-primary hover:underline disabled:opacity-50"
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? 'Loading more...' : 'Load more results'}
+            </button>
+          )}
 
           {/* Add manually link */}
           {!loading && results.length > 0 && (
