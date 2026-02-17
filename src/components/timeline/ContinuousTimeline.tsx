@@ -6,7 +6,8 @@ import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
 import { getBlock, getEntriesAfterInBlock } from '@/lib/blockDetection';
 import { localToUTC, getHourInTimezone, resolveEntryTz, getDateInTimezone, getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
-import { Plus, Bus, Lock, LockOpen, AlertTriangle, Magnet, Loader2, Trash2 } from 'lucide-react';
+import { Plus, Bus, Lock, LockOpen, Magnet, Loader2, Trash2 } from 'lucide-react';
+import { computeOverlapLayout } from '@/lib/overlapLayout';
 import { useDragResize, type DragType } from '@/hooks/useDragResize';
 import EntryCard from './EntryCard';
 import FlightGroupCard from './FlightGroupCard';
@@ -553,6 +554,24 @@ const ContinuousTimeline = ({
     return map;
   }, [sortedEntries, linkedEntryIds, getEntryGlobalHours]);
 
+  // Overlap layout for horizontal offset (Google Calendar style)
+  const overlapLayout = useMemo(() => {
+    const layoutEntries = sortedEntries
+      .filter(e => !linkedEntryIds.has(e.id))
+      .map(e => {
+        const gh = getEntryGlobalHours(e);
+        return { id: e.id, startMinutes: gh.startGH * 60, endMinutes: gh.endGH * 60 };
+      });
+    const results = computeOverlapLayout(layoutEntries);
+    const map = new Map<string, { column: number; totalColumns: number }>();
+    for (const r of results) {
+      if (r.totalColumns > 1) {
+        map.set(r.entryId, { column: r.column, totalColumns: r.totalColumns });
+      }
+    }
+    return map;
+  }, [sortedEntries, linkedEntryIds, getEntryGlobalHours]);
+
   // Snap detection during move drag
   const snapTarget = useMemo(() => {
     if (!dragState || dragState.type !== 'move') return null;
@@ -623,15 +642,6 @@ const ContinuousTimeline = ({
   // Keep ref in sync for handleDragCommit
   snapTargetRef.current = snapTarget;
 
-  // Conflict toast
-  const prevConflictCountRef = useRef(0);
-  useEffect(() => {
-    const conflictCount = overlapMap.size;
-    if (conflictCount > 0 && conflictCount !== prevConflictCountRef.current) {
-      toast.warning('Time conflict — drag to adjust');
-    }
-    prevConflictCountRef.current = conflictCount;
-  }, [overlapMap]);
 
   // Drag-to-create state
   const [slotDragStart, setSlotDragStart] = useState<number | null>(null);
@@ -1376,27 +1386,31 @@ const ContinuousTimeline = ({
                   style={{
                     top,
                     height,
-                    left: '0%',
-                    width: '100%',
+                    left: (() => { const cl = overlapLayout.get(entry.id); return cl ? `${(cl.column / cl.totalColumns) * 100}%` : '0%'; })(),
+                    width: (() => { const cl = overlapLayout.get(entry.id); return cl ? `${(1 / cl.totalColumns) * 100}%` : '100%'; })(),
                     zIndex: isDragged ? 30 : isTransport ? 20 : hasConflict ? 10 + index : 10,
                     opacity: isBeingDragged ? 0.4
                       : (dragState && dragState.type === 'move' && dragState.entryId !== entry.id) ? 0.4
                       : undefined,
-                    transition: 'opacity 0.2s ease',
+                    transition: 'left 200ms ease, width 200ms ease, opacity 0.2s ease',
                     border: isBeingDragged ? '3px dashed hsl(var(--primary) / 0.5)' : undefined,
                     borderRadius: isBeingDragged ? '16px' : undefined,
                     touchAction: 'none',
                   }}
                 >
                 <div className="relative h-full">
-                  {/* Conflict indicators */}
+                  {/* Thin red edge bar for conflicts */}
                   {hasConflict && !isDragged && (
-                    <div className="absolute inset-0 rounded-xl ring-2 ring-red-400/60 pointer-events-none z-20" />
-                  )}
-                  {hasConflict && !isDragged && (
-                    <div className="absolute right-1 top-1/2 -translate-y-1/2 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow-md">
-                      <AlertTriangle className="h-3 w-3" />
-                    </div>
+                    <div
+                      className="absolute z-20 rounded-sm pointer-events-none"
+                      style={{
+                        width: 4,
+                        background: '#f87171',
+                        ...(overlapMap.get(entry.id)?.position === 'bottom'
+                          ? { right: -1, bottom: 0, height: '30%', borderRadius: '0 2px 2px 0' }
+                          : { left: -1, top: 0, height: '30%', borderRadius: '2px 0 0 2px' }),
+                      }}
+                    />
                   )}
 
                   {/* Top resize handle */}
@@ -1560,8 +1574,6 @@ const ContinuousTimeline = ({
                   ) : (
                     <div className="relative h-full">
                       <EntryCard
-                        overlapMinutes={overlapMap.get(entry.id)?.minutes}
-                        overlapPosition={overlapMap.get(entry.id)?.position}
                         height={height}
                         notes={(entry as any).notes}
                         option={primaryOption}
