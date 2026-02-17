@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, RefreshCw, Star, Loader2, ChevronRight, MapPin } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Star, Loader2, ChevronRight, MapPin, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Drawer, DrawerContent } from '@/components/ui/drawer';
@@ -12,6 +12,7 @@ import { toast } from '@/hooks/use-toast';
 import { findCategory } from '@/lib/categories';
 import PlaceOverview from '@/components/timeline/PlaceOverview';
 import SidebarEntryCard from '@/components/timeline/SidebarEntryCard';
+import ExploreView, { type ExploreResult } from '@/components/timeline/ExploreView';
 import type { GlobalPlace, EntryWithOptions, EntryOption } from '@/types/trip';
 
 type StatusFilter = 'all' | 'visited' | 'want_to_go';
@@ -97,6 +98,7 @@ const GlobalPlanner = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedPlace, setSelectedPlace] = useState<GlobalPlace | null>(null);
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
+  const [cityExploreOpen, setCityExploreOpen] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !isAdmin) navigate('/auth');
@@ -282,6 +284,36 @@ const GlobalPlanner = () => {
     return catMap;
   }, [cityPlaces]);
 
+  const cityCenter = useMemo(() => {
+    if (!selectedCity) return null;
+    const cp = cityPlaces.filter(p => p.latitude && p.longitude);
+    if (!cp.length) return null;
+    return {
+      lat: cp.reduce((s, p) => s + Number(p.latitude), 0) / cp.length,
+      lng: cp.reduce((s, p) => s + Number(p.longitude), 0) / cp.length,
+    };
+  }, [cityPlaces, selectedCity]);
+
+  const handleCityExploreAdd = useCallback(async (place: ExploreResult) => {
+    if (!adminUser) return;
+    await supabase.from('global_places').upsert({
+      user_id: adminUser.id,
+      google_place_id: place.placeId,
+      name: place.name,
+      category: null,
+      latitude: place.lat,
+      longitude: place.lng,
+      status: 'want_to_go',
+      source: 'explore_save',
+      rating: place.rating,
+      price_level: place.priceLevel,
+      address: place.address,
+      city: selectedCity,
+    } as any, { onConflict: 'user_id,google_place_id' });
+    toast({ title: `Saved ${place.name} to My Places` });
+    fetchPlaces();
+  }, [adminUser, selectedCity, fetchPlaces]);
+
   const filters: { label: string; value: StatusFilter }[] = [
     { label: 'All', value: 'all' },
     { label: 'Visited', value: 'visited' },
@@ -304,7 +336,9 @@ const GlobalPlanner = () => {
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="icon" onClick={() => {
-              if (selectedCity) { setSelectedCity(null); } else { navigate('/'); }
+              if (cityExploreOpen) { setCityExploreOpen(false); }
+              else if (selectedCity) { setSelectedCity(null); setCityExploreOpen(false); }
+              else { navigate('/'); }
             }}>
               <ArrowLeft className="h-5 w-5" />
             </Button>
@@ -319,6 +353,12 @@ const GlobalPlanner = () => {
           </div>
           <div className="flex items-center gap-2">
             {syncing && <span className="text-xs text-muted-foreground">Syncing…</span>}
+            {selectedCity && !cityExploreOpen && (
+              <Button variant="outline" size="sm" onClick={() => setCityExploreOpen(true)}>
+                <Search className="h-3.5 w-3.5 mr-1.5" />
+                Explore
+              </Button>
+            )}
             {!selectedCity && (
               <Button variant="ghost" size="icon" onClick={syncPlaces} disabled={syncing}>
                 <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
@@ -479,6 +519,24 @@ const GlobalPlanner = () => {
           </div>
         )}
       </main>
+
+
+      {/* City Explore overlay */}
+      {cityExploreOpen && cityCenter && selectedCity && (
+        <div className="fixed inset-0 z-40 bg-background flex flex-col">
+          <ExploreView
+            open={true}
+            onClose={() => setCityExploreOpen(false)}
+            trip={null}
+            entries={[]}
+            isEditor={true}
+            onAddToPlanner={handleCityExploreAdd}
+            onCardTap={() => {}}
+            onAddManually={() => {}}
+            initialOrigin={{ name: selectedCity, ...cityCenter }}
+          />
+        </div>
+      )}
 
       {/* Place detail drawer */}
       <Drawer open={!!selectedPlace} onOpenChange={(open) => !open && setSelectedPlace(null)}>
