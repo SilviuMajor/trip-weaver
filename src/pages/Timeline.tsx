@@ -1540,6 +1540,76 @@ const Timeline = () => {
 
     await fetchData();
 
+    // ─── Smart Drop: push overlapped card down ───
+    const newStartMs = new Date(newStartIso).getTime();
+    const newEndMs = new Date(newEndIso).getTime();
+
+    const overlapped = scheduledEntries.find(e => {
+      if (e.id === entryId) return false;
+      if (e.options[0]?.category === 'transfer') return false;
+      const eStart = new Date(e.start_time).getTime();
+      const eEnd = new Date(e.end_time).getTime();
+      return newStartMs < eEnd && newEndMs > eStart;
+    });
+
+    if (overlapped && !overlapped.is_locked) {
+      const pushedStart = newEndMs;
+      const pushedDuration = new Date(overlapped.end_time).getTime() - new Date(overlapped.start_time).getTime();
+      const pushedEnd = pushedStart + pushedDuration;
+
+      // Check: would push collide with a locked card?
+      const wouldCollide = scheduledEntries.find(e => {
+        if (e.id === entryId || e.id === overlapped.id) return false;
+        if (!e.is_locked) return false;
+        const eStart = new Date(e.start_time).getTime();
+        return pushedEnd > eStart && pushedStart < new Date(e.end_time).getTime();
+      });
+
+      // Check: would push overlap ANY other card? (no cascading)
+      const wouldOverlapAnother = scheduledEntries.find(e => {
+        if (e.id === entryId || e.id === overlapped.id) return false;
+        if (e.options[0]?.category === 'transfer') return false;
+        const eStart = new Date(e.start_time).getTime();
+        const eEnd = new Date(e.end_time).getTime();
+        return pushedStart < eEnd && pushedEnd > eStart;
+      });
+
+      if (!wouldCollide && !wouldOverlapAnother) {
+        const oldOverlapStart = overlapped.start_time;
+        const oldOverlapEnd = overlapped.end_time;
+
+        await supabase.from('entries').update({
+          start_time: new Date(pushedStart).toISOString(),
+          end_time: new Date(pushedEnd).toISOString(),
+        }).eq('id', overlapped.id);
+
+        sonnerToast.success(`Pushed ${overlapped.options[0]?.name || 'entry'} to make room`);
+
+        pushAction({
+          description: 'Smart drop + push',
+          undo: async () => {
+            await supabase.from('entries').update({
+              start_time: oldOverlapStart,
+              end_time: oldOverlapEnd,
+            }).eq('id', overlapped.id);
+          },
+          redo: async () => {
+            await supabase.from('entries').update({
+              start_time: new Date(pushedStart).toISOString(),
+              end_time: new Date(pushedEnd).toISOString(),
+            }).eq('id', overlapped.id);
+          },
+        });
+
+        handleSnapRelease(entryId, overlapped.id, 'below');
+        await fetchData();
+      }
+    } else if (overlapped && overlapped.is_locked) {
+      sonnerToast(`Overlaps ${overlapped.options[0]?.name || 'a locked entry'}`, {
+        description: 'Unlock it to rearrange',
+      });
+    }
+
     // Auto-extend trip if entry goes past final day
     if (trip && tripId) await autoExtendTripIfNeeded(tripId, newEndIso, trip, fetchData);
 
