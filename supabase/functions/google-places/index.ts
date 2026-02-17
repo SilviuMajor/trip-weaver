@@ -190,16 +190,17 @@ serve(async (req) => {
     }
 
     if (action === 'nearbySearch') {
-      const { latitude, longitude, types, maxResults = 20 } = body;
+      const { latitude, longitude, types, maxResults = 20, radius } = body;
+      const searchRadius = radius || 5000;
 
-      // First call with 5km radius
+      // First call with specified radius
       const requestBody1: any = {
         includedTypes: types,
         maxResultCount: Math.min(maxResults, 20),
         locationRestriction: {
           circle: {
             center: { latitude, longitude },
-            radius: 5000.0,
+            radius: Number(searchRadius),
           },
         },
         rankPreference: 'DISTANCE',
@@ -234,7 +235,7 @@ serve(async (req) => {
             locationRestriction: {
               circle: {
                 center: { latitude, longitude },
-                radius: 10000.0,
+                radius: Number(searchRadius) * 2,
               },
             },
             rankPreference: 'DISTANCE',

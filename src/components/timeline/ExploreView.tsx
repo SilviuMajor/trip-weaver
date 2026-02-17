@@ -244,6 +244,7 @@ const ExploreView = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const initialLoadDone = useRef(false);
   const textSearchRadiusRef = useRef(10000);
+  const nearbyRadiusRef = useRef(5000);
   const isMobile = useIsMobile();
   const { adminUser } = useAdminAuth();
 
@@ -487,15 +488,19 @@ const ExploreView = ({
     })();
   }, [results, trip?.id]);
 
-  const performNearbySearch = useCallback(async (lat: number, lng: number, types: string[]) => {
+  const performNearbySearch = useCallback(async (lat: number, lng: number, types: string[], radius?: number) => {
     setLoading(true);
     setCanLoadMore(false);
+    const r = radius || 5000;
+    nearbyRadiusRef.current = r;
     try {
       const { data, error } = await supabase.functions.invoke('google-places', {
-        body: { action: 'nearbySearch', latitude: lat, longitude: lng, types, maxResults: 20 },
+        body: { action: 'nearbySearch', latitude: lat, longitude: lng, types, maxResults: 20, radius: r },
       });
       if (error) throw error;
-      setResults(data?.results ?? []);
+      const newResults = data?.results ?? [];
+      setResults(newResults);
+      setCanLoadMore(newResults.length >= 20);
     } catch (err: any) {
       console.error('Nearby search failed:', err);
       toast({ title: 'Search failed', description: err.message, variant: 'destructive' });
@@ -534,30 +539,47 @@ const ExploreView = ({
   }, [originLocation, selectedCategories]);
 
   const handleLoadMore = useCallback(async () => {
-    if (!searchQuery.trim()) return;
     setLoadingMore(true);
-    const newRadius = textSearchRadiusRef.current * 2;
-    textSearchRadiusRef.current = newRadius;
     try {
-      const body: any = { action: 'textSearch', query: searchQuery.trim(), radius: newRadius };
-      if (originLocation) {
-        body.latitude = originLocation.lat;
-        body.longitude = originLocation.lng;
+      if (searchQuery.trim()) {
+        // Text search: widen radius
+        const newRadius = textSearchRadiusRef.current * 2;
+        textSearchRadiusRef.current = newRadius;
+        const body: any = { action: 'textSearch', query: searchQuery.trim(), radius: newRadius };
+        if (originLocation) {
+          body.latitude = originLocation.lat;
+          body.longitude = originLocation.lng;
+        }
+        if (selectedCategories.length === 1) {
+          const types = CATEGORY_TO_PLACE_TYPES[selectedCategories[0]];
+          if (types?.length) body.types = types;
+        }
+        const { data, error } = await supabase.functions.invoke('google-places', { body });
+        if (error) throw error;
+        const moreResults = data?.results ?? [];
+        setResults(prev => {
+          const existingIds = new Set(prev.map(r => r.placeId));
+          const unique = moreResults.filter((r: ExploreResult) => !existingIds.has(r.placeId));
+          return [...prev, ...unique];
+        });
+        setCanLoadMore(moreResults.length >= 20);
+      } else if (originLocation) {
+        // Nearby search: double radius
+        const newRadius = nearbyRadiusRef.current * 2;
+        nearbyRadiusRef.current = newRadius;
+        const types = selectedCategories.flatMap(catId => CATEGORY_TO_PLACE_TYPES[catId] || []);
+        const { data, error } = await supabase.functions.invoke('google-places', {
+          body: { action: 'nearbySearch', latitude: originLocation.lat, longitude: originLocation.lng, types, maxResults: 20, radius: newRadius },
+        });
+        if (error) throw error;
+        const moreResults = data?.results ?? [];
+        setResults(prev => {
+          const existingIds = new Set(prev.map(r => r.placeId));
+          const unique = moreResults.filter((r: ExploreResult) => !existingIds.has(r.placeId));
+          return [...prev, ...unique];
+        });
+        setCanLoadMore(moreResults.length >= 20);
       }
-      if (selectedCategories.length === 1) {
-        const types = CATEGORY_TO_PLACE_TYPES[selectedCategories[0]];
-        if (types?.length) body.types = types;
-      }
-      const { data, error } = await supabase.functions.invoke('google-places', { body });
-      if (error) throw error;
-      const moreResults = data?.results ?? [];
-      // Merge and deduplicate
-      setResults(prev => {
-        const existingIds = new Set(prev.map(r => r.placeId));
-        const unique = moreResults.filter((r: ExploreResult) => !existingIds.has(r.placeId));
-        return [...prev, ...unique];
-      });
-      setCanLoadMore(moreResults.length >= 20);
     } catch (err: any) {
       console.error('Load more failed:', err);
     } finally {
