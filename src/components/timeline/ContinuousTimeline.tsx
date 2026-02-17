@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
 import { getBlock, getEntriesAfterInBlock } from '@/lib/blockDetection';
 import { localToUTC, getHourInTimezone, resolveEntryTz, getDateInTimezone, getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
-import { Plus, Bus, Lock, LockOpen, Magnet, Loader2, Trash2 } from 'lucide-react';
+import { Plus, Lock, LockOpen, Trash2 } from 'lucide-react';
 import { computeOverlapLayout } from '@/lib/overlapLayout';
 import { useDragResize, type DragType } from '@/hooks/useDragResize';
 import EntryCard from './EntryCard';
@@ -44,8 +44,6 @@ interface ContinuousTimelineProps {
   onClickSlot?: (isoTime: string) => void;
   onDragSlot?: (startIso: string, endIso: string) => void;
   onAddBetween?: (prefillTime: string, gapContext?: { fromName: string; toName: string; fromAddress: string; toAddress: string }) => void;
-  onAddTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string, resolvedTz?: string) => void;
-  onGenerateTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string, resolvedTz?: string) => void;
   onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
   onDropFromPanel?: (entryId: string, globalHour: number) => void;
   onDropExploreCard?: (place: any, categoryId: string | null, globalHour: number) => void;
@@ -59,7 +57,7 @@ interface ContinuousTimelineProps {
   isUndated?: boolean;
   onCurrentDayChange?: (dayIndex: number) => void;
   onTrimDay?: (side: 'start' | 'end') => void;
-  onMagnetSnap?: (entryId: string) => Promise<void>;
+  
   pixelsPerHour: number;
   onResetZoom?: () => void;
   onDragActiveChange?: (active: boolean, entryId: string | null) => void;
@@ -95,8 +93,6 @@ const ContinuousTimeline = ({
   onClickSlot,
   onDragSlot,
   onAddBetween,
-  onAddTransport,
-  onGenerateTransport,
   onEntryTimeChange,
   onDropFromPanel,
   onDropExploreCard,
@@ -110,7 +106,7 @@ const ContinuousTimeline = ({
   isUndated,
   onCurrentDayChange,
   onTrimDay,
-  onMagnetSnap,
+  
   pixelsPerHour,
   onResetZoom,
   onDragActiveChange,
@@ -462,7 +458,7 @@ const ContinuousTimeline = ({
 
   const [shakeEntryId, setShakeEntryId] = useState<string | null>(null);
   
-  const [magnetLoadingId, setMagnetLoadingId] = useState<string | null>(null);
+  
   
   const handleLockedAttempt = useCallback((entryId: string) => {
     toast.error('Cannot drag a locked event');
@@ -1226,24 +1222,11 @@ const ContinuousTimeline = ({
           const gapHeight = gapBottomPx - gapTopPx;
           const midGH = (aEndGH + bStartGH) / 2;
           const btnTop = midGH * pixelsPerHour - 12;
-          const isTransportGap = gapMin < 120;
 
           return (
             <div key={`gap-${entry.id}-${nextEntry.id}`}>
               <div className="absolute left-1/2 border-l-2 border-dashed border-primary/20 pointer-events-none" style={{ top: gapTopPx, height: gapHeight }} />
-              {isTransportGap ? (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const fromResolvedTz = resolveGlobalHourTz(aEndGH);
-                    (onGenerateTransport || onAddTransport)!(entry.id, nextEntry.id, entry.end_time, fromResolvedTz);
-                  }}
-                  className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                  style={{ top: btnTop }}
-                >
-                  <Bus className="h-3 w-3" /><span>Transport</span>
-                </button>
-              ) : gapMin > 360 ? (
+              {gapMin > 360 ? (
                 <>
                   <button
                     onClick={(e) => {
@@ -1380,55 +1363,6 @@ const ContinuousTimeline = ({
           // Transport entries are now rendered as inline connectors, not as cards
           if (isTransport) return null;
 
-          // Compute magnet state: gap-aware, transport-aware
-          const magnetState = (() => {
-            const cat = primaryOption.category;
-            // Sub-entries of flight groups: no magnet
-            if (cat === 'airport_processing' || entry.linked_flight_id) {
-              return { showMagnet: false, nextLocked: false };
-            }
-
-            const isTransferEntry = cat === 'transfer';
-            const isFlightEntry = cat === 'flight';
-
-            // For flights, use the flight GROUP end (checkout end, not flight end)
-            let effectiveEndTime = entry.end_time;
-            if (isFlightEntry && flightGroup?.checkout) {
-              effectiveEndTime = flightGroup.checkout.end_time;
-            }
-
-            let transportAfter: EntryWithOptions | null = null;
-            let nextEvent: EntryWithOptions | null = null;
-            for (let i = index + 1; i < sortedEntries.length; i++) {
-              const c = sortedEntries[i];
-              const co = c.options[0];
-              // Skip entries that are part of THIS flight group
-              if (isFlightEntry && (c.linked_flight_id === entry.id || c.id === flightGroup?.checkin?.id || c.id === flightGroup?.checkout?.id)) continue;
-              if (co?.category === 'transfer' && !transportAfter && !isTransferEntry) {
-                transportAfter = c;
-              } else if (co?.category !== 'transfer' && co?.category !== 'airport_processing' && !c.linked_flight_id) {
-                nextEvent = c;
-                break;
-              }
-            }
-
-            if (!nextEvent) return { showMagnet: false, nextLocked: false };
-
-            const GAP_TOLERANCE_MS = 2 * 60 * 1000;
-
-            if (isTransferEntry) {
-              const gapMs = new Date(nextEvent.start_time).getTime() - new Date(entry.end_time).getTime();
-              return { showMagnet: gapMs > GAP_TOLERANCE_MS, nextLocked: !!nextEvent.is_locked };
-            }
-
-            if (transportAfter) {
-              const gapToTransport = new Date(transportAfter.start_time).getTime() - new Date(effectiveEndTime).getTime();
-              return { showMagnet: gapToTransport > GAP_TOLERANCE_MS, nextLocked: !!nextEvent.is_locked };
-            } else {
-              const gapToNext = new Date(nextEvent.start_time).getTime() - new Date(effectiveEndTime).getTime();
-              return { showMagnet: gapToNext > GAP_TOLERANCE_MS, nextLocked: !!nextEvent.is_locked };
-            }
-          })();
           const isFlightCard = !!flightGroup;
           const canDrag = isEditor && onEntryTimeChange && !isLocked && !isFlightCard;
 
@@ -1595,35 +1529,6 @@ const ContinuousTimeline = ({
                             />
                           );
                         })()}
-                        {/* Magnet on flight group */}
-                        {magnetState.showMagnet && (
-                          <button
-                            data-magnet
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (magnetState.nextLocked) {
-                                toast('Next event is locked', { description: 'Unlock it before snapping' });
-                                return;
-                              }
-                              if (!onMagnetSnap) return;
-                              setMagnetLoadingId(entry.id);
-                              onMagnetSnap(entry.id).finally(() => setMagnetLoadingId(null));
-                            }}
-                            className={cn(
-                              "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
-                              magnetState.nextLocked
-                                ? "bg-muted cursor-not-allowed"
-                                : "bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
-                              magnetLoadingId === entry.id && "animate-pulse"
-                            )}
-                          >
-                            {magnetLoadingId === entry.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin text-green-600" />
-                            ) : (
-                              <Magnet className={cn("h-3 w-3", magnetState.nextLocked ? "text-muted-foreground/40" : "text-green-600 dark:text-green-400")} style={{ transform: 'rotate(180deg)' }} />
-                            )}
-                          </button>
-                        )}
                       </div>
                     );
                   })() : (
@@ -1683,34 +1588,6 @@ const ContinuousTimeline = ({
                             <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-foreground rotate-45" />
                           </div>
                         </div>
-                      )}
-                      {/* Magnet snap icon outside card — bottom right */}
-                      {magnetState.showMagnet && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (magnetState.nextLocked) {
-                              toast('Next event is locked', { description: 'Unlock it before snapping' });
-                              return;
-                            }
-                            if (!onMagnetSnap) return;
-                            setMagnetLoadingId(entry.id);
-                            onMagnetSnap(entry.id).finally(() => setMagnetLoadingId(null));
-                          }}
-                          className={cn(
-                            "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
-                            magnetState.nextLocked
-                              ? "bg-muted cursor-not-allowed"
-                              : "bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
-                            magnetLoadingId === entry.id && "animate-pulse"
-                          )}
-                        >
-                          {magnetLoadingId === entry.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-green-600" />
-                          ) : (
-                            <Magnet className={cn("h-3 w-3", magnetState.nextLocked ? "text-muted-foreground/40" : "text-green-600 dark:text-green-400")} style={{ transform: 'rotate(180deg)' }} />
-                          )}
-                        </button>
                       )}
                     </div>
                   )}
