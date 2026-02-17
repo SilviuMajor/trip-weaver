@@ -42,7 +42,7 @@ export interface ExploreResult {
 interface ExploreViewProps {
   open: boolean;
   onClose: () => void;
-  trip: Trip;
+  trip: Trip | null;
   entries: EntryWithOptions[];
   categoryId?: string | null;
   isEditor: boolean;
@@ -51,6 +51,7 @@ interface ExploreViewProps {
   onAddManually: () => void;
   createContext?: { startTime?: string; endTime?: string } | null;
   onAddAtTime?: (place: ExploreResult, startTime: string, endTime: string) => void;
+  initialOrigin?: { name: string; lat: number; lng: number } | null;
 }
 
 // ─── Helpers ───
@@ -178,6 +179,7 @@ const ExploreView = ({
   onAddManually,
   createContext,
   onAddAtTime,
+  initialOrigin,
 }: ExploreViewProps) => {
   const [results, setResults] = useState<ExploreResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -207,7 +209,7 @@ const ExploreView = ({
   const { adminUser } = useAdminAuth();
 
   const cat: CategoryDef | undefined = categoryId ? findCategory(categoryId) : undefined;
-  const destination = trip.destination || null;
+  const destination = trip?.destination || null;
 
   // Existing place IDs in trip
   const existingPlaceIds = useMemo(() => {
@@ -234,6 +236,12 @@ const ExploreView = ({
   useEffect(() => {
     if (!open) return;
     if (originManuallySet.current) return;
+    // Use initialOrigin if provided (global explore mode)
+    if (initialOrigin) {
+      setOriginLocation(initialOrigin);
+      setOriginResolved(true);
+      return;
+    }
     const fromEntries = resolveOriginFromEntries(entries);
     if (fromEntries) {
       setOriginLocation(fromEntries);
@@ -253,7 +261,7 @@ const ExploreView = ({
     } else {
       setOriginResolved(true);
     }
-  }, [open, entries, destination]);
+  }, [open, entries, destination, initialOrigin]);
 
   // Auto-focus search input
   useEffect(() => {
@@ -364,7 +372,7 @@ const ExploreView = ({
           .from('entries')
           .select('id, trip_id')
           .in('id', entryIds)
-          .neq('trip_id', trip.id);
+          .neq('trip_id', trip?.id ?? '__none__');
 
         if (!matchingEntries?.length) return;
 
@@ -393,7 +401,7 @@ const ExploreView = ({
         // Non-critical, silently ignore
       }
     })();
-  }, [results, trip.id]);
+  }, [results, trip?.id]);
 
   const performNearbySearch = useCallback(async (lat: number, lng: number, types: string[]) => {
     setLoading(true);
@@ -590,7 +598,7 @@ const ExploreView = ({
 
   // Detail sheet content
   const detailContent = selectedPlace ? (() => {
-    const { entry: tempEntry, option: tempOption } = buildTempEntry(selectedPlace, trip.id, categoryId ?? null, selectedPlace.photoUrl ?? null);
+    const { entry: tempEntry, option: tempOption } = buildTempEntry(selectedPlace, trip?.id || 'global', categoryId ?? null, selectedPlace.photoUrl ?? null);
     const placeIsInTrip = existingPlaceIds.has(selectedPlace.placeId) || addedPlaceIds.has(selectedPlace.placeId);
     return (
       <div className="overflow-y-auto max-h-[85vh]">
