@@ -66,6 +66,15 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
       )}
       style={{ height: 140, opacity: isInTrip ? 0.75 : 1 }}
       onClick={onTap}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('application/json', JSON.stringify({
+          source: 'explore',
+          place,
+          categoryId,
+        }));
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
     >
       {/* Background */}
       {hasImage ? (

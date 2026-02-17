@@ -148,6 +148,9 @@ const Timeline = () => {
   const [exploreCategoryId, setExploreCategoryId] = useState<string | null>(null);
   const [exploreSearchQuery, setExploreSearchQuery] = useState<string | null>(null);
 
+  // Floating place for "Add to Timeline" mode
+  const [floatingPlaceForTimeline, setFloatingPlaceForTimeline] = useState<ExploreResult | null>(null);
+
   // Touch drag state (mobile planner → timeline)
   const [touchDragEntry, setTouchDragEntry] = useState<EntryWithOptions | null>(null);
   const [touchDragPosition, setTouchDragPosition] = useState<{ x: number; y: number } | null>(null);
@@ -1584,6 +1587,43 @@ const Timeline = () => {
     }
   };
 
+  // Handle drop of ExploreCard onto timeline
+  const handleDropExploreCard = useCallback(async (place: ExploreResult, categoryId: string | null, globalHour: number) => {
+    if (!trip || !tripId) return;
+
+    const daysArr = getDays();
+    const dayIndex = Math.max(0, Math.min(Math.floor(globalHour / 24), daysArr.length - 1));
+    const dayDate = daysArr[dayIndex];
+    const dateStr = format(dayDate, 'yyyy-MM-dd');
+    const localHour = globalHour - dayIndex * 24;
+    const durationMin = 60;
+
+    const startMinutes = Math.round(localHour * 60);
+    const sH = Math.floor(startMinutes / 60) % 24;
+    const sM = startMinutes % 60;
+    const endMinutes = startMinutes + durationMin;
+    const eH = Math.floor(endMinutes / 60) % 24;
+    const eM = endMinutes % 60;
+
+    const dayKey = format(dayDate, 'yyyy-MM-dd');
+    const tzInfo = dayTimezoneMap.get(dayKey);
+    const resolvedTz = resolveDropTz(localHour, tzInfo, homeTimezone);
+    const startIso = localToUTC(dateStr, `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`, resolvedTz);
+    const endDayIndex = Math.min(Math.floor((globalHour + durationMin / 60) / 24), daysArr.length - 1);
+    const endDateStr = format(daysArr[endDayIndex], 'yyyy-MM-dd');
+    const endIso = localToUTC(endDateStr, `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`, resolvedTz);
+
+    await handleAddAtTime(place, startIso, endIso);
+  }, [trip, tripId, dayTimezoneMap, homeTimezone, handleAddAtTime]);
+
+  // Handle "Add to Timeline" from PlaceOverview
+  const handleAddToTimeline = useCallback((place: ExploreResult) => {
+    setExploreOpen(false);
+    setExploreCategoryId(null);
+    setExploreSearchQuery(null);
+    setFloatingPlaceForTimeline(place);
+  }, []);
+
   // Touch drag from planner sidebar (mobile)
   const touchDragGlobalHourRef = useRef<number | null>(null);
   const touchDragEntryRef = useRef<EntryWithOptions | null>(null);
@@ -2193,7 +2233,6 @@ const Timeline = () => {
 
   const days = getDays();
 
-
   if (!currentUser) return null;
 
   return (
@@ -2374,9 +2413,17 @@ const Timeline = () => {
                   onAddBetween={handleAddBetween}
                   onAddTransport={handleAddTransport}
                   onGenerateTransport={handleGenerateTransportDirect}
-                  onDragSlot={handleDragSlot}
-                  onClickSlot={() => {}}
+                  onDragSlot={floatingPlaceForTimeline ? (startIso, endIso) => {
+                    handleAddAtTime(floatingPlaceForTimeline, startIso, endIso);
+                    setFloatingPlaceForTimeline(null);
+                  } : handleDragSlot}
+                  onClickSlot={floatingPlaceForTimeline ? (isoTime) => {
+                    const endTime = new Date(new Date(isoTime).getTime() + 60 * 60000).toISOString();
+                    handleAddAtTime(floatingPlaceForTimeline, isoTime, endTime);
+                    setFloatingPlaceForTimeline(null);
+                  } : () => {}}
                   onDropFromPanel={handleDropOnTimeline}
+                  onDropExploreCard={handleDropExploreCard}
                   onModeSwitchConfirm={handleModeSwitchConfirm}
                   onDeleteTransport={handleDeleteTransport}
                   onToggleLock={handleToggleLock}
@@ -2518,7 +2565,7 @@ const Timeline = () => {
                     entries={entries}
                     categoryId={exploreCategoryId}
                     isEditor={isEditor}
-                    onAddToPlanner={handleAddToPlanner}
+                   onAddToPlanner={handleAddToPlanner}
                     onCardTap={() => {}}
                     onAddManually={() => {
                       setExploreOpen(false);
@@ -2532,6 +2579,7 @@ const Timeline = () => {
                     createContext={prefillStartTime ? { startTime: prefillStartTime, endTime: prefillEndTime } : null}
                     onAddAtTime={handleAddAtTime}
                     initialSearchQuery={exploreSearchQuery}
+                    onAddToTimeline={handleAddToTimeline}
                     embedded
                   />
                 ) : undefined}
@@ -2692,6 +2740,7 @@ const Timeline = () => {
               createContext={prefillStartTime ? { startTime: prefillStartTime, endTime: prefillEndTime } : null}
               onAddAtTime={handleAddAtTime}
               initialSearchQuery={exploreSearchQuery}
+              onAddToTimeline={handleAddToTimeline}
             />
           )}
 
@@ -2762,6 +2811,23 @@ const Timeline = () => {
                 </span>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Floating place instruction overlay */}
+      {floatingPlaceForTimeline && (
+        <div className="fixed inset-x-0 z-50 flex items-center justify-center pointer-events-none" style={{ top: 110 }}>
+          <div className="pointer-events-auto flex items-center gap-3 rounded-full bg-primary px-5 py-2.5 shadow-lg">
+            <span className="text-sm font-medium text-primary-foreground">
+              Tap a time slot to place <span className="font-bold">{floatingPlaceForTimeline.name}</span>
+            </span>
+            <button
+              className="rounded-full bg-primary-foreground/20 px-3 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary-foreground/30 transition-colors"
+              onClick={() => setFloatingPlaceForTimeline(null)}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
