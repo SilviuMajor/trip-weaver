@@ -1,55 +1,93 @@
 
 
-# Smart Drop (Push on Release)
+# Unified Planner to Timeline Drag
 
 ## Overview
-When releasing a dragged card on top of another card, intelligently push the overlapped card down to make room instead of leaving a conflict marker. Only pushes one level deep -- if the push itself would cause further overlaps, the existing conflict marker behavior handles it.
+Replace the existing touch-based drag system in `SidebarEntryCard` with a unified system that uses document-level touch listeners (surviving sidebar DOM changes), and add desktop mouse-drag support. The floating card and ghost outline match the timeline's visual style. The existing HTML5 drag-and-drop is kept as a fallback for desktop.
 
 ## Changes
 
-### File: `src/pages/Timeline.tsx` -- Add overlap detection and push logic to `handleEntryTimeChange`
+### 1. `SidebarEntryCard.tsx` -- Add unified drag callbacks and rewrite touch handling
 
-**Location: After the existing `await fetchData()` call at line 1541, before the auto-extend trip check at line 1544.**
+**New props added to interface:**
+- `onSidebarDragStart?: (entry: EntryWithOptions, position: { x: number; y: number }) => void`
+- `onSidebarDragMove?: (x: number, y: number) => void`
+- `onSidebarDragEnd?: () => void`
 
-Insert overlap detection and push logic:
+**Touch handling rewrite (replace existing `onTouchStart`/`onTouchMove`/`onTouchEnd`):**
+- Remove the React-level `onTouchMove` and `onTouchEnd` handlers from the div
+- In `onTouchStart`: register document-level `touchmove` (passive: false), `touchend`, and `touchcancel` listeners
+- 300ms hold timer with 10px movement threshold cancellation
+- On hold trigger: call `onSidebarDragStart`, then subsequent `touchmove` calls `onSidebarDragMove`, and `touchend` calls `onSidebarDragEnd`
+- All listeners cleaned up on end/cancel
+- Keep `draggable` and `onDragStart` for HTML5 desktop fallback
 
-1. Compute `newStartMs` and `newEndMs` from `newStartIso` and `newEndIso`
-2. Find the first overlapped scheduled entry (excluding the dragged entry itself and transport/transfer entries)
-3. If overlapped entry exists and is **not locked**:
-   - Calculate pushed position: start at `newEndMs`, preserve the overlapped entry's duration
-   - Check if the push would collide with a locked card
-   - Check if the push would overlap any other card (no cascading)
-   - If both checks pass:
-     - Update the overlapped entry's times in the database
-     - Show a success toast: "Pushed [name] to make room"
-     - Register an undo action for the push (storing old start/end of the overlapped entry)
-     - Call `handleSnapRelease(entryId, overlapped.id, 'below')` to create a transport between the dragged and pushed card
-   - If checks fail: do nothing extra, existing conflict markers handle it
-4. If overlapped entry is **locked**: show an info toast "Overlaps [name] -- Unlock it to rearrange"
+**Mouse drag for desktop (new `onMouseDown`):**
+- On mousedown, register document-level `mousemove` and `mouseup`
+- Use a 5px movement threshold before starting drag (to distinguish from clicks)
+- Once threshold crossed: call `onSidebarDragStart`, then `onSidebarDragMove` on each `mousemove`, `onSidebarDragEnd` on `mouseup`
+- Clean up listeners on mouseup
+- Prevent default to avoid conflicting with HTML5 drag
 
-**Important**: Use `scheduledEntries` (the memo that filters `is_scheduled !== false`) for overlap detection, not raw `entries`. Skip entries with `category === 'transfer'` to avoid triggering push on transport nodes.
+### 2. `PlannerContent.tsx` -- Thread new callbacks through
 
-**Undo considerations**: The main move is already registered as an undo action (lines 1488-1496). The push gets a separate undo action so Ctrl+Z first undoes the push, then a second Ctrl+Z undoes the move. This provides granular undo control.
+**New props on PlannerContentProps:**
+- `onSidebarDragStart?: (entry: EntryWithOptions, position: { x: number; y: number }) => void`
+- `onSidebarDragMove?: (x: number, y: number) => void`
+- `onSidebarDragEnd?: () => void`
+
+**Pass to every `SidebarEntryCard` instance** in both `renderCategoryRow` and `renderOtherRow`.
+
+### 3. `CategorySidebar.tsx` -- Thread new callbacks through
+
+**New props on CategorySidebarProps:**
+- `onSidebarDragStart?: (entry: EntryWithOptions, position: { x: number; y: number }) => void`
+- `onSidebarDragMove?: (x: number, y: number) => void`
+- `onSidebarDragEnd?: () => void`
+
+**Pass to `PlannerContent`.**
+
+### 4. `Timeline.tsx` -- Manage sidebar drag state and render visuals
+
+**New state:**
+```
+sidebarDrag: { entry: EntryWithOptions; clientX: number; clientY: number } | null
+```
+
+**New callbacks:**
+- `handleSidebarDragStartUnified(entry, pos)`: sets `sidebarDrag` state, hides planner on mobile (`touchDragHidePlanner = true`), starts 5-second cancel timeout
+- `handleSidebarDragMoveUnified(x, y)`: updates `sidebarDrag.clientX/clientY`, computes `globalHour` from timeline area (same logic as existing `handleTouchMove` at lines 2009-2035), resets cancel timeout on movement
+- `handleSidebarDragEndUnified()`: reads computed `globalHour`, calls existing `handleDropOnTimeline(entry.id, globalHour)` which already handles scheduling + Smart Drop. Cleans up state.
+
+**Pass to both `CategorySidebar` instances** (mobile and desktop).
+
+**Floating card render (fixed position, z-[60]):**
+- Rendered at page level (outside sidebar DOM) when `sidebarDrag` is set
+- Shows a compact `SidebarEntryCard` at 200px width, centered on finger/cursor with slight offset
+- Shows time pill below the card when over the timeline area (same style as existing touch drag ghost)
+
+**Ghost outline on timeline:**
+- When `sidebarDrag` is active and `globalHour` is computed, render a ghost outline on the timeline grid at the computed position
+- Width matches the timeline entry column, height based on entry duration
+- Uses green snap style when within 20min of another card (reuses existing snap detection)
+
+**Remove old touch drag system:**
+- The old `touchDragEntry`/`touchDragPosition`/`touchDragGlobalHour` state and related `handleTouchDragStart`/`cleanupTouchDrag`/document-level listener effect (lines 1970-2067) are replaced by the new unified system
+- The old touch drag ghost render (lines 3152-3178) is replaced by the new floating card
 
 ## Behavior Summary
 
-| Scenario | Result |
-|----------|--------|
-| Drop on unlocked card, push fits | Overlapped card pushed down, transport created |
-| Drop on locked card | Toast "Overlaps [name] -- Unlock it to rearrange", conflict marker |
-| Push would hit another card | No push, conflict marker from existing logic |
-| Push would hit a locked card | No push, conflict marker from existing logic |
-| Ctrl+Z after smart drop | First undo: reverts push. Second undo: reverts move |
-
-## Technical Details
-
-- Overlap check uses `scheduledEntries` which excludes unscheduled entries
-- Transport/transfer entries are excluded from overlap targets (they have their own repositioning logic at lines 1508-1536)
-- The push is one-level only: if pushing card B would overlap card C, we abort the push entirely
-- `handleSnapRelease` is reused to create the transport, matching existing snap behavior
-- The `fetchData()` call at line 1541 has already refreshed state, so the overlap check uses the latest `scheduledEntries` via closure. However, since React state updates are async, we use `newStartMs`/`newEndMs` from the function params (which are the committed values) rather than re-reading from state.
+| Platform | Interaction | Result |
+|----------|-------------|--------|
+| Mobile touch | 300ms hold on sidebar card | Floating card follows finger, ghost on timeline, drop schedules entry |
+| Desktop mouse | Click + drag sidebar card | Floating card follows cursor, ghost on timeline, drop schedules entry |
+| Desktop HTML5 | Native drag (fallback) | Existing behavior preserved via `draggable` + `onDragStart` |
+| Snap | Drop within 20min of card | Green snap ghost, transport created on release |
+| Smart Drop | Drop on unlocked card | Pushed card down (from Prompt 7) |
 
 ## Files Modified
-- `src/pages/Timeline.tsx` -- overlap detection + push logic in `handleEntryTimeChange`
-- No other files changed
+- `src/components/timeline/SidebarEntryCard.tsx` -- new drag callbacks, document-level listeners
+- `src/components/timeline/PlannerContent.tsx` -- thread callbacks
+- `src/components/timeline/CategorySidebar.tsx` -- thread callbacks  
+- `src/pages/Timeline.tsx` -- state management, floating card, ghost outline, replace old touch drag
 
