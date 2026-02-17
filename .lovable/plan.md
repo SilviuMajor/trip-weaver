@@ -1,76 +1,55 @@
 
 
-# Group Drop + Transport Recalculation
+# Smart Drop (Push on Release)
 
 ## Overview
-When a group drag (from Prompt 5) is released, all entries in the block move together by the same time delta. Transports within the group are recalculated in the background. Snap detection also works for group edges.
+When releasing a dragged card on top of another card, intelligently push the overlapped card down to make room instead of leaving a conflict marker. Only pushes one level deep -- if the push itself would cause further overlaps, the existing conflict marker behavior handles it.
 
 ## Changes
 
-### 1. `ContinuousTimeline.tsx` -- Add `onGroupDrop` prop and group commit logic
+### File: `src/pages/Timeline.tsx` -- Add overlap detection and push logic to `handleEntryTimeChange`
 
-**Props interface (line ~72):**
-- Add `onGroupDrop?: (entryIds: string[], deltaMs: number) => void;`
+**Location: After the existing `await fetchData()` call at line 1541, before the auto-extend trip check at line 1544.**
 
-**Destructure the new prop (line ~117)**
+Insert overlap detection and push logic:
 
-**`handleDragCommit` (line ~260):**
-- Add an early check: if `dragState.dragMode === 'group'` and `dragState.blockEntryIds.length > 0`:
-  - Compute `deltaHours = newStartGH - dragState.originalStartHour`
-  - Compute `deltaMs = deltaHours * 3600000`
-  - Call `onGroupDrop?.(dragState.blockEntryIds, deltaMs)`
-  - Return early (skip individual move logic)
+1. Compute `newStartMs` and `newEndMs` from `newStartIso` and `newEndIso`
+2. Find the first overlapped scheduled entry (excluding the dragged entry itself and transport/transfer entries)
+3. If overlapped entry exists and is **not locked**:
+   - Calculate pushed position: start at `newEndMs`, preserve the overlapped entry's duration
+   - Check if the push would collide with a locked card
+   - Check if the push would overlap any other card (no cascading)
+   - If both checks pass:
+     - Update the overlapped entry's times in the database
+     - Show a success toast: "Pushed [name] to make room"
+     - Register an undo action for the push (storing old start/end of the overlapped entry)
+     - Call `handleSnapRelease(entryId, overlapped.id, 'below')` to create a transport between the dragged and pushed card
+   - If checks fail: do nothing extra, existing conflict markers handle it
+4. If overlapped entry is **locked**: show an info toast "Overlaps [name] -- Unlock it to rearrange"
 
-**Snap detection (`snapTarget` useMemo, line ~524):**
-- When `dragState.dragMode === 'group'`, compute group bounds instead of single-card bounds:
-  - Find the first and last entries in `dragState.blockEntryIds` from `sortedEntries`
-  - Calculate group start/end global hours plus the drag delta
-  - Use group top edge for "snap above" and group bottom edge for "snap below" detection
-  - This allows the entire block's edges to snap to nearby cards
+**Important**: Use `scheduledEntries` (the memo that filters `is_scheduled !== false`) for overlap detection, not raw `entries`. Skip entries with `category === 'transfer'` to avoid triggering push on transport nodes.
 
-**Snap release for groups (line ~282):**
-- When `dragState.dragMode === 'group'` and `snapTargetRef.current` is active:
-  - For `side === 'below'`: use the LAST entry in the block as the dragged entry for `onSnapRelease`
-  - For `side === 'above'`: use the FIRST entry in the block as the dragged entry for `onSnapRelease`
-  - Still call `onGroupDrop` for the positional shift of all entries
-  - Then call `onSnapRelease` for transport creation at the snap edge
-
-**Ghost/floating visuals (lines ~1811-1903):**
-- When `dragState.dragMode === 'group'`:
-  - Ghost outline covers entire block height (first entry start to last entry end, shifted by delta)
-  - Floating card area covers the full block height
-
-### 2. `Timeline.tsx` -- Implement `handleGroupDrop`
-
-**New callback (after `handleChainShift`/`recalculateTransports`, around line 1115):**
-
-```
-handleGroupDrop(entryIds: string[], deltaMs: number)
-```
-
-- For each entry ID, find the current entry and compute new start/end by adding `deltaMs`
-- Batch update all entries in the database
-- Register undo/redo action storing old and new times for all entries
-- Call `fetchData()` to refresh
-- Fire-and-forget: filter transport entries from `entryIds` and call `recalculateTransports` for them
-
-**Pass prop (in the ContinuousTimeline JSX):**
-- Add `onGroupDrop={handleGroupDrop}`
-
-### 3. `useDragResize.ts` -- Expose `dragMode` and `blockEntryIds`
-
-Note: Prompt 5 adds `dragMode` and `blockEntryIds` to `DragState`. This prompt assumes those fields exist. If Prompt 5 has not been implemented yet, the `dragMode` field will default to `undefined`, and all group-related code paths will be skipped (safe fallback). The group drop logic only activates when `dragState.dragMode === 'group'`.
+**Undo considerations**: The main move is already registered as an undo action (lines 1488-1496). The push gets a separate undo action so Ctrl+Z first undoes the push, then a second Ctrl+Z undoes the move. This provides granular undo control.
 
 ## Behavior Summary
 
 | Scenario | Result |
 |----------|--------|
-| Group drag released (no snap) | All entries shift by deltaMs, transports recalculate |
-| Group drag released near a card (snap) | Entries shift to snapped position + transport created at snap edge |
-| Ctrl+Z after group drop | All entries return to original positions |
-| Individual drag (dragMode !== 'group') | Existing behavior unchanged |
+| Drop on unlocked card, push fits | Overlapped card pushed down, transport created |
+| Drop on locked card | Toast "Overlaps [name] -- Unlock it to rearrange", conflict marker |
+| Push would hit another card | No push, conflict marker from existing logic |
+| Push would hit a locked card | No push, conflict marker from existing logic |
+| Ctrl+Z after smart drop | First undo: reverts push. Second undo: reverts move |
+
+## Technical Details
+
+- Overlap check uses `scheduledEntries` which excludes unscheduled entries
+- Transport/transfer entries are excluded from overlap targets (they have their own repositioning logic at lines 1508-1536)
+- The push is one-level only: if pushing card B would overlap card C, we abort the push entirely
+- `handleSnapRelease` is reused to create the transport, matching existing snap behavior
+- The `fetchData()` call at line 1541 has already refreshed state, so the overlap check uses the latest `scheduledEntries` via closure. However, since React state updates are async, we use `newStartMs`/`newEndMs` from the function params (which are the committed values) rather than re-reading from state.
 
 ## Files Modified
-- `src/components/timeline/ContinuousTimeline.tsx` -- new prop, group commit/snap logic, group ghost visuals
-- `src/pages/Timeline.tsx` -- new `handleGroupDrop` callback
-- No changes to `useDragResize.ts`, `blockDetection.ts`, or edge functions
+- `src/pages/Timeline.tsx` -- overlap detection + push logic in `handleEntryTimeChange`
+- No other files changed
+
