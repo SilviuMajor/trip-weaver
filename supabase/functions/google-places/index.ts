@@ -6,6 +6,31 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
+const mapPlace = (place: any) => ({
+  placeId: place.id,
+  name: place.displayName?.text ?? '',
+  address: place.formattedAddress ?? '',
+  lat: place.location?.latitude ?? null,
+  lng: place.location?.longitude ?? null,
+  rating: place.rating ?? null,
+  userRatingCount: place.userRatingCount ?? null,
+  priceLevel: place.priceLevel ?? null,
+  openingHours: place.regularOpeningHours?.weekdayDescriptions ?? null,
+  types: place.types ?? [],
+  googleMapsUri: place.googleMapsUri ?? null,
+  website: place.websiteUri ?? null,
+  phone: place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? null,
+  photoRef: place.photos?.[0]?.name ?? null,
+  reviews: (place.reviews ?? []).slice(0, 1).map((r: any) => ({
+    text: r.text?.text ?? '',
+    rating: r.rating ?? null,
+    author: r.authorAttribution?.displayName ?? 'Anonymous',
+    relativeTime: r.relativePublishTimeDescription ?? '',
+  })),
+});
+
+const FIELD_MASK = 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.photos,places.regularOpeningHours,places.types,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber,places.reviews';
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -31,9 +56,7 @@ serve(async (req) => {
         });
       }
 
-      const requestBody: any = {
-        input: query,
-      };
+      const requestBody: any = { input: query };
       if (location?.lat && location?.lng) {
         requestBody.locationBias = {
           circle: {
@@ -45,10 +68,7 @@ serve(async (req) => {
 
       const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': apiKey,
-        },
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey },
         body: JSON.stringify(requestBody),
       });
       const data = await res.json();
@@ -115,10 +135,7 @@ serve(async (req) => {
           try {
             const photoUrl = `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=800&key=${apiKey}`;
             const photoRes = await fetch(photoUrl);
-            if (!photoRes.ok) {
-              console.error('Photo fetch failed:', photoRes.status);
-              continue;
-            }
+            if (!photoRes.ok) continue;
 
             const blob = await photoRes.blob();
             const arrayBuffer = await blob.arrayBuffer();
@@ -131,10 +148,7 @@ serve(async (req) => {
                 upsert: false,
               });
 
-            if (uploadError) {
-              console.error('Upload error:', uploadError);
-              continue;
-            }
+            if (uploadError) continue;
 
             const { data: urlData } = supabase.storage
               .from('trip-images')
@@ -175,7 +189,8 @@ serve(async (req) => {
     if (action === 'nearbySearch') {
       const { latitude, longitude, types, maxResults = 20 } = body;
 
-      const requestBody: any = {
+      // First call with 5km radius
+      const requestBody1: any = {
         includedTypes: types,
         maxResultCount: Math.min(maxResults, 20),
         locationRestriction: {
@@ -187,46 +202,63 @@ serve(async (req) => {
         rankPreference: 'DISTANCE',
       };
 
-      const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+      const res1 = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.photos,places.regularOpeningHours,places.types,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber,places.reviews',
+          'X-Goog-FieldMask': FIELD_MASK,
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(requestBody1),
       });
-      const data = await res.json();
+      const data1 = await res1.json();
 
-      if (data.error) {
-        console.error('nearbySearch error:', JSON.stringify(data.error));
+      if (data1.error) {
+        console.error('nearbySearch error:', JSON.stringify(data1.error));
         return new Response(JSON.stringify({ results: [] }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      const results = (data.places ?? []).map((place: any) => ({
-        placeId: place.id,
-        name: place.displayName?.text ?? '',
-        address: place.formattedAddress ?? '',
-        lat: place.location?.latitude ?? null,
-        lng: place.location?.longitude ?? null,
-        rating: place.rating ?? null,
-        userRatingCount: place.userRatingCount ?? null,
-        priceLevel: place.priceLevel ?? null,
-        openingHours: place.regularOpeningHours?.weekdayDescriptions ?? null,
-        types: place.types ?? [],
-        googleMapsUri: place.googleMapsUri ?? null,
-        website: place.websiteUri ?? null,
-        phone: place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? null,
-        photoRef: place.photos?.[0]?.name ?? null,
-        reviews: (place.reviews ?? []).slice(0, 1).map((r: any) => ({
-          text: r.text?.text ?? '',
-          rating: r.rating ?? null,
-          author: r.authorAttribution?.displayName ?? 'Anonymous',
-          relativeTime: r.relativePublishTimeDescription ?? '',
-        })),
-      }));
+      let allPlaces = data1.places ?? [];
+
+      // If we got exactly 20, fetch more with larger radius
+      if (allPlaces.length >= 20) {
+        try {
+          const requestBody2: any = {
+            includedTypes: types,
+            maxResultCount: 20,
+            locationRestriction: {
+              circle: {
+                center: { latitude, longitude },
+                radius: 10000.0,
+              },
+            },
+            rankPreference: 'DISTANCE',
+          };
+
+          const res2 = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': apiKey,
+              'X-Goog-FieldMask': FIELD_MASK,
+            },
+            body: JSON.stringify(requestBody2),
+          });
+          const data2 = await res2.json();
+
+          if (!data2.error && data2.places?.length) {
+            const existingIds = new Set(allPlaces.map((p: any) => p.id));
+            const newPlaces = data2.places.filter((p: any) => !existingIds.has(p.id));
+            allPlaces = [...allPlaces, ...newPlaces];
+          }
+        } catch (err) {
+          console.error('Second nearby search failed:', err);
+        }
+      }
+
+      const results = allPlaces.map(mapPlace);
 
       return new Response(JSON.stringify({ results }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -234,7 +266,7 @@ serve(async (req) => {
     }
 
     if (action === 'textSearch') {
-      const { query, latitude, longitude, types } = body;
+      const { query, latitude, longitude, types, radius = 10000 } = body;
 
       const requestBody: any = {
         textQuery: query,
@@ -245,7 +277,7 @@ serve(async (req) => {
         requestBody.locationBias = {
           circle: {
             center: { latitude, longitude },
-            radius: 10000.0,
+            radius: Number(radius),
           },
         };
       }
@@ -259,7 +291,7 @@ serve(async (req) => {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.photos,places.regularOpeningHours,places.types,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber,places.reviews',
+          'X-Goog-FieldMask': FIELD_MASK,
         },
         body: JSON.stringify(requestBody),
       });
@@ -272,28 +304,7 @@ serve(async (req) => {
         });
       }
 
-      const results = (data.places ?? []).map((place: any) => ({
-        placeId: place.id,
-        name: place.displayName?.text ?? '',
-        address: place.formattedAddress ?? '',
-        lat: place.location?.latitude ?? null,
-        lng: place.location?.longitude ?? null,
-        rating: place.rating ?? null,
-        userRatingCount: place.userRatingCount ?? null,
-        priceLevel: place.priceLevel ?? null,
-        openingHours: place.regularOpeningHours?.weekdayDescriptions ?? null,
-        types: place.types ?? [],
-        googleMapsUri: place.googleMapsUri ?? null,
-        website: place.websiteUri ?? null,
-        phone: place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? null,
-        photoRef: place.photos?.[0]?.name ?? null,
-        reviews: (place.reviews ?? []).slice(0, 1).map((r: any) => ({
-          text: r.text?.text ?? '',
-          rating: r.rating ?? null,
-          author: r.authorAttribution?.displayName ?? 'Anonymous',
-          relativeTime: r.relativePublishTimeDescription ?? '',
-        })),
-      }));
+      const results = (data.places ?? []).map(mapPlace);
 
       return new Response(JSON.stringify({ results }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

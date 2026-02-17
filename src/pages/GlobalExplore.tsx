@@ -2,20 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, MapPin, Navigation, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { toast } from '@/hooks/use-toast';
-import { PICKER_CATEGORIES, findCategory } from '@/lib/categories';
-import { cn } from '@/lib/utils';
+import { inferCategoryFromTypes } from '@/lib/placeTypeMapping';
 import PlacesAutocomplete, { type PlaceDetails } from '@/components/timeline/PlacesAutocomplete';
 import ExploreView, { type ExploreResult } from '@/components/timeline/ExploreView';
-import type { GlobalPlace } from '@/types/trip';
-
-const EXPLORE_CATEGORIES = PICKER_CATEGORIES.filter(
-  c => !['flight', 'hotel', 'private_transfer'].includes(c.id)
-);
 
 interface SelectedLocation {
   name: string;
@@ -35,7 +28,6 @@ const GlobalExplore = () => {
   const geo = useGeolocation();
 
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
-  const [activeCategoryId, setActiveCategoryId] = useState<string>(EXPLORE_CATEGORIES[0]?.id ?? 'breakfast');
   const [searchQuery, setSearchQuery] = useState('');
   const [recentCities, setRecentCities] = useState<RecentCity[]>([]);
   const [loadingCities, setLoadingCities] = useState(true);
@@ -98,11 +90,12 @@ const GlobalExplore = () => {
 
   const handleGlobalAdd = async (place: ExploreResult) => {
     if (!adminUser) return;
+    const inferredCat = inferCategoryFromTypes(place.types);
     const { error } = await supabase.from('global_places').upsert({
       user_id: adminUser.id,
       google_place_id: place.placeId,
       name: place.name,
-      category: activeCategoryId,
+      category: inferredCat,
       latitude: place.lat,
       longitude: place.lng,
       status: 'want_to_go',
@@ -129,7 +122,7 @@ const GlobalExplore = () => {
     );
   }
 
-  // ── State 2: Category + ExploreView ──
+  // ── State 2: ExploreView (no external category pills — ExploreView handles it) ──
   if (selectedLocation) {
     return (
       <div className="fixed inset-0 flex flex-col bg-background">
@@ -144,32 +137,13 @@ const GlobalExplore = () => {
           </div>
         </div>
 
-        {/* Category pills */}
-        <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto border-b">
-          {EXPLORE_CATEGORIES.map(cat => (
-            <button
-              key={cat.id}
-              className={cn(
-                'rounded-full px-3 py-1.5 text-xs font-medium border transition-colors whitespace-nowrap',
-                activeCategoryId === cat.id
-                  ? 'bg-primary/10 text-primary border-primary/20'
-                  : 'text-muted-foreground border-border/50 hover:bg-muted'
-              )}
-              onClick={() => setActiveCategoryId(cat.id)}
-            >
-              {cat.emoji} {cat.name}
-            </button>
-          ))}
-        </div>
-
-        {/* ExploreView */}
+        {/* ExploreView — handles its own category selection internally */}
         <div className="flex-1 relative">
           <ExploreView
             open={true}
             onClose={() => setSelectedLocation(null)}
             trip={null}
             entries={[]}
-            categoryId={activeCategoryId}
             isEditor={true}
             onAddToPlanner={handleGlobalAdd}
             onCardTap={() => {}}
@@ -199,7 +173,6 @@ const GlobalExplore = () => {
           <p className="text-sm text-muted-foreground mb-4">Search for a city or use your current location</p>
         </div>
 
-        {/* Current location button */}
         <Button
           variant="outline"
           className="w-full justify-start gap-2"
@@ -209,7 +182,6 @@ const GlobalExplore = () => {
           Use current location
         </Button>
 
-        {/* City search */}
         <div>
           <PlacesAutocomplete
             value={searchQuery}
@@ -220,7 +192,6 @@ const GlobalExplore = () => {
           />
         </div>
 
-        {/* Recent cities */}
         {!loadingCities && recentCities.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Recent cities</p>
