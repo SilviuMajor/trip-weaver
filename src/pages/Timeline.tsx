@@ -25,6 +25,7 @@ import ContinuousTimeline from '@/components/timeline/ContinuousTimeline';
 import EntrySheet from '@/components/timeline/EntrySheet';
 import CategorySidebar from '@/components/timeline/CategorySidebar';
 import SidebarEntryCard from '@/components/timeline/SidebarEntryCard';
+import EntryCard from '@/components/timeline/EntryCard';
 import LivePanel from '@/components/timeline/LivePanel';
 import ConflictResolver from '@/components/timeline/ConflictResolver';
 import DayPickerDialog from '@/components/timeline/DayPickerDialog';
@@ -2838,7 +2839,17 @@ const Timeline = () => {
                    onGroupDrop={handleGroupDrop}
                     pixelsPerHour={pixelsPerHour}
                   onResetZoom={() => setZoomLevel(1.0)}
-                  binRef={binRef}
+                   externalDragGlobalHour={
+                     (sidebarDrag?.globalHour ?? exploreDrag?.globalHour) ?? null
+                   }
+                   externalDragDurationHours={
+                     sidebarDrag
+                       ? (new Date(sidebarDrag.entry.end_time).getTime() - new Date(sidebarDrag.entry.start_time).getTime()) / 3600000
+                       : exploreDrag
+                         ? 1
+                         : null
+                   }
+                   binRef={binRef}
                   onDragActiveChange={(active, entryId) => {
                     setDragActiveEntryId(active ? entryId : null);
                     if (!active) {
@@ -3209,30 +3220,55 @@ const Timeline = () => {
       )}
 
       {/* Unified sidebar drag floating card (planner → timeline) */}
-      {sidebarDrag && (
-        <div className="fixed inset-0 z-[100] pointer-events-none">
-          <div
-            className="pointer-events-none absolute z-[101]"
-            style={{
-              left: sidebarDrag.clientX - 100,
-              top: sidebarDrag.clientY - 40,
-              width: 200,
-              opacity: 0.9,
-              filter: 'drop-shadow(0 8px 16px rgba(0,0,0,0.2))',
-            }}
-          >
-            <SidebarEntryCard entry={sidebarDrag.entry} compact />
-            {sidebarDrag.globalHour !== null && sidebarDrag.globalHour >= 0 && (
-              <div className="mt-1 flex justify-center">
-                <span className="rounded-full bg-primary px-2.5 py-0.5 text-[11px] font-bold text-primary-foreground shadow-md">
-                  {String(Math.floor((sidebarDrag.globalHour % 24))).padStart(2, '0')}:
-                  {String(Math.round(((sidebarDrag.globalHour % 1) * 60))).padStart(2, '0')}
-                </span>
+      {sidebarDrag && (() => {
+        const opt = sidebarDrag.entry.options[0];
+        if (!opt) return null;
+        const durationMs = new Date(sidebarDrag.entry.end_time).getTime() - new Date(sidebarDrag.entry.start_time).getTime();
+        const durationHours = durationMs / 3600000;
+        const moveHeight = durationHours * pixelsPerHour;
+        const cardWidth = Math.min(window.innerWidth * 0.6, 300);
+        return (
+          <div className="fixed inset-0 z-[200] pointer-events-none">
+            <div
+              style={{
+                position: 'fixed',
+                left: sidebarDrag.clientX - cardWidth / 2,
+                top: sidebarDrag.clientY - 40,
+                width: cardWidth,
+                height: Math.max(moveHeight, 60),
+                willChange: 'transform',
+              }}
+            >
+              <div className="h-full ring-2 ring-primary/60 shadow-lg shadow-primary/20 rounded-2xl overflow-hidden">
+                <EntryCard
+                  option={opt}
+                  startTime={sidebarDrag.entry.start_time}
+                  endTime={sidebarDrag.entry.end_time}
+                  formatTime={(iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                  isPast={false}
+                  optionIndex={0}
+                  totalOptions={1}
+                  votingLocked={trip.voting_locked}
+                  hasVoted={false}
+                  onVoteChange={() => {}}
+                  cardSizeClass="h-full"
+                  height={Math.max(moveHeight, 60)}
+                  notes={sidebarDrag.entry.notes}
+                  isLocked={sidebarDrag.entry.is_locked}
+                />
               </div>
-            )}
+              {sidebarDrag.globalHour !== null && sidebarDrag.globalHour >= 0 && (
+                <div className="mt-1 flex justify-center">
+                  <span className="rounded-full bg-primary px-2.5 py-0.5 text-[11px] font-bold text-primary-foreground shadow-md">
+                    {String(Math.floor((sidebarDrag.globalHour % 24))).padStart(2, '0')}:
+                    {String(Math.round(((sidebarDrag.globalHour % 1) * 60))).padStart(2, '0')}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Unified explore drag floating card (explore → timeline) */}
       {exploreDrag && (

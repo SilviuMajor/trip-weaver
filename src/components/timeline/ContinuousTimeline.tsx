@@ -70,6 +70,10 @@ interface ContinuousTimelineProps {
   onSnapRelease?: (draggedEntryId: string, targetEntryId: string, side: 'above' | 'below') => void;
   onChainShift?: (resizedEntryId: string, entryIdsToShift: string[], deltaMs: number) => void;
   onGroupDrop?: (entryIds: string[], deltaMs: number) => void;
+  /** Global hour where an external card (from planner/explore) would land */
+  externalDragGlobalHour?: number | null;
+  /** Duration in hours of the externally-dragged card */
+  externalDragDurationHours?: number | null;
 }
 
 const ContinuousTimeline = ({
@@ -117,6 +121,8 @@ const ContinuousTimeline = ({
   onSnapRelease,
   onChainShift,
   onGroupDrop,
+  externalDragGlobalHour,
+  externalDragDurationHours,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
@@ -1982,6 +1988,24 @@ const ContinuousTimeline = ({
                 )}
               </div>
             </>
+          );
+        })()}
+
+        {/* Ghost outline for external drag (planner/explore → timeline) */}
+        {externalDragGlobalHour != null && externalDragDurationHours != null && (() => {
+          const ghostTop = externalDragGlobalHour * pixelsPerHour;
+          const ghostHeight = externalDragDurationHours * pixelsPerHour;
+          return (
+            <div
+              className="absolute left-0 right-0 z-[11] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 pointer-events-none transition-all duration-75"
+              style={{ top: ghostTop, height: Math.max(ghostHeight, 20) }}
+            >
+              <div className="absolute -left-[72px] top-0 z-[60] pointer-events-none">
+                <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">
+                  {formatGlobalHourToDisplay(externalDragGlobalHour)}
+                </span>
+              </div>
+            </div>
           );
         })()}
 
