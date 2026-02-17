@@ -69,6 +69,7 @@ interface ContinuousTimelineProps {
   binRef?: React.RefObject<HTMLDivElement>;
   onSnapRelease?: (draggedEntryId: string, targetEntryId: string, side: 'above' | 'below') => void;
   onChainShift?: (resizedEntryId: string, entryIdsToShift: string[], deltaMs: number) => void;
+  onGroupDrop?: (entryIds: string[], deltaMs: number) => void;
 }
 
 const ContinuousTimeline = ({
@@ -115,6 +116,7 @@ const ContinuousTimeline = ({
   binRef,
   onSnapRelease,
   onChainShift,
+  onGroupDrop,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
@@ -268,6 +270,31 @@ const ContinuousTimeline = ({
 
   // Drag commit handler: convert global hours back to day/local/UTC
   const handleDragCommit = useCallback((entryId: string, newStartGH: number, newEndGH: number, tz?: string, _targetDay?: Date, dragType?: DragType, clientX?: number, clientY?: number) => {
+    // Group drop: shift all entries in the block by the same delta
+    if ((dragState as any)?.dragMode === 'group' && (dragState as any)?.blockEntryIds?.length > 0) {
+      const deltaHours = newStartGH - dragState!.originalStartHour;
+      const deltaMs = deltaHours * 3600000;
+
+      // Handle snap release for group edge
+      if (dragType === 'move' && snapTargetRef.current) {
+        const snap = snapTargetRef.current;
+        const blockIds = (dragState as any).blockEntryIds as string[];
+        // Compute snapped delta instead
+        const snappedDeltaHours = snap.snapStartHour - dragState!.originalStartHour;
+        const snappedDeltaMs = snappedDeltaHours * 3600000;
+        onGroupDrop?.(blockIds, snappedDeltaMs);
+        // Snap release: use first or last entry of block
+        const edgeEntryId = snap.side === 'below'
+          ? blockIds[blockIds.length - 1]
+          : blockIds[0];
+        onSnapRelease?.(edgeEntryId, snap.entryId, snap.side);
+        return;
+      }
+
+      onGroupDrop?.((dragState as any).blockEntryIds, deltaMs);
+      return;
+    }
+
     // For move drags, check override (bin/planner) first — only when detached
     if (dragType === 'move' && clientX !== undefined && clientY !== undefined) {
       if (onDragCommitOverride?.(entryId, clientX, clientY)) return;
@@ -524,9 +551,31 @@ const ContinuousTimeline = ({
   const snapTarget = useMemo(() => {
     if (!dragState || dragState.type !== 'move') return null;
 
-    const dragStart = dragState.currentStartHour;
-    const dragEnd = dragState.currentEndHour;
-    const dragDuration = dragEnd - dragStart;
+    const isGroupDrag = (dragState as any)?.dragMode === 'group' && (dragState as any)?.blockEntryIds?.length > 0;
+    const blockEntryIds: string[] = isGroupDrag ? (dragState as any).blockEntryIds : [];
+
+    // For group drag, compute group bounds; for individual, use single card bounds
+    let dragStart: number;
+    let dragEnd: number;
+    let dragDuration: number;
+
+    if (isGroupDrag) {
+      const blockEntries = blockEntryIds
+        .map(id => sortedEntries.find(e => e.id === id))
+        .filter(Boolean) as EntryWithOptions[];
+      if (blockEntries.length === 0) return null;
+      const firstGH = getEntryGlobalHours(blockEntries[0]);
+      const lastGH = getEntryGlobalHours(blockEntries[blockEntries.length - 1]);
+      const delta = dragState.currentStartHour - dragState.originalStartHour;
+      dragStart = firstGH.startGH + delta;
+      dragEnd = lastGH.endGH + delta;
+      dragDuration = dragEnd - dragStart;
+    } else {
+      dragStart = dragState.currentStartHour;
+      dragEnd = dragState.currentEndHour;
+      dragDuration = dragEnd - dragStart;
+    }
+
     const SNAP_THRESHOLD_HOURS = 20 / 60; // 20 minutes
 
     let bestSnap: { entryId: string; side: 'above' | 'below'; snapStartHour: number } | null = null;
@@ -534,22 +583,31 @@ const ContinuousTimeline = ({
 
     for (const entry of sortedEntries) {
       if (entry.id === dragState.entryId) continue;
+      if (isGroupDrag && blockEntryIds.includes(entry.id)) continue;
       if (entry.options[0]?.category === 'transfer') continue;
 
       const gh = getEntryGlobalHours(entry);
 
-      // Snap BELOW this entry (dragged card goes after it)
+      // Snap BELOW this entry (dragged card/group goes after it)
       const distBelow = Math.abs(dragStart - gh.endGH);
       if (distBelow < bestDist) {
         bestDist = distBelow;
-        bestSnap = { entryId: entry.id, side: 'below', snapStartHour: gh.endGH };
+        // snapStartHour = the dragged entry's new currentStartHour that aligns the group/card top edge
+        // For group: dragStart is group top, so delta to snap = gh.endGH - dragStart, applied to currentStartHour
+        const snapStart = isGroupDrag
+          ? dragState.currentStartHour + (gh.endGH - dragStart)
+          : gh.endGH;
+        bestSnap = { entryId: entry.id, side: 'below', snapStartHour: snapStart };
       }
 
-      // Snap ABOVE this entry (dragged card goes before it)
+      // Snap ABOVE this entry (dragged card/group goes before it)
       const distAbove = Math.abs(dragEnd - gh.startGH);
       if (distAbove < bestDist) {
         bestDist = distAbove;
-        bestSnap = { entryId: entry.id, side: 'above', snapStartHour: gh.startGH - dragDuration };
+        const snapStart = isGroupDrag
+          ? dragState.currentStartHour + (gh.startGH - dragEnd)
+          : gh.startGH - dragDuration;
+        bestSnap = { entryId: entry.id, side: 'above', snapStartHour: snapStart };
       }
     }
 
@@ -1808,10 +1866,27 @@ const ContinuousTimeline = ({
         {dragState && dragState.type === 'move' && (() => {
           const entry = sortedEntries.find(e => e.id === dragState.entryId);
           if (!entry) return null;
-          const origGH = getEntryGlobalHours(entry);
-          const durationGH = origGH.endGH - origGH.startGH;
-          const startGH = snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour;
-          const endGH = startGH + durationGH;
+          const isGroupDrag = (dragState as any)?.dragMode === 'group' && (dragState as any)?.blockEntryIds?.length > 0;
+
+          let startGH: number;
+          let endGH: number;
+
+          if (isGroupDrag) {
+            const blockIds = (dragState as any).blockEntryIds as string[];
+            const blockEntries = blockIds.map((id: string) => sortedEntries.find(e => e.id === id)).filter(Boolean) as EntryWithOptions[];
+            if (blockEntries.length === 0) return null;
+            const firstGH = getEntryGlobalHours(blockEntries[0]);
+            const lastGH = getEntryGlobalHours(blockEntries[blockEntries.length - 1]);
+            const delta = (snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour) - dragState.originalStartHour;
+            startGH = firstGH.startGH + delta;
+            endGH = lastGH.endGH + delta;
+          } else {
+            const origGH = getEntryGlobalHours(entry);
+            const durationGH = origGH.endGH - origGH.startGH;
+            startGH = snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour;
+            endGH = startGH + durationGH;
+          }
+
           const startTop = startGH * pixelsPerHour;
           const endTop = endGH * pixelsPerHour;
           return (
@@ -1843,11 +1918,31 @@ const ContinuousTimeline = ({
         {dragState && dragState.type === 'move' && dragPhase === 'detached' && (() => {
           const entry = sortedEntries.find(e => e.id === dragState.entryId);
           if (!entry) return null;
-          const origGH = getEntryGlobalHours(entry);
-          const durationGH = origGH.endGH - origGH.startGH;
-          const ghostStartGH = snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour;
+          const isGroupDrag = (dragState as any)?.dragMode === 'group' && (dragState as any)?.blockEntryIds?.length > 0;
+
+          let ghostStartGH: number;
+          let ghostHeight: number;
+
+          if (isGroupDrag) {
+            const blockIds = (dragState as any).blockEntryIds as string[];
+            const blockEntries = blockIds
+              .map((id: string) => sortedEntries.find(e => e.id === id))
+              .filter(Boolean) as EntryWithOptions[];
+            if (blockEntries.length === 0) return null;
+            const firstGH = getEntryGlobalHours(blockEntries[0]);
+            const lastGH = getEntryGlobalHours(blockEntries[blockEntries.length - 1]);
+            const delta = (snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour) - dragState.originalStartHour;
+            ghostStartGH = firstGH.startGH + delta;
+            const groupDuration = lastGH.endGH - firstGH.startGH;
+            ghostHeight = groupDuration * pixelsPerHour;
+          } else {
+            const origGH = getEntryGlobalHours(entry);
+            const durationGH = origGH.endGH - origGH.startGH;
+            ghostStartGH = snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour;
+            ghostHeight = durationGH * pixelsPerHour;
+          }
+
           const ghostTop = ghostStartGH * pixelsPerHour;
-          const ghostHeight = durationGH * pixelsPerHour;
           const isSnapped = !!snapTarget;
           return (
             <>
@@ -1858,16 +1953,16 @@ const ContinuousTimeline = ({
                 const targetGH = getEntryGlobalHours(targetEntry);
                 const connectorTop = snapTarget!.side === 'below'
                   ? targetGH.endGH * pixelsPerHour
-                  : ghostStartGH * pixelsPerHour + ghostHeight;
+                  : ghostTop + ghostHeight;
                 const connectorBottom = snapTarget!.side === 'below'
                   ? ghostTop
                   : targetGH.startGH * pixelsPerHour;
-                const connectorHeight = Math.abs(connectorBottom - connectorTop);
-                if (connectorHeight < 1) return null;
+                const connectorH = Math.abs(connectorBottom - connectorTop);
+                if (connectorH < 1) return null;
                 return (
                   <div
                     className="absolute left-1/2 z-[10] border-l-2 border-dashed border-green-400/60 pointer-events-none"
-                    style={{ top: Math.min(connectorTop, connectorBottom), height: connectorHeight }}
+                    style={{ top: Math.min(connectorTop, connectorBottom), height: connectorH }}
                   />
                 );
               })()}
@@ -1943,9 +2038,25 @@ const ContinuousTimeline = ({
         if (!entry) return null;
         const opt = entry.options[0];
         if (!opt) return null;
-        const origGH = getEntryGlobalHours(entry);
-        const durationGH = origGH.endGH - origGH.startGH;
-        const moveHeight = durationGH * pixelsPerHour;
+        const isGroupDrag = (dragState as any)?.dragMode === 'group' && (dragState as any)?.blockEntryIds?.length > 0;
+
+        let moveHeight: number;
+        if (isGroupDrag) {
+          const blockIds = (dragState as any).blockEntryIds as string[];
+          const blockEntries = blockIds.map((id: string) => sortedEntries.find(e => e.id === id)).filter(Boolean) as EntryWithOptions[];
+          if (blockEntries.length > 0) {
+            const firstGH = getEntryGlobalHours(blockEntries[0]);
+            const lastGH = getEntryGlobalHours(blockEntries[blockEntries.length - 1]);
+            moveHeight = (lastGH.endGH - firstGH.startGH) * pixelsPerHour;
+          } else {
+            const origGH = getEntryGlobalHours(entry);
+            moveHeight = (origGH.endGH - origGH.startGH) * pixelsPerHour;
+          }
+        } else {
+          const origGH = getEntryGlobalHours(entry);
+          moveHeight = (origGH.endGH - origGH.startGH) * pixelsPerHour;
+        }
+
         const gridRect = gridRef.current?.getBoundingClientRect();
         const cardWidth = gridRect ? gridRect.width - 4 : 220;
 
@@ -1962,26 +2073,54 @@ const ContinuousTimeline = ({
               transform: `translate(${Math.max(4, Math.min(window.innerWidth - cardWidth - 4, clientXRef.current - cardWidth / 2))}px, ${Math.max(4, Math.min(window.innerHeight - moveHeight - 4, clientYRef.current - dragState.grabOffsetHours * pixelsPerHour))}px)`,
             }}
           >
-            <div className="h-full ring-2 ring-primary/60 shadow-lg shadow-primary/20 rounded-2xl overflow-hidden">
-              <EntryCard
-                option={opt}
-                startTime={entry.start_time}
-                endTime={entry.end_time}
-                formatTime={(iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}
-                isPast={false}
-                optionIndex={0}
-                totalOptions={1}
-                votingLocked={votingLocked}
-                hasVoted={false}
-                onVoteChange={() => {}}
-                cardSizeClass="h-full"
-                height={moveHeight}
-                notes={(entry as any).notes}
-                isLocked={entry.is_locked}
-                linkedType={entry.linked_type}
-                isProcessing={opt.category === 'airport_processing'}
-              />
-            </div>
+            {isGroupDrag ? (
+              /* Mini-stack for group drag */
+              <div className="relative h-full">
+                <div className="absolute inset-0 translate-y-[-4px] scale-[0.97] ring-2 ring-primary/30 shadow-md rounded-2xl bg-muted/60" />
+                <div className="absolute inset-0 translate-y-[-2px] scale-[0.985] ring-2 ring-primary/40 shadow-md rounded-2xl bg-muted/40" />
+                <div className="relative h-full ring-2 ring-primary/60 shadow-lg shadow-primary/20 rounded-2xl overflow-hidden">
+                  <EntryCard
+                    option={opt}
+                    startTime={entry.start_time}
+                    endTime={entry.end_time}
+                    formatTime={(iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                    isPast={false}
+                    optionIndex={0}
+                    totalOptions={1}
+                    votingLocked={votingLocked}
+                    hasVoted={false}
+                    onVoteChange={() => {}}
+                    cardSizeClass="h-full"
+                    height={moveHeight}
+                    notes={(entry as any).notes}
+                    isLocked={entry.is_locked}
+                    linkedType={entry.linked_type}
+                    isProcessing={opt.category === 'airport_processing'}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="h-full ring-2 ring-primary/60 shadow-lg shadow-primary/20 rounded-2xl overflow-hidden">
+                <EntryCard
+                  option={opt}
+                  startTime={entry.start_time}
+                  endTime={entry.end_time}
+                  formatTime={(iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                  isPast={false}
+                  optionIndex={0}
+                  totalOptions={1}
+                  votingLocked={votingLocked}
+                  hasVoted={false}
+                  onVoteChange={() => {}}
+                  cardSizeClass="h-full"
+                  height={moveHeight}
+                  notes={(entry as any).notes}
+                  isLocked={entry.is_locked}
+                  linkedType={entry.linked_type}
+                  isProcessing={opt.category === 'airport_processing'}
+                />
+              </div>
+            )}
           </div>
         );
       })()}
