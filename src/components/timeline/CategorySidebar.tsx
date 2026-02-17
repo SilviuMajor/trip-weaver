@@ -19,6 +19,8 @@ interface CategorySidebarProps {
   onTouchDragStart?: (entry: EntryWithOptions, initialPosition: { x: number; y: number }) => void;
   compact?: boolean;
   hiddenForDrag?: boolean;
+  exploreOpen?: boolean;
+  exploreContent?: React.ReactNode;
 }
 
 const CategorySidebar = ({
@@ -34,10 +36,16 @@ const CategorySidebar = ({
   onTouchDragStart,
   compact = false,
   hiddenForDrag,
+  exploreOpen,
+  exploreContent,
 }: CategorySidebarProps) => {
   const isMobile = useIsMobile();
 
-  const panelContent = (
+  const panelContent = exploreOpen && exploreContent ? (
+    <div className="flex h-full flex-col overflow-hidden">
+      {exploreContent}
+    </div>
+  ) : (
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background/95 backdrop-blur-sm px-3 py-2.5">
