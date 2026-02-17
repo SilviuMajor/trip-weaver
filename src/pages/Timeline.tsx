@@ -146,6 +146,7 @@ const Timeline = () => {
   // Explore state
   const [exploreOpen, setExploreOpen] = useState(false);
   const [exploreCategoryId, setExploreCategoryId] = useState<string | null>(null);
+  const [exploreSearchQuery, setExploreSearchQuery] = useState<string | null>(null);
 
   // Touch drag state (mobile planner → timeline)
   const [touchDragEntry, setTouchDragEntry] = useState<EntryWithOptions | null>(null);
@@ -356,6 +357,7 @@ const Timeline = () => {
     if (!trip || !tripId) return;
     setExploreOpen(false);
     setExploreCategoryId(null);
+    setExploreSearchQuery(null);
     const timeStr = new Date(startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
     toast({ title: `Added ${place.name} at ${timeStr}` });
 
@@ -2256,7 +2258,14 @@ const Timeline = () => {
       <button
         ref={plannerFabRef}
         onClick={() => {
-          if (!dragActiveEntryId) setSidebarOpen(!sidebarOpen);
+          if (!dragActiveEntryId) {
+            if (exploreOpen) {
+              setExploreOpen(false);
+              setExploreCategoryId(null);
+              setExploreSearchQuery(null);
+            }
+            setSidebarOpen(!sidebarOpen);
+          }
         }}
         className={cn(
           "fixed bottom-24 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-200",
@@ -2504,7 +2513,7 @@ const Timeline = () => {
                 exploreContent={trip ? (
                   <ExploreView
                     open={exploreOpen}
-                    onClose={() => { setExploreOpen(false); setExploreCategoryId(null); }}
+                    onClose={() => { setExploreOpen(false); setExploreCategoryId(null); setExploreSearchQuery(null); }}
                     trip={trip}
                     entries={entries}
                     categoryId={exploreCategoryId}
@@ -2522,6 +2531,7 @@ const Timeline = () => {
                     }}
                     createContext={prefillStartTime ? { startTime: prefillStartTime, endTime: prefillEndTime } : null}
                     onAddAtTime={handleAddAtTime}
+                    initialSearchQuery={exploreSearchQuery}
                     embedded
                   />
                 ) : undefined}
@@ -2651,9 +2661,10 @@ const Timeline = () => {
                 setConflictOpen(true);
               }
             }}
-            onExploreRequest={(catId) => {
+            onExploreRequest={(catId, searchQuery) => {
               setSheetOpen(false);
               setExploreCategoryId(catId);
+              setExploreSearchQuery(searchQuery ?? null);
               setExploreOpen(true);
             }}
           />
@@ -2662,7 +2673,7 @@ const Timeline = () => {
           {trip && isMobile && (
             <ExploreView
               open={exploreOpen}
-              onClose={() => { setExploreOpen(false); setExploreCategoryId(null); }}
+              onClose={() => { setExploreOpen(false); setExploreCategoryId(null); setExploreSearchQuery(null); }}
               trip={trip}
               entries={entries}
               categoryId={exploreCategoryId}
@@ -2680,6 +2691,7 @@ const Timeline = () => {
               }}
               createContext={prefillStartTime ? { startTime: prefillStartTime, endTime: prefillEndTime } : null}
               onAddAtTime={handleAddAtTime}
+              initialSearchQuery={exploreSearchQuery}
             />
           )}
 
