@@ -1,42 +1,55 @@
 
 
-# Global Explore Page
+# City-level Explore from Global Planner
 
 ## Overview
-Create a new `GlobalExplore` page with two states: a location picker and a category-based Explore view. Wire it up from the Dashboard and route it at `/explore`.
+Add an "Explore" button to the city detail view in GlobalPlanner that opens ExploreView as an overlay, letting users discover and save new places for that city.
 
 ## Changes
 
-### 1. Create `src/pages/GlobalExplore.tsx`
+### File: `src/pages/GlobalPlanner.tsx`
 
-New page with two states:
+**New imports:**
+- Add `Search` to lucide-react imports
+- Import `ExploreView` and `ExploreResult` from `@/components/timeline/ExploreView`
+- Import `PICKER_CATEGORIES` from `@/lib/categories`
+- Import `cn` from `@/lib/utils`
 
-**State 1 - Location Picker:**
-- Header with back button and "Explore" title
-- "Use current location" button using `useGeolocation` hook
-- `PlacesAutocomplete` for city search (types filter for cities)
-- "Recent cities" section: query `global_places` for distinct city values with averaged lat/lng, show up to 5 as quick-pick buttons
-- When a location is selected, store `{ name, lat, lng }` and switch to State 2
-
-**State 2 - Category + Explore:**
-- Header with back button and selected city name
-- Horizontal scrolling category pills from `PICKER_CATEGORIES`, filtered to exclude `flight`, `hotel`, `private_transfer` (only place categories)
-- Render `ExploreView` with:
-  - `open={true}`
-  - `trip` as a minimal dummy object (since ExploreView requires it) -- OR make `trip` optional
-  - `entries={[]}` (no trip entries)
-  - `categoryId` from selected pill
-  - `onAddToPlanner` = saves to `global_places` via upsert
-  - `onClose` = go back to location picker or navigate back
-
-**"Add to Planner" handler:**
+**New state (around line 99):**
 ```typescript
-const handleGlobalAdd = async (place: ExploreResult) => {
+const [cityExploreOpen, setCityExploreOpen] = useState(false);
+```
+
+**New memo for city center coordinates:**
+```typescript
+const cityCenter = useMemo(() => {
+  if (!selectedCity) return null;
+  const cp = cityPlaces.filter(p => p.latitude && p.longitude);
+  if (!cp.length) return null;
+  return {
+    lat: cp.reduce((s, p) => s + Number(p.latitude), 0) / cp.length,
+    lng: cp.reduce((s, p) => s + Number(p.longitude), 0) / cp.length,
+  };
+}, [cityPlaces, selectedCity]);
+```
+
+**Explore categories constant (top-level, same as GlobalExplore):**
+```typescript
+const EXPLORE_CATEGORIES = PICKER_CATEGORIES.filter(
+  c => !['flight', 'hotel', 'private_transfer'].includes(c.id)
+);
+```
+
+**handleCityExploreAdd handler:**
+Saves the place to `global_places` with the city name pre-filled, then refetches places so the new entry appears immediately.
+```typescript
+const handleCityExploreAdd = async (place: ExploreResult) => {
+  if (!adminUser) return;
   await supabase.from('global_places').upsert({
     user_id: adminUser.id,
     google_place_id: place.placeId,
     name: place.name,
-    category: activeCategoryId,
+    category: /* derive from ExploreView categoryId or fallback */,
     latitude: place.lat,
     longitude: place.lng,
     status: 'want_to_go',
@@ -44,48 +57,77 @@ const handleGlobalAdd = async (place: ExploreResult) => {
     rating: place.rating,
     price_level: place.priceLevel,
     address: place.address,
-    city: selectedCityName,
-  }, { onConflict: 'user_id,google_place_id' });
+    city: selectedCity,
+  } as any, { onConflict: 'user_id,google_place_id' });
+  toast({ title: `Saved ${place.name} to My Places` });
+  fetchPlaces(); // Refetch so the new place appears
 };
 ```
 
-### 2. Make `trip` optional in `ExploreView`
+**City header modification (lines 303-328):**
+When `selectedCity` is set, replace the generic header with one that includes an "Explore" button on the right side:
+```tsx
+<div className="flex items-center gap-2">
+  <Button variant="ghost" size="icon" onClick={() => {
+    if (cityExploreOpen) { setCityExploreOpen(false); }
+    else if (selectedCity) { setSelectedCity(null); }
+    else { navigate('/'); }
+  }}>
+    <ArrowLeft className="h-5 w-5" />
+  </Button>
+  <h1 className="text-lg font-bold">
+    {selectedCity ? (
+      <span className="flex items-center gap-1.5">
+        <MapPin className="h-4 w-4 text-primary" />
+        {selectedCity}
+      </span>
+    ) : 'My Places'}
+  </h1>
+</div>
+<div className="flex items-center gap-2">
+  {syncing && <span className="text-xs text-muted-foreground">Syncing...</span>}
+  {selectedCity && !cityExploreOpen && (
+    <Button variant="outline" size="sm" onClick={() => setCityExploreOpen(true)}>
+      <Search className="h-3.5 w-3.5 mr-1.5" />
+      Explore
+    </Button>
+  )}
+  {!selectedCity && (
+    <Button variant="ghost" size="icon" onClick={syncPlaces} disabled={syncing}>
+      <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+    </Button>
+  )}
+</div>
+```
 
-**File: `src/components/timeline/ExploreView.tsx`**
+**ExploreView overlay (after main, before the Drawer):**
+When `cityExploreOpen` is true and `cityCenter` exists, render ExploreView as a full-screen overlay:
+```tsx
+{cityExploreOpen && cityCenter && (
+  <div className="fixed inset-0 z-40 bg-background flex flex-col">
+    <ExploreView
+      open={true}
+      onClose={() => setCityExploreOpen(false)}
+      trip={null}
+      entries={[]}
+      isEditor={true}
+      onAddToPlanner={handleCityExploreAdd}
+      onCardTap={() => {}}
+      onAddManually={() => {}}
+      initialOrigin={{ name: selectedCity!, ...cityCenter }}
+    />
+  </div>
+)}
+```
 
-- Change `ExploreViewProps.trip` from `Trip` to `Trip | null` (make optional)
-- Guard all `trip.` references:
-  - Line 210: `const destination = trip?.destination || null`
-  - Line 367: `.neq('trip_id', trip.id)` -- skip entire cross-trip check when `!trip`
-  - Line 396: `[results, trip?.id]`
-  - Line 593: `buildTempEntry(selectedPlace, trip?.id || 'global', ...)` -- use `'global'` as fallback tripId for temp entries
-  - Line 639: `trip={trip}` -- already optional in PlaceOverview
+Note: ExploreView already has its own category picker built in (the category pills row), so we don't need to add a separate one here. The `categoryId` prop can be left undefined to let the user pick within ExploreView.
 
-### 3. Add Explore button back to Dashboard
-
-**File: `src/pages/Dashboard.tsx`**
-
-Add an "Explore" button below the "My Places" button in the navigation cards section. It navigates to `/explore`.
-
-### 4. Add route in App.tsx
-
-**File: `src/App.tsx`**
-
-- Import `GlobalExplore` from `./pages/GlobalExplore`
-- Replace the existing `<Route path="/explore" element={<NotFound />} />` with `<Route path="/explore" element={<GlobalExplore />} />`
-
-## Technical Details
-
-- Category pills for global explore: filter `PICKER_CATEGORIES` to exclude ids `flight`, `hotel`, `private_transfer` since those aren't discoverable places
-- The `ExploreView` origin will be set by the parent page passing coordinates via the existing origin resolution -- since no entries exist, the `resolveOriginFromEntries` returns null, and `destination` is null, so we need to pass origin coordinates. We'll set origin by having `GlobalExplore` provide a custom origin location prop. Since ExploreView doesn't have an `originOverride` prop, we'll add one: `initialOrigin?: { name: string; lat: number; lng: number }` that seeds `originLocation` state when provided.
-- Recent cities query: `SELECT DISTINCT city, AVG(latitude), AVG(longitude) FROM global_places WHERE user_id = ? AND city IS NOT NULL GROUP BY city LIMIT 5` -- done client-side by fetching all global_places and grouping in JS
+**Reset cityExploreOpen when leaving city:**
+When `setSelectedCity(null)` is called, also reset `setCityExploreOpen(false)`.
 
 ## Files Summary
 
 | File | Change |
 |------|--------|
-| `src/pages/GlobalExplore.tsx` | New page: location picker + category pills + ExploreView |
-| `src/components/timeline/ExploreView.tsx` | Make `trip` optional, add `initialOrigin` prop, guard all `trip.` usages |
-| `src/pages/Dashboard.tsx` | Add Explore button back |
-| `src/App.tsx` | Route `/explore` to `GlobalExplore` |
+| `src/pages/GlobalPlanner.tsx` | Add Explore button to city header, cityCenter memo, ExploreView overlay with global_places save handler, refetch on add |
 
