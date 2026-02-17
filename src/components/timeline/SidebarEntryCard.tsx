@@ -12,6 +12,9 @@ interface SidebarEntryCardProps {
   onDuplicate?: (entry: EntryWithOptions) => void;
   onInsert?: (entry: EntryWithOptions) => void;
   onTouchDragStart?: (entry: EntryWithOptions, initialPosition: { x: number; y: number }) => void;
+  onSidebarDragStart?: (entry: EntryWithOptions, position: { x: number; y: number }) => void;
+  onSidebarDragMove?: (x: number, y: number) => void;
+  onSidebarDragEnd?: () => void;
   usageCount?: number;
   isFlight?: boolean;
   compact?: boolean;
@@ -33,7 +36,7 @@ const extractHue = (hslString: string): number => {
   return match ? parseInt(match[1]) : 260;
 };
 
-const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, onTouchDragStart, usageCount, isFlight, compact, visitedBadge }: SidebarEntryCardProps) => {
+const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, onTouchDragStart, onSidebarDragStart, onSidebarDragMove, onSidebarDragEnd, usageCount, isFlight, compact, visitedBadge }: SidebarEntryCardProps) => {
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -83,32 +86,81 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
       onClick={onClick}
       onContextMenu={(e) => e.preventDefault()}
       onTouchStart={(e) => {
-        if (!isDraggable || !onTouchDragStart) return;
+        if (!isDraggable) return;
+        // Use unified sidebar drag if available, otherwise fall back to old system
+        const hasSidebarDrag = onSidebarDragStart && onSidebarDragMove && onSidebarDragEnd;
+        if (!hasSidebarDrag && !onTouchDragStart) return;
+
         const touch = e.touches[0];
-        touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-        touchTimerRef.current = setTimeout(() => {
-          if (touchStartRef.current) {
-            onTouchDragStart(entry, touchStartRef.current);
+        const startX = touch.clientX;
+        const startY = touch.clientY;
+        let holdCancelled = false;
+        let dragging = false;
+
+        const handleMove = (ev: TouchEvent) => {
+          ev.preventDefault();
+          const t = ev.touches[0];
+          if (!holdCancelled && !dragging && Math.hypot(t.clientX - startX, t.clientY - startY) > 10) {
+            holdCancelled = true;
+            clearTimeout(timer);
           }
-          touchTimerRef.current = null;
+          if (dragging) {
+            onSidebarDragMove?.(t.clientX, t.clientY);
+          }
+        };
+
+        const handleEnd = () => {
+          if (dragging) onSidebarDragEnd?.();
+          clearTimeout(timer);
+          document.removeEventListener('touchmove', handleMove);
+          document.removeEventListener('touchend', handleEnd);
+          document.removeEventListener('touchcancel', handleEnd);
+        };
+
+        document.addEventListener('touchmove', handleMove, { passive: false });
+        document.addEventListener('touchend', handleEnd);
+        document.addEventListener('touchcancel', handleEnd);
+
+        const timer = setTimeout(() => {
+          if (!holdCancelled) {
+            dragging = true;
+            if (hasSidebarDrag) {
+              onSidebarDragStart!(entry, { x: startX, y: startY });
+            } else {
+              onTouchDragStart!(entry, { x: startX, y: startY });
+            }
+            if (navigator.vibrate) navigator.vibrate(20);
+          }
         }, 300);
       }}
-      onTouchMove={(e) => {
-        if (touchTimerRef.current && touchStartRef.current) {
-          const touch = e.touches[0];
-          const dx = touch.clientX - touchStartRef.current.x;
-          const dy = touch.clientY - touchStartRef.current.y;
-          if (Math.sqrt(dx * dx + dy * dy) > 10) {
-            clearTimeout(touchTimerRef.current);
-            touchTimerRef.current = null;
+      onMouseDown={(e) => {
+        if (!isDraggable || !onSidebarDragStart || !onSidebarDragMove || !onSidebarDragEnd) return;
+        // Only left click
+        if (e.button !== 0) return;
+        const startX = e.clientX;
+        const startY = e.clientY;
+        let started = false;
+
+        const handleMouseMove = (ev: MouseEvent) => {
+          if (!started && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 5) {
+            started = true;
+            ev.preventDefault();
+            onSidebarDragStart!(entry, { x: startX, y: startY });
           }
-        }
-      }}
-      onTouchEnd={() => {
-        if (touchTimerRef.current) {
-          clearTimeout(touchTimerRef.current);
-          touchTimerRef.current = null;
-        }
+          if (started) {
+            ev.preventDefault();
+            onSidebarDragMove!(ev.clientX, ev.clientY);
+          }
+        };
+
+        const handleMouseUp = () => {
+          if (started) onSidebarDragEnd!();
+          document.removeEventListener('mousemove', handleMouseMove);
+          document.removeEventListener('mouseup', handleMouseUp);
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
       }}
       className={cn(
         'group relative flex flex-col rounded-[14px] overflow-hidden transition-all',

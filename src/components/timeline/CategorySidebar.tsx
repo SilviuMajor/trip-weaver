@@ -17,6 +17,9 @@ interface CategorySidebarProps {
   onDuplicate?: (entry: EntryWithOptions) => void;
   onInsert?: (entry: EntryWithOptions) => void;
   onTouchDragStart?: (entry: EntryWithOptions, initialPosition: { x: number; y: number }) => void;
+  onSidebarDragStart?: (entry: EntryWithOptions, position: { x: number; y: number }) => void;
+  onSidebarDragMove?: (x: number, y: number) => void;
+  onSidebarDragEnd?: () => void;
   compact?: boolean;
   hiddenForDrag?: boolean;
   exploreOpen?: boolean;
@@ -34,6 +37,9 @@ const CategorySidebar = ({
   onDuplicate,
   onInsert,
   onTouchDragStart,
+  onSidebarDragStart,
+  onSidebarDragMove,
+  onSidebarDragEnd,
   compact = false,
   hiddenForDrag,
   exploreOpen,
@@ -70,6 +76,9 @@ const CategorySidebar = ({
           onDuplicate={onDuplicate}
           onInsert={onInsert}
           onTouchDragStart={onTouchDragStart}
+          onSidebarDragStart={onSidebarDragStart}
+          onSidebarDragMove={onSidebarDragMove}
+          onSidebarDragEnd={onSidebarDragEnd}
         />
       </div>
     </div>
