@@ -84,7 +84,7 @@ function resolveOriginFromEntries(
   return closest ? { name: closest.name, lat: closest.lat, lng: closest.lng } : null;
 }
 
-function buildTempEntry(place: ExploreResult, tripId: string, categoryId: string | null, resolvedPhotoUrl: string | null, detailPhotos?: string[]): { entry: EntryWithOptions; option: EntryOption } {
+function buildTempEntry(place: ExploreResult, tripId: string, categoryId: string | null, resolvedPhotoUrl: string | null, detailPhotos?: { url: string; attribution: string }[]): { entry: EntryWithOptions; option: EntryOption } {
   const now = new Date().toISOString();
   const fakeEntryId = `explore-${place.placeId}`;
   const fakeOptionId = `explore-opt-${place.placeId}`;
@@ -121,12 +121,13 @@ function buildTempEntry(place: ExploreResult, tripId: string, categoryId: string
     updated_at: now,
     vote_count: 0,
     images: detailPhotos && detailPhotos.length > 0
-      ? detailPhotos.map((url, i) => ({
+      ? detailPhotos.map((p, i) => ({
           id: `temp-img-${i}`,
           option_id: fakeOptionId,
-          image_url: url,
+          image_url: p.url,
           sort_order: i,
           created_at: now,
+          attribution: p.attribution || undefined,
         }))
       : resolvedPhotoUrl
         ? [{ id: 'temp', option_id: fakeOptionId, image_url: resolvedPhotoUrl, sort_order: 0, created_at: now }]
@@ -228,7 +229,8 @@ const ExploreView = ({
   const [loadingMore, setLoadingMore] = useState(false);
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
   const [detailReviews, setDetailReviews] = useState<any[] | null>(null);
-  const [detailPhotos, setDetailPhotos] = useState<string[]>([]);
+  const [detailPhotos, setDetailPhotos] = useState<{ url: string; attribution: string }[]>([]);
+  const [detailEditorialSummary, setDetailEditorialSummary] = useState<string | null>(null);
   // Multi-select categories
   const [selectedCategories, setSelectedCategories] = useState<string[]>(() => {
     if (categoryId) return [categoryId];
@@ -588,8 +590,14 @@ const ExploreView = ({
       const { data: details } = await supabase.functions.invoke('google-places', {
         body: { action: 'details', placeId: place.placeId },
       });
-      setDetailPhotos(details?.photos ?? []);
+      // photos may be string[] (legacy) or { url, attribution }[]
+      const rawPhotos = details?.photos ?? [];
+      const normalizedPhotos = rawPhotos.map((p: any) =>
+        typeof p === 'string' ? { url: p, attribution: '' } : { url: p.url, attribution: p.attribution ?? '' }
+      );
+      setDetailPhotos(normalizedPhotos);
       setDetailReviews(details?.reviews ?? []);
+      setDetailEditorialSummary(details?.editorialSummary ?? null);
       // Enrich place with details data
       if (details?.website) place.website = details.website;
       if (details?.phone) place.phone = details.phone;
@@ -599,6 +607,7 @@ const ExploreView = ({
       console.error('Failed to fetch place details:', err);
       setDetailPhotos([]);
       setDetailReviews(null);
+      setDetailEditorialSummary(null);
       setSelectedPlace(place);
       setDetailOpen(true);
     } finally {
@@ -826,6 +835,7 @@ const ExploreView = ({
           onSaved={() => {}}
           onClose={() => setDetailOpen(false)}
           preloadedReviews={detailReviews}
+          preloadedEditorialSummary={detailEditorialSummary}
         />
       </div>
     );
@@ -1378,14 +1388,14 @@ const ExploreView = ({
 
       {/* Detail sheet */}
       {isMobile ? (
-        <Drawer open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setDetailReviews(null); setDetailPhotos([]); } }}>
+        <Drawer open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setDetailReviews(null); setDetailPhotos([]); setDetailEditorialSummary(null); } }}>
           <DrawerContent className="max-h-[92vh]">
             <DrawerTitle className="sr-only">Place Details</DrawerTitle>
             {detailContent}
           </DrawerContent>
         </Drawer>
       ) : (
-        <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setDetailReviews(null); setDetailPhotos([]); } }}>
+        <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) { setDetailReviews(null); setDetailPhotos([]); setDetailEditorialSummary(null); } }}>
           <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto p-0">
             <DialogTitle className="sr-only">Place Details</DialogTitle>
             {detailContent}

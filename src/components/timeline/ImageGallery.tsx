@@ -50,6 +50,11 @@ const ImageGallery = ({ images, height = 220 }: ImageGalleryProps) => {
           alt={`Image ${current + 1}`}
           className="h-full w-full object-cover"
         />
+        {sorted[current].attribution && (
+          <span className="absolute bottom-2 right-2 text-[9px] text-white/70 bg-black/30 px-1.5 py-0.5 rounded backdrop-blur-sm pointer-events-none">
+            Photo by {sorted[current].attribution}
+          </span>
+        )}
       </div>
 
       {sorted.length > 1 && (

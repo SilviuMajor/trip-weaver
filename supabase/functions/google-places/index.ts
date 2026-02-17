@@ -21,7 +21,7 @@ const mapPlace = (place: any) => ({
   website: place.websiteUri ?? null,
   phone: place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? null,
   photoRef: place.photos?.[0]?.name ?? null,
-  reviews: (place.reviews ?? []).slice(0, 1).map((r: any) => ({
+  reviews: (place.reviews ?? []).slice(0, 3).map((r: any) => ({
     text: r.text?.text ?? '',
     rating: r.rating ?? null,
     author: r.authorAttribution?.displayName ?? 'Anonymous',
@@ -109,7 +109,7 @@ serve(async (req) => {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'displayName,formattedAddress,websiteUri,location,photos,nationalPhoneNumber,internationalPhoneNumber,rating,userRatingCount,regularOpeningHours,googleMapsUri,priceLevel,types,reviews',
+          'X-Goog-FieldMask': 'displayName,formattedAddress,websiteUri,location,photos,nationalPhoneNumber,internationalPhoneNumber,rating,userRatingCount,regularOpeningHours,googleMapsUri,priceLevel,types,reviews,editorialSummary,currentOpeningHours',
         },
       });
       const result = await res.json();
@@ -122,8 +122,8 @@ serve(async (req) => {
         });
       }
 
-      // Upload photos to storage
-      const photoUrls: string[] = [];
+      // Upload photos to storage (with attribution)
+      const photoResults: { url: string; attribution: string }[] = [];
       const photoRefs = (result.photos ?? []).slice(0, 5);
 
       if (photoRefs.length > 0) {
@@ -154,7 +154,8 @@ serve(async (req) => {
               .from('trip-images')
               .getPublicUrl(fileName);
 
-            photoUrls.push(urlData.publicUrl);
+            const attribution = (photo.authorAttributions ?? [])[0]?.displayName ?? '';
+            photoResults.push({ url: urlData.publicUrl, attribution });
           } catch (err) {
             console.error('Photo processing error:', err);
           }
@@ -174,13 +175,15 @@ serve(async (req) => {
         googleMapsUri: result.googleMapsUri ?? null,
         priceLevel: result.priceLevel ?? null,
         placeTypes: result.types ?? null,
-        photos: photoUrls,
+        photos: photoResults,
         reviews: (result.reviews ?? []).slice(0, 3).map((r: any) => ({
           text: r.text?.text ?? '',
           rating: r.rating ?? null,
           author: r.authorAttribution?.displayName ?? 'Anonymous',
           relativeTime: r.relativePublishTimeDescription ?? '',
         })),
+        editorialSummary: result.editorialSummary?.text ?? null,
+        currentOpeningHours: result.currentOpeningHours?.weekdayDescriptions ?? null,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

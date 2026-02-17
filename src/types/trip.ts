@@ -107,6 +107,7 @@ export interface OptionImage {
   image_url: string;
   sort_order: number;
   created_at: string;
+  attribution?: string;
 }
 
 export interface Vote {
