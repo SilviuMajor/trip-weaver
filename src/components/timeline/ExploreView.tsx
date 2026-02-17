@@ -57,6 +57,9 @@ interface ExploreViewProps {
   embedded?: boolean;
   initialSearchQuery?: string | null;
   onAddToTimeline?: (place: ExploreResult) => void;
+  onExploreDragStart?: (place: ExploreResult, position: { x: number; y: number }) => void;
+  onExploreDragMove?: (x: number, y: number) => void;
+  onExploreDragEnd?: () => void;
 }
 
 // ─── Explore categories (exclude transport types) ───
@@ -204,6 +207,9 @@ const ExploreView = ({
   embedded = false,
   initialSearchQuery,
   onAddToTimeline,
+  onExploreDragStart,
+  onExploreDragMove,
+  onExploreDragEnd,
 }: ExploreViewProps) => {
   const [results, setResults] = useState<ExploreResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1223,6 +1229,9 @@ const ExploreView = ({
                           isInTrip={inTrip}
                           travelTime={travelTimeStr ?? null}
                           isLoading={detailLoading === place.placeId}
+                          onExploreDragStart={onExploreDragStart}
+                          onExploreDragMove={onExploreDragMove}
+                          onExploreDragEnd={onExploreDragEnd}
                         />
                       </div>
                     );
@@ -1351,6 +1360,9 @@ const ExploreView = ({
                           onTap={() => handleCardTap(asExplore)}
                           isInTrip={inTrip}
                           isLoading={detailLoading === asExplore.placeId}
+                          onExploreDragStart={onExploreDragStart}
+                          onExploreDragMove={onExploreDragMove}
+                          onExploreDragEnd={onExploreDragEnd}
                         />
                       </div>
                     );
@@ -1380,6 +1392,9 @@ const ExploreView = ({
                   compactHours={hours.text}
                   crossTripName={crossTripMatches.get(place.placeId) || null}
                   isLoading={detailLoading === place.placeId}
+                  onExploreDragStart={onExploreDragStart}
+                  onExploreDragMove={onExploreDragMove}
+                  onExploreDragEnd={onExploreDragEnd}
                 />
               );
             })}
