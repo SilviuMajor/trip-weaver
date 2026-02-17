@@ -1,64 +1,52 @@
 
 
-# Remove Magnet System + Transport Gap Buttons
+# Snap Zone During Drag + Auto-Place with Transport
 
 ## Overview
-Remove the entire magnet/snap system and transport gap buttons from both Timeline.tsx and ContinuousTimeline.tsx. The auto-connector system (from Prompt 2) replaces their function.
+The existing codebase already has snap zone detection during drag (useMemo in ContinuousTimeline), green ghost rendering with "Snap" label, and auto-transport creation via `handleSnapRelease`. This plan adds the missing piece: **auto-creating transport when dropping cards from the Planner/Explore panels** onto the timeline near existing cards.
 
-## Changes
+## What Already Exists (No Changes Needed)
+- Snap detection during drag (ContinuousTimeline.tsx `snapTarget` useMemo, lines 632-696)
+- Green ghost outline with "Snap" label (lines 1822-1858)
+- Green connector line between snap target and ghost (lines 1826-1844)
+- `handleSnapRelease` in Timeline.tsx (lines 707-805) that auto-creates transport entries
+- Snap release is already called from `handleDragCommit` (lines 312-332)
 
-### Timeline.tsx
+## Changes Needed
 
-**1. Delete `handleMagnetSnap` (lines 705-919)**
-The entire `useCallback` that handles magnet snap logic (transport-source path, transport-exists case, no-transport case with directions API call). ~215 lines removed.
+### 1. Timeline.tsx -- Auto-create transport on panel drops (`handleDropOnTimeline`)
 
-**2. Delete `checkProximityAndPrompt` (lines 1179-1227)**
-The proximity toast callback that asks "Generate transport & snap?" ~49 lines removed.
+After the existing placement logic in `handleDropOnTimeline` (after `fetchData()` at line 1481), add auto-transport creation for nearby adjacent cards:
 
-**3. Remove `checkProximityAndPrompt` call sites:**
-- Line 1631: Delete `checkProximityAndPrompt(entryId);` from `handleEntryTimeChange`
-- Line 1910: Delete `checkProximityAndPrompt(placedEntryId);` from `handleDropOnTimeline`
+- After fetching fresh data, find the placed entry's neighbors among scheduled non-transport entries
+- If the gap to the previous card is 0-30 minutes, call `handleSnapRelease(placedEntryId, prevEntry.id, 'below')`
+- If the gap to the next card is 0-30 minutes, call `handleSnapRelease(nextEntry.id, placedEntryId, 'below')` (note: this reuses the existing handler which already creates transport, shifts the "to" entry, and supports undo)
 
-**4. Delete `handleAddTransport` (lines 1336-1365)**
-Opens EntrySheet for manual transport creation from gap buttons. No longer needed.
+This replaces the travel conflict analysis that currently runs (lines 1495-1528) with direct transport creation when cards are close enough. When cards are far apart (>30min gap), keep the existing conflict analysis.
 
-**5. Delete `handleGenerateTransportDirect` (lines 1367-1483)**
-Auto-generates transport from gap buttons. No longer needed.
+### 2. Timeline.tsx -- Auto-create transport on Explore card drops (`handleDropExploreCard`)
 
-**6. Remove prop passing to ContinuousTimeline (lines 2815-2816, 2836):**
-- Delete `onAddTransport={handleAddTransport}`
-- Delete `onGenerateTransport={handleGenerateTransportDirect}`
-- Delete `onMagnetSnap={handleMagnetSnap}`
+Apply the same 0-30 minute proximity check after placing an explore card on the timeline, calling `handleSnapRelease` for nearby neighbors.
 
-### ContinuousTimeline.tsx
+### 3. ContinuousTimeline.tsx -- Update snap label to show destination name
 
-**7. Remove from interface + destructuring:**
-- `onAddTransport` prop (line 47)
-- `onGenerateTransport` prop (line 48)
-- `onMagnetSnap` prop (line 62)
-- Corresponding destructuring lines (98-99, 113)
+Currently the snap label says "Snap" (line 1856). Update to show "Snap after [name]" or "Snap before [name]" depending on the `snapTarget.side`:
 
-**8. Delete `magnetLoadingId` state (line 465)**
+```
+const targetName = sortedEntries.find(e => e.id === snapTarget.entryId)?.options[0]?.name;
+const shortName = targetName?.split(',')[0]?.trim() || 'event';
+const label = snapTarget.side === 'below' ? `after ${shortName}` : `before ${shortName}`;
+```
 
-**9. Delete the `magnetState` IIFE (lines 1383-1431)**
-The entire computation block that determines whether to show magnet buttons, checks for transport entries after, locked state, etc.
+## Technical Details
 
-**10. Delete magnet button on flight groups (lines 1598-1626)**
-The `{magnetState.showMagnet && (` block inside the flight group card rendering.
+**Why not move snap detection into useDragResize?** The current architecture computes snap targets in a `useMemo` in ContinuousTimeline, which has access to `sortedEntries` and `getEntryGlobalHours`. Moving this into the hook would require passing entry data as a parameter and duplicating entry-awareness in a lower-level hook. The current approach is cleaner -- the hook handles pixel-level drag mechanics, and the component handles entry-level logic.
 
-**11. Delete magnet button on regular cards (lines 1687-1714)**
-The `{magnetState.showMagnet && (` block inside the regular card rendering.
+**Transport creation reuse:** `handleSnapRelease` already handles the full flow: Google Directions API call, transport entry creation, shifting the "to" entry, undo/redo support, and toast notifications. Reusing it for panel drops avoids code duplication.
 
-**12. Replace transport gap button with "+ Add something" (lines 1229-1245)**
-Remove the `isTransportGap` variable and the Bus button branch. Replace the ternary so all gaps just show "+ Add something" button(s):
-- Gaps > 6 hours: dual buttons (top and bottom) -- already exists
-- Gaps <= 6 hours: single centered button -- already exists
-- Remove the transport-specific branch entirely
-
-**13. Clean up lucide-react import (line 9):**
-Remove `Bus`, `Magnet`, `Loader2` from the import. Keep `Plus`, `Lock`, `LockOpen`, `Trash2`.
+**Gap threshold:** 30 minutes chosen as the boundary -- close enough that transport is relevant, far enough that it does not trigger for intentional gaps (e.g., lunch break between morning and afternoon activities).
 
 ## Files Modified
-- `src/pages/Timeline.tsx` -- delete handleMagnetSnap, checkProximityAndPrompt, handleAddTransport, handleGenerateTransportDirect; remove prop passing
-- `src/components/timeline/ContinuousTimeline.tsx` -- remove magnet state/buttons, transport gap button, unused imports and props
+- `src/pages/Timeline.tsx` -- add auto-transport logic to `handleDropOnTimeline` and `handleDropExploreCard`
+- `src/components/timeline/ContinuousTimeline.tsx` -- update snap label text to include destination name
 
