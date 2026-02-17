@@ -527,6 +527,66 @@ const ContinuousTimeline = ({
     });
   }, [sortedEntries, isTransportEntry]);
 
+  // Auto-connector data between all adjacent visible entries
+  const connectorData = useMemo(() => {
+    const connectors: Array<{
+      fromEntryId: string;
+      toEntryId: string;
+      fromEndGH: number;
+      toStartGH: number;
+      mode: string;
+      durationMin: number;
+      destinationName: string;
+      distanceKm?: number | null;
+      transportEntryId?: string;
+    }> = [];
+
+    for (let i = 0; i < visibleEntries.length - 1; i++) {
+      const from = visibleEntries[i];
+      const to = visibleEntries[i + 1];
+      const fromGH = getEntryGlobalHours(from);
+      const toGH = getEntryGlobalHours(to);
+
+      // Check if a transport entry exists between these two
+      const transportEntry = sortedEntries.find(e => {
+        const cat = e.options[0]?.category;
+        return cat === 'transfer' && (e.from_entry_id === from.id || e.to_entry_id === to.id);
+      });
+
+      if (transportEntry) {
+        const tOpt = transportEntry.options[0];
+        const nameLower = tOpt?.name?.toLowerCase() ?? '';
+        const currentMode = nameLower.startsWith('walk') ? 'walk'
+          : nameLower.startsWith('drive') ? 'drive'
+          : nameLower.startsWith('cycle') || nameLower.startsWith('bic') ? 'bicycle'
+          : 'transit';
+        const durMin = Math.round((new Date(transportEntry.end_time).getTime() - new Date(transportEntry.start_time).getTime()) / 60000);
+        connectors.push({
+          fromEntryId: from.id,
+          toEntryId: to.id,
+          fromEndGH: fromGH.endGH,
+          toStartGH: toGH.startGH,
+          mode: currentMode,
+          durationMin: durMin,
+          destinationName: tOpt?.arrival_location || to.options[0]?.name || 'Next',
+          distanceKm: (tOpt as any)?.distance_km,
+          transportEntryId: transportEntry.id,
+        });
+      } else {
+        connectors.push({
+          fromEntryId: from.id,
+          toEntryId: to.id,
+          fromEndGH: fromGH.endGH,
+          toStartGH: toGH.startGH,
+          mode: 'transit',
+          durationMin: 0,
+          destinationName: to.options[0]?.name || 'Next',
+        });
+      }
+    }
+    return connectors;
+  }, [visibleEntries, sortedEntries, getEntryGlobalHours]);
+
   // First hint-eligible entry index
   const firstHintIndex = useMemo(() => {
     if (!showCardHint) return -1;
@@ -1230,6 +1290,37 @@ const ContinuousTimeline = ({
           );
         })}
 
+        {/* Auto-connectors between adjacent entries */}
+        {connectorData.map((conn) => {
+          const topPx = conn.fromEndGH * pixelsPerHour;
+          const gapPx = (conn.toStartGH - conn.fromEndGH) * pixelsPerHour;
+          const connHeight = Math.max(gapPx, 20);
+          const connTop = gapPx >= 20 ? topPx : topPx - (20 - gapPx) / 2;
+
+          return (
+            <div
+              key={`conn-${conn.fromEntryId}-${conn.toEntryId}`}
+              className="absolute left-0 right-0 pr-1 z-[12]"
+              style={{ top: connTop, height: connHeight }}
+            >
+              <TransportConnector
+                mode={conn.mode}
+                durationMin={conn.durationMin}
+                destinationName={conn.destinationName}
+                distanceKm={conn.distanceKm}
+                isLoading={conn.durationMin === 0 && !conn.transportEntryId}
+                onCogTap={() => {
+                  if (conn.transportEntryId) {
+                    const tEntry = sortedEntries.find(e => e.id === conn.transportEntryId);
+                    if (tEntry) onCardTap(tEntry, tEntry.options[0]);
+                  }
+                }}
+                height={connHeight}
+              />
+            </div>
+          );
+        })}
+
         {/* Entry cards */}
         {sortedEntries.map((entry, index) => {
           if (linkedEntryIds.has(entry.id)) return null;
@@ -1285,6 +1376,9 @@ const ContinuousTimeline = ({
               : null;
 
           const isTransport = isTransportEntry(entry);
+
+          // Transport entries are now rendered as inline connectors, not as cards
+          if (isTransport) return null;
 
           // Compute magnet state: gap-aware, transport-aware
           const magnetState = (() => {
@@ -1532,46 +1626,7 @@ const ContinuousTimeline = ({
                         )}
                       </div>
                     );
-                  })() : isTransport ? (
-                    <div data-transport-connector className="relative h-full flex items-center justify-center">
-                      <TransportConnector
-                        entry={entry}
-                        option={primaryOption}
-                        height={height}
-                        fromLabel={primaryOption.departure_location || undefined}
-                        toLabel={primaryOption.arrival_location || undefined}
-                        onTap={() => onCardTap(entry, primaryOption)}
-                      />
-                      {/* Magnet snap icon on transport connector */}
-                      {magnetState.showMagnet && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (magnetState.nextLocked) {
-                              toast('Next event is locked', { description: 'Unlock it before snapping' });
-                              return;
-                            }
-                            if (!onMagnetSnap) return;
-                            setMagnetLoadingId(entry.id);
-                            onMagnetSnap(entry.id).finally(() => setMagnetLoadingId(null));
-                          }}
-                          className={cn(
-                            "absolute -bottom-3 -right-3 z-[45] flex h-7 w-7 items-center justify-center rounded-full border border-border shadow-sm",
-                            magnetState.nextLocked
-                              ? "bg-muted cursor-not-allowed"
-                              : "bg-green-100 dark:bg-green-900/40 hover:bg-green-200 dark:hover:bg-green-800/50 cursor-pointer",
-                            magnetLoadingId === entry.id && "animate-pulse"
-                          )}
-                        >
-                          {magnetLoadingId === entry.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-green-600" />
-                          ) : (
-                            <Magnet className={cn("h-3 w-3", magnetState.nextLocked ? "text-muted-foreground/40" : "text-green-600 dark:text-green-400")} style={{ transform: 'rotate(180deg)' }} />
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  ) : (
+                  })() : (
                     <div className="relative h-full">
                       <EntryCard
                         height={height}
@@ -1660,8 +1715,8 @@ const ContinuousTimeline = ({
                     </div>
                   )}
 
-                  {/* Bottom resize handle — not for transport */}
-                  {canDrag && !flightGroup && !isTransport && (
+                  {/* Bottom resize handle */}
+                  {canDrag && !flightGroup && (
                     <div
                       data-resize-handle
                       className="absolute -bottom-1 left-0 right-0 z-20 h-5 cursor-ns-resize group/resize touch-none"
@@ -1675,7 +1730,7 @@ const ContinuousTimeline = ({
                       )}
                     </div>
                   )}
-                  {!canDrag && isLocked && !flightGroup && !isTransport && (
+                  {!canDrag && isLocked && !flightGroup && (
                     <div
                       data-resize-handle
                       className="absolute -bottom-1 left-0 right-0 z-20 h-5 cursor-not-allowed touch-none"
@@ -1689,7 +1744,7 @@ const ContinuousTimeline = ({
                   )}
 
                   {/* + buttons — not for transport, not adjacent to transport */}
-                  {onAddBetween && !isTransport && (() => {
+                  {onAddBetween && (() => {
                     const prevIdx = sortedEntries.findIndex(e => e.id === entry.id) - 1;
                     const prevE = prevIdx >= 0 ? sortedEntries[prevIdx] : null;
                     if (prevE?.options[0]?.category === 'transfer') return null;
@@ -1707,7 +1762,7 @@ const ContinuousTimeline = ({
                       </button>
                     );
                   })()}
-                  {onAddBetween && !isTransport && (() => {
+                  {onAddBetween && (() => {
                     const nextIdx = sortedEntries.findIndex(e => e.id === entry.id) + 1;
                     const nextE = nextIdx < sortedEntries.length ? sortedEntries[nextIdx] : null;
                     if (nextE?.options[0]?.category === 'transfer') return null;
@@ -1725,80 +1780,6 @@ const ContinuousTimeline = ({
                     );
                   })()}
 
-                  {/* "+ Add something" below transport cards */}
-                  {isTransport && (() => {
-                    let nextVisible = entry.to_entry_id
-                      ? sortedEntries.find(e => e.id === entry.to_entry_id)
-                      : null;
-                    if (!nextVisible) {
-                      const entryIdx = sortedEntries.findIndex(e => e.id === entry.id);
-                      for (let i = entryIdx + 1; i < sortedEntries.length; i++) {
-                        const candidate = sortedEntries[i];
-                        if (!isTransportEntry(candidate) && !candidate.linked_flight_id) {
-                          nextVisible = candidate;
-                          break;
-                        }
-                      }
-                    }
-                    if (!nextVisible) return null;
-
-                    const transportEndGH = getEntryGlobalHours(entry).endGH;
-                    const nextStartGH = getEntryGlobalHours(nextVisible).startGH;
-                    const gapGH = nextStartGH - transportEndGH;
-                    const gapMin = Math.round(gapGH * 60);
-                    if (gapMin <= 5) return null;
-
-                    const gapTopPx = transportEndGH * pixelsPerHour;
-                    const gapBottomPx = nextStartGH * pixelsPerHour;
-                    const gapPixelHeight = gapBottomPx - gapTopPx;
-                    const relGapTop = gapTopPx - (entryStartGH * pixelsPerHour);
-
-                    return (
-                      <>
-                        {/* Dashed centre line */}
-                        <div
-                          className="absolute left-1/2 border-l-2 border-dashed border-primary/20 pointer-events-none"
-                          style={{ top: relGapTop, height: gapPixelHeight }}
-                        />
-
-                        {gapMin > 360 && onAddBetween ? (
-                          <>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onAddBetween(addMinutes(new Date(entry.end_time), 60).toISOString());
-                              }}
-                              className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-0.5 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                              style={{ top: relGapTop + pixelsPerHour - 12 }}
-                            >
-                              <Plus className="h-3 w-3" />
-                              <span>+ Add something</span>
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onAddBetween(addMinutes(new Date(nextVisible!.start_time), -60).toISOString());
-                              }}
-                              className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-0.5 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                              style={{ top: relGapTop + gapPixelHeight - pixelsPerHour - 12 }}
-                            >
-                              <Plus className="h-3 w-3" />
-                              <span>+ Add something</span>
-                            </button>
-                          </>
-                        ) : onAddBetween ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); onAddBetween(entry.end_time); }}
-                            className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-0.5 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
-                            style={{ top: relGapTop + (gapPixelHeight - 22) / 2 }}
-                          >
-                            <Plus className="h-3 w-3" />
-                            <span>+ Add something</span>
-                          </button>
-                        ) : null}
-                      </>
-                    );
-                  })()}
                 </div>
               </div>
             </div>
