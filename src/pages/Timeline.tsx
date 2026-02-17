@@ -35,6 +35,7 @@ import ExploreView from '@/components/timeline/ExploreView';
 import type { ExploreResult } from '@/components/timeline/ExploreView';
 import type { Trip, Entry, EntryOption, EntryWithOptions, WeatherData } from '@/types/trip';
 import type { ConflictInfo, Recommendation } from '@/lib/conflictEngine';
+import TransportOverlay from '@/components/timeline/TransportOverlay';
 
 async function autoExtendTripIfNeeded(
   tripId: string,
@@ -153,6 +154,19 @@ const Timeline = () => {
 
   // Floating place for "Add to Timeline" mode
   const [floatingPlaceForTimeline, setFloatingPlaceForTimeline] = useState<ExploreResult | null>(null);
+
+  // Transport overlay state
+  const [transportOverlayOpen, setTransportOverlayOpen] = useState(false);
+  const [transportOverlayData, setTransportOverlayData] = useState<{
+    entryId: string;
+    fromAddress: string;
+    toAddress: string;
+    currentMode: string;
+    durationMin: number;
+    distanceKm?: number | null;
+    allModes: Array<{ mode: string; duration_min: number; distance_km: number; polyline?: string }>;
+    departureTime: string;
+  } | null>(null);
 
   // Unified sidebar drag state (replaces old touch drag)
   const [sidebarDrag, setSidebarDrag] = useState<{
@@ -709,6 +723,20 @@ const Timeline = () => {
   }, [days, scheduledEntries, homeTimezone]);
 
 
+  // ─── Cleanup transports referencing a deleted entry ───
+  const cleanupTransportsForEntry = useCallback(async (deletedEntryId: string) => {
+    const { data: orphaned } = await supabase
+      .from('entries')
+      .select('id')
+      .or(`from_entry_id.eq.${deletedEntryId},to_entry_id.eq.${deletedEntryId}`);
+    if (orphaned) {
+      for (const t of orphaned) {
+        await supabase.from('entry_options').delete().eq('entry_id', t.id);
+        await supabase.from('entries').delete().eq('id', t.id);
+      }
+    }
+  }, []);
+
   // ─── Snap Release handler (auto-transport on drag snap) ───
   const handleSnapRelease = useCallback(async (draggedEntryId: string, targetEntryId: string, side: 'above' | 'below') => {
     // side === 'below': dragged card placed AFTER target. target=from, dragged=to
@@ -749,6 +777,33 @@ const Timeline = () => {
 
       const transportStartMs = new Date(fromEntry.end_time).getTime();
       const transportEndMs = transportStartMs + blockDur * 60000;
+
+      // Delete any existing transport FROM the fromEntry to a different card
+      const { data: oldFromTransports } = await supabase
+        .from('entries')
+        .select('id')
+        .eq('from_entry_id', fromEntryId)
+        .neq('to_entry_id', toEntryId);
+      for (const old of (oldFromTransports ?? [])) {
+        const oldEntry = entries.find(e => e.id === old.id);
+        if (oldEntry?.options[0]?.category === 'transfer') {
+          await supabase.from('entry_options').delete().eq('entry_id', old.id);
+          await supabase.from('entries').delete().eq('id', old.id);
+        }
+      }
+      // Delete any existing transport TO the toEntry from a different card
+      const { data: oldToTransports } = await supabase
+        .from('entries')
+        .select('id')
+        .eq('to_entry_id', toEntryId)
+        .neq('from_entry_id', fromEntryId);
+      for (const old of (oldToTransports ?? [])) {
+        const oldEntry = entries.find(e => e.id === old.id);
+        if (oldEntry?.options[0]?.category === 'transfer') {
+          await supabase.from('entry_options').delete().eq('entry_id', old.id);
+          await supabase.from('entries').delete().eq('id', old.id);
+        }
+      }
 
       // Create transport entry
       const { data: newTransport } = await supabase.from('entries').insert({
@@ -1113,7 +1168,7 @@ const Timeline = () => {
       return;
     }
 
-    // Auto-reposition linked transport entries (preserve duration, don't re-fetch)
+    // Auto-recalculate transport connectors adjacent to this card
     try {
       const { data: linkedTransports } = await supabase
         .from('entries')
@@ -1123,27 +1178,57 @@ const Timeline = () => {
       if (linkedTransports && linkedTransports.length > 0) {
         for (const transport of linkedTransports) {
           const fromId = transport.from_entry_id;
-          if (!fromId) continue;
+          const toId = transport.to_entry_id;
+          if (!fromId || !toId) continue;
 
-          // Get the "from" entry's new end time
-          const { data: fromEntry } = await supabase
-            .from('entries')
-            .select('end_time')
-            .eq('id', fromId)
-            .single();
+          const fromEndTime = fromId === entryId ? newEndIso : (entries.find(e => e.id === fromId)?.end_time ?? null);
+          const toStartTime = toId === entryId ? newStartIso : (entries.find(e => e.id === toId)?.start_time ?? null);
 
-          if (!fromEntry) continue;
+          if (!fromEndTime || !toStartTime) continue;
 
-          // Preserve existing transport duration, just reposition
-          const transportDurationMs = new Date(transport.end_time).getTime() - new Date(transport.start_time).getTime();
-          const newTransportStart = fromEntry.end_time;
-          const newTransportEnd = new Date(new Date(newTransportStart).getTime() + transportDurationMs).toISOString();
-          await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
+          const fromEndMs = new Date(fromEndTime).getTime();
+          const toStartMs = new Date(toStartTime).getTime();
+          const gapMin = (toStartMs - fromEndMs) / 60000;
 
+          if (gapMin > 90) {
+            // Cards moved too far apart — delete transport entry
+            await supabase.from('entry_options').delete().eq('entry_id', transport.id);
+            await supabase.from('entries').delete().eq('id', transport.id);
+          } else {
+            // Reposition transport to start at from.end, preserve duration
+            const transportDurationMs = new Date(transport.end_time).getTime() - new Date(transport.start_time).getTime();
+            const newTransportStart = fromEndTime;
+            const newTransportEnd = new Date(new Date(newTransportStart).getTime() + transportDurationMs).toISOString();
+            await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
+          }
+        }
+      }
+
+      // Check if we need to create NEW transport entries for newly-adjacent cards
+      const updatedEntries = entries.map(e => e.id === entryId ? { ...e, start_time: newStartIso, end_time: newEndIso } : e);
+      const sorted = updatedEntries
+        .filter(e => e.is_scheduled && e.options[0]?.category !== 'transfer' && e.options[0]?.category !== 'airport_processing' && !e.linked_flight_id)
+        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+      const idx = sorted.findIndex(e => e.id === entryId);
+
+      if (idx > 0) {
+        const prev = sorted[idx - 1];
+        const gapMin = (new Date(newStartIso).getTime() - new Date(prev.end_time).getTime()) / 60000;
+        const hasTransport = entries.some(e => e.options[0]?.category === 'transfer' && e.from_entry_id === prev.id && e.to_entry_id === entryId);
+        if (gapMin >= 0 && gapMin <= 30 && !hasTransport) {
+          handleSnapRelease(entryId, prev.id, 'below');
+        }
+      }
+      if (idx >= 0 && idx < sorted.length - 1) {
+        const next = sorted[idx + 1];
+        const gapMin = (new Date(next.start_time).getTime() - new Date(newEndIso).getTime()) / 60000;
+        const hasTransport = entries.some(e => e.options[0]?.category === 'transfer' && e.from_entry_id === entryId && e.to_entry_id === next.id);
+        if (gapMin >= 0 && gapMin <= 30 && !hasTransport) {
+          handleSnapRelease(next.id, entryId, 'below');
         }
       }
     } catch (err) {
-      console.error('Failed to reposition transport:', err);
+      console.error('Failed to manage transport entries:', err);
     }
 
     await fetchData();
@@ -1365,6 +1450,35 @@ const Timeline = () => {
     toast({ title: 'Transport deleted', description: 'Press Ctrl+Z to undo' });
     await fetchData();
   };
+
+  // Handle transport cog tap — open lightweight overlay
+  const handleTransportCogTap = useCallback((transportEntryId: string) => {
+    const entry = entries.find(e => e.id === transportEntryId);
+    if (!entry) return;
+    const opt = entry.options[0];
+    if (!opt) return;
+
+    const nameLower = opt.name?.toLowerCase() || '';
+    const currentMode = nameLower.startsWith('walk') ? 'walk'
+      : nameLower.startsWith('drive') ? 'drive'
+      : nameLower.startsWith('cycle') ? 'bicycle'
+      : 'transit';
+
+    const durMin = Math.round((new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 60000);
+    const allModes = (opt as any).transport_modes ?? [];
+
+    setTransportOverlayData({
+      entryId: transportEntryId,
+      fromAddress: opt.departure_location || '',
+      toAddress: opt.arrival_location || '',
+      currentMode,
+      durationMin: durMin,
+      distanceKm: (opt as any).distance_km,
+      allModes,
+      departureTime: entry.start_time,
+    });
+    setTransportOverlayOpen(true);
+  }, [entries]);
 
   // Handle drop from ideas panel onto timeline (global hour)
   const handleDropOnTimeline = async (entryId: string, globalHour: number) => {
@@ -2436,7 +2550,8 @@ const Timeline = () => {
                   onDropFromPanel={handleDropOnTimeline}
                   onDropExploreCard={handleDropExploreCard}
                   onModeSwitchConfirm={handleModeSwitchConfirm}
-                  onDeleteTransport={handleDeleteTransport}
+                   onDeleteTransport={handleDeleteTransport}
+                   onTransportCogTap={handleTransportCogTap}
                   onToggleLock={handleToggleLock}
                   onVoteChange={fetchData}
                   scrollContainerRef={mainScrollRef}
@@ -2486,9 +2601,11 @@ const Timeline = () => {
                           sonnerToast.error("Can't delete flights by dragging");
                           return true;
                         }
-                        supabase.from('entries').delete().eq('id', entryId).then(() => {
-                          fetchData();
-                          sonnerToast.success(entry.options[0]?.name ? `Deleted ${entry.options[0].name}` : 'Entry deleted');
+                        cleanupTransportsForEntry(entryId).then(() => {
+                          supabase.from('entries').delete().eq('id', entryId).then(() => {
+                            fetchData();
+                            sonnerToast.success(entry.options[0]?.name ? `Deleted ${entry.options[0].name}` : 'Entry deleted');
+                          });
                         });
                         return true;
                       }
@@ -2795,6 +2912,22 @@ const Timeline = () => {
             onSkip={handleSkipConflict}
           />
 
+          {transportOverlayData && (
+            <TransportOverlay
+              open={transportOverlayOpen}
+              onOpenChange={setTransportOverlayOpen}
+              transportEntryId={transportOverlayData.entryId}
+              fromAddress={transportOverlayData.fromAddress}
+              toAddress={transportOverlayData.toAddress}
+              currentMode={transportOverlayData.currentMode}
+              durationMin={transportOverlayData.durationMin}
+              distanceKm={transportOverlayData.distanceKm}
+              allModes={transportOverlayData.allModes}
+              departureTime={transportOverlayData.departureTime}
+              onModeSwitchConfirm={handleModeSwitchConfirm}
+            />
+          )}
+
           <DayPickerDialog
             open={insertDayPickerOpen}
             onOpenChange={(open) => {
@@ -2976,6 +3109,7 @@ const Timeline = () => {
             sonnerToast.error("Can't delete flights by dragging");
             return;
           }
+          await cleanupTransportsForEntry(entryId);
           await supabase.from('entries').delete().eq('id', entryId);
           sonnerToast.success(entry.options[0]?.name ? `Deleted ${entry.options[0].name}` : 'Entry deleted');
           fetchData();

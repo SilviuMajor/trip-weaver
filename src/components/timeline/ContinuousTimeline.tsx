@@ -49,6 +49,7 @@ interface ContinuousTimelineProps {
   onDropExploreCard?: (place: any, categoryId: string | null, globalHour: number) => void;
   onModeSwitchConfirm?: (entryId: string, mode: string, newDurationMin: number, distanceKm: number, polyline?: string | null) => Promise<void>;
   onDeleteTransport?: (entryId: string) => Promise<void>;
+  onTransportCogTap?: (transportEntryId: string) => void;
   dayTimezoneMap: Map<string, { activeTz: string; flights: FlightTzInfo[] }>;
   dayLocationMap: Map<string, { lat: number; lng: number }>;
   isEditor?: boolean;
@@ -98,6 +99,7 @@ const ContinuousTimeline = ({
   onDropExploreCard,
   onModeSwitchConfirm,
   onDeleteTransport,
+  onTransportCogTap,
   dayTimezoneMap,
   dayLocationMap,
   isEditor,
@@ -1293,7 +1295,9 @@ const ContinuousTimeline = ({
                 distanceKm={conn.distanceKm}
                 isLoading={conn.durationMin === 0 && !conn.transportEntryId}
                 onCogTap={() => {
-                  if (conn.transportEntryId) {
+                  if (conn.transportEntryId && onTransportCogTap) {
+                    onTransportCogTap(conn.transportEntryId);
+                  } else if (conn.transportEntryId) {
                     const tEntry = sortedEntries.find(e => e.id === conn.transportEntryId);
                     if (tEntry) onCardTap(tEntry, tEntry.options[0]);
                   }
