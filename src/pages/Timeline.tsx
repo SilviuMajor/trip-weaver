@@ -164,6 +164,16 @@ const Timeline = () => {
   const sidebarDragTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sidebarDragRef = useRef<typeof sidebarDrag>(null);
 
+  // Unified explore drag state
+  const [exploreDrag, setExploreDrag] = useState<{
+    place: ExploreResult;
+    clientX: number;
+    clientY: number;
+    globalHour: number | null;
+  } | null>(null);
+  const exploreDragTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const exploreDragRef = useRef<typeof exploreDrag>(null);
+
   // Travel calculation
   const { calculateTravel } = useTravelCalculation();
 
@@ -2041,7 +2051,71 @@ const Timeline = () => {
     }
   }, []);
 
-  // Pinch-to-zoom gesture (mobile)
+  // Unified explore drag callbacks
+  useEffect(() => {
+    exploreDragRef.current = exploreDrag;
+  }, [exploreDrag]);
+
+  const handleExploreDragStartUnified = useCallback((place: ExploreResult, pos: { x: number; y: number }) => {
+    setExploreDrag({ place, clientX: pos.x, clientY: pos.y, globalHour: null });
+    // On mobile, hide explore panel
+    if (window.innerWidth < 768) {
+      setExploreOpen(false);
+    }
+    // 5-second cancel timeout
+    if (exploreDragTimeoutRef.current) clearTimeout(exploreDragTimeoutRef.current);
+    exploreDragTimeoutRef.current = setTimeout(() => {
+      setExploreDrag(null);
+    }, 5000);
+  }, []);
+
+  const handleExploreDragMoveUnified = useCallback((x: number, y: number) => {
+    // Reset cancel timeout on movement
+    if (exploreDragTimeoutRef.current) {
+      clearTimeout(exploreDragTimeoutRef.current);
+      exploreDragTimeoutRef.current = null;
+    }
+
+    let globalHour: number | null = null;
+    const timelineArea = document.querySelector('[data-timeline-area]');
+    if (timelineArea) {
+      const rect = timelineArea.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right) {
+        const relativeY = y - rect.top;
+        const rawGlobalHour = relativeY / pixelsPerHour;
+        globalHour = Math.round(rawGlobalHour * 4) / 4; // 15-min snap
+      }
+    }
+
+    setExploreDrag(prev => prev ? { ...prev, clientX: x, clientY: y, globalHour } : null);
+
+    // Auto-scroll near edges
+    const scrollEl = mainScrollRef.current;
+    if (scrollEl) {
+      const rect = scrollEl.getBoundingClientRect();
+      const SCROLL_ZONE = 80;
+      if (y < rect.top + SCROLL_ZONE) {
+        scrollEl.scrollTop -= 8;
+      } else if (y > rect.bottom - SCROLL_ZONE) {
+        scrollEl.scrollTop += 8;
+      }
+    }
+  }, [pixelsPerHour]);
+
+  const handleExploreDragEndUnified = useCallback(() => {
+    const drag = exploreDragRef.current;
+    if (drag && drag.globalHour !== null && drag.globalHour >= 0) {
+      const catId = inferCategoryFromTypes(drag.place.types);
+      handleDropExploreCard(drag.place, catId, drag.globalHour);
+    }
+    setExploreDrag(null);
+    if (exploreDragTimeoutRef.current) {
+      clearTimeout(exploreDragTimeoutRef.current);
+      exploreDragTimeoutRef.current = null;
+    }
+  }, [handleDropExploreCard]);
+
+
   const lastPinchDistRef = useRef<number | null>(null);
   const pinchAnchorScrollRef = useRef<number>(0);
   const pinchAnchorZoomRef = useRef<number>(1);
@@ -2911,6 +2985,9 @@ const Timeline = () => {
                     onAddAtTime={handleAddAtTime}
                     initialSearchQuery={exploreSearchQuery}
                     onAddToTimeline={handleAddToTimeline}
+                    onExploreDragStart={handleExploreDragStartUnified}
+                    onExploreDragMove={handleExploreDragMoveUnified}
+                    onExploreDragEnd={handleExploreDragEndUnified}
                     embedded
                   />
                 ) : undefined}
@@ -3082,6 +3159,9 @@ const Timeline = () => {
               onAddAtTime={handleAddAtTime}
               initialSearchQuery={exploreSearchQuery}
               onAddToTimeline={handleAddToTimeline}
+              onExploreDragStart={handleExploreDragStartUnified}
+              onExploreDragMove={handleExploreDragMoveUnified}
+              onExploreDragEnd={handleExploreDragEndUnified}
             />
           )}
 
@@ -3154,7 +3234,41 @@ const Timeline = () => {
         </div>
       )}
 
-      {/* Floating place instruction overlay */}
+      {/* Unified explore drag floating card (explore → timeline) */}
+      {exploreDrag && (
+        <div className="fixed inset-0 z-[100] pointer-events-none">
+          <div
+            className="pointer-events-none absolute z-[101]"
+            style={{
+              left: exploreDrag.clientX - 100,
+              top: exploreDrag.clientY - 40,
+              width: 200,
+              opacity: 0.9,
+              filter: 'drop-shadow(0 8px 16px rgba(0,0,0,0.2))',
+            }}
+          >
+            <div className="rounded-xl bg-background border border-border shadow-xl p-2.5">
+              <p className="text-sm font-bold truncate text-foreground">{exploreDrag.place.name}</p>
+              {exploreDrag.place.address && (
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5">📍 {exploreDrag.place.address}</p>
+              )}
+              {exploreDrag.place.rating != null && (
+                <p className="text-[11px] font-bold text-amber-500 mt-0.5">⭐ {exploreDrag.place.rating.toFixed(1)}</p>
+              )}
+            </div>
+            {exploreDrag.globalHour !== null && exploreDrag.globalHour >= 0 && (
+              <div className="mt-1 flex justify-center">
+                <span className="rounded-full bg-primary px-2.5 py-0.5 text-[11px] font-bold text-primary-foreground shadow-md">
+                  {String(Math.floor((exploreDrag.globalHour % 24))).padStart(2, '0')}:
+                  {String(Math.round(((exploreDrag.globalHour % 1) * 60))).padStart(2, '0')}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+
       {floatingPlaceForTimeline && (
         <div className="fixed inset-x-0 z-50 flex items-center justify-center pointer-events-none" style={{ top: 110 }}>
           <div className="pointer-events-auto flex items-center gap-3 rounded-full bg-primary px-5 py-2.5 shadow-lg">

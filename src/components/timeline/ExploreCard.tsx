@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ClipboardList, Check, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { findCategory } from '@/lib/categories';
@@ -17,6 +17,9 @@ interface ExploreCardProps {
   compactHours?: string | null;
   crossTripName?: string | null;
   isLoading?: boolean;
+  onExploreDragStart?: (place: ExploreResult, position: { x: number; y: number }) => void;
+  onExploreDragMove?: (x: number, y: number) => void;
+  onExploreDragEnd?: () => void;
 }
 
 const extractHue = (hslString: string): number => {
@@ -24,7 +27,7 @@ const extractHue = (hslString: string): number => {
   return match ? parseInt(match[1]) : 260;
 };
 
-const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, travelTimeLoading, isInTrip, compactHours, crossTripName, isLoading }: ExploreCardProps) => {
+const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, travelTimeLoading, isInTrip, compactHours, crossTripName, isLoading, onExploreDragStart, onExploreDragMove, onExploreDragEnd }: ExploreCardProps) => {
   const [photoUrl, setPhotoUrl] = useState<string | null>(place.photoUrl ?? null);
 
   const cat = findCategory(categoryId ?? '');
@@ -32,6 +35,8 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
   const color = cat?.color ?? 'hsl(260, 50%, 55%)';
   const hue = extractHue(color);
   const isDark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
+
+  const hasExploreDrag = !!(onExploreDragStart && onExploreDragMove && onExploreDragEnd);
 
   // Photo loading
   useEffect(() => {
@@ -74,6 +79,73 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
           categoryId,
         }));
         e.dataTransfer.effectAllowed = 'copy';
+      }}
+      onTouchStart={(e) => {
+        if (!hasExploreDrag) return;
+        const touch = e.touches[0];
+        const startX = touch.clientX;
+        const startY = touch.clientY;
+        let holdCancelled = false;
+        let dragging = false;
+
+        const handleMove = (ev: TouchEvent) => {
+          const t = ev.touches[0];
+          if (!holdCancelled && !dragging && Math.hypot(t.clientX - startX, t.clientY - startY) > 10) {
+            holdCancelled = true;
+            clearTimeout(timer);
+          }
+          if (dragging) {
+            ev.preventDefault();
+            onExploreDragMove!(t.clientX, t.clientY);
+          }
+        };
+
+        const handleEnd = () => {
+          if (dragging) onExploreDragEnd!();
+          clearTimeout(timer);
+          document.removeEventListener('touchmove', handleMove);
+          document.removeEventListener('touchend', handleEnd);
+          document.removeEventListener('touchcancel', handleEnd);
+        };
+
+        document.addEventListener('touchmove', handleMove, { passive: false });
+        document.addEventListener('touchend', handleEnd);
+        document.addEventListener('touchcancel', handleEnd);
+
+        const timer = setTimeout(() => {
+          if (!holdCancelled) {
+            dragging = true;
+            onExploreDragStart!(place, { x: startX, y: startY });
+            if (navigator.vibrate) navigator.vibrate(20);
+          }
+        }, 300);
+      }}
+      onMouseDown={(e) => {
+        if (!hasExploreDrag || e.button !== 0) return;
+        const startX = e.clientX;
+        const startY = e.clientY;
+        let started = false;
+
+        const handleMouseMove = (ev: MouseEvent) => {
+          if (!started && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 5) {
+            started = true;
+            ev.preventDefault();
+            onExploreDragStart!(place, { x: startX, y: startY });
+          }
+          if (started) {
+            ev.preventDefault();
+            onExploreDragMove!(ev.clientX, ev.clientY);
+          }
+        };
+
+        const handleMouseUp = () => {
+          if (started) onExploreDragEnd!();
+          document.removeEventListener('mousemove', handleMouseMove);
+          document.removeEventListener('mouseup', handleMouseUp);
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
       }}
     >
       {/* Background */}
