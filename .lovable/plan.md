@@ -1,107 +1,66 @@
 
 
-# Interactive Leaflet Map, Drag from Explore, and "Add to Timeline"
+# API Improvements: Reviews, Editorial Summary, Photo Attribution, Current Hours
 
 ## Overview
-Three related features: (1) Replace the static map image in ExploreView with an interactive Leaflet map, (2) Make ExploreCards draggable onto the timeline, and (3) Add an "Add to Timeline" action in PlaceOverview that lets users tap a time slot to place an entry.
+Four improvements to the Google Places data pipeline: (1) reviews already in search field masks, (2) editorial summary in details, (3) photo attribution, (4) current opening hours with modified-hours warning.
 
 ---
 
-## Feature 1: Interactive Leaflet Map
+## Improvement 1: Reviews in Nearby/Text Search Field Masks
 
-### Dependencies
-Install `leaflet`, `react-leaflet`, and `@types/leaflet`.
+**Already done.** The `FIELD_MASK` constant (line 32) already includes `places.reviews`, and `mapPlace` (line 24) already maps reviews. Both `nearbySearch` and `textSearch` use `FIELD_MASK`. No changes needed.
 
-### Leaflet CSS
-Add `import 'leaflet/dist/leaflet.css';` in `src/App.tsx`.
+However, `mapPlace` currently only takes 1 review (`.slice(0, 1)`). Update to 3 reviews for consistency with the details action.
 
-### New Component: `src/components/timeline/ExploreMap.tsx`
-A dedicated component that wraps the Leaflet map logic:
-- Uses `MapContainer`, `TileLayer`, `Marker`, `Popup` from `react-leaflet`
-- Custom marker icons: blue (scheduled entries) and gold (explore results)
-- A `FitBounds` child component using `useMap()` to auto-zoom to fit all markers with padding
-- Gold pin tap highlights the corresponding card in the strip below (via a callback)
-- Props: `entries`, `sortedResults`, `originLat`, `originLng`, `onPinTap`, `selectedPlaceId`
-
-### ExploreView.tsx Changes (lines 1148-1214)
-Replace the static map image section with the new `ExploreMap` component.
-
-**Mobile (inline):** Render the map inline within ExploreView, full-width, taking the available flex space.
-
-**Desktop (overlay):** When `!isMobile && viewMode === 'map'`, render the map as a large fixed overlay (80vw x 80vh, centered, dark backdrop with close button). The card strip renders at the bottom of the overlay.
-
-Add state: `selectedMapPlaceId` to track which gold pin is tapped, and scroll the corresponding card into view in the horizontal strip.
-
-### Card Strip
-The horizontal card strip below the map (already exists at lines 1170-1213) stays mostly the same, but each card gets a `ref` for scroll-into-view, and a visual ring highlight (`ring-2 ring-primary`) when its placeId matches `selectedMapPlaceId`.
+### `supabase/functions/google-places/index.ts`
+- Line 24: Change `.slice(0, 1)` to `.slice(0, 3)` in `mapPlace`
 
 ---
 
-## Feature 2: Drag ExploreCard to Timeline
+## Improvement 2: Editorial Summary in Details
 
-### ExploreCard.tsx
-Add `draggable` and `onDragStart` to the root div. On drag start, encode the place data as JSON in `e.dataTransfer.setData('application/json', ...)` with `{ source: 'explore', place, categoryId }`. Also set `e.dataTransfer.effectAllowed = 'copy'`.
+### `supabase/functions/google-places/index.ts`
+- **Update details field mask** (line 112): Add `editorialSummary` to the comma-separated string
+- **Add to response** (line 164-186): Add `editorialSummary: result.editorialSummary?.text ?? null`
 
-### ContinuousTimeline.tsx (lines 725-741)
-Update the `onDrop` handler to check for `application/json` data first:
-```
-const jsonData = e.dataTransfer.getData('application/json');
-if (jsonData) {
-  const parsed = JSON.parse(jsonData);
-  if (parsed.source === 'explore') {
-    onDropExploreCard?.(parsed.place, parsed.categoryId, snappedGlobalHour);
-    return;
-  }
-}
-// fallback to existing entry ID logic
-```
+### `src/components/timeline/PlaceOverview.tsx`
+- Add `editorialSummary` to the props/data flow. Since PlaceOverview reads from `option`, and the editorial summary comes from the details fetch, pass it via `preloadedReviews` data or a new prop.
+- Simplest approach: Add `preloadedEditorialSummary?: string | null` prop to `PlaceOverviewProps`
+- Display it above the Top Review section (before line 881): an italicised quote block
 
-Add a new prop `onDropExploreCard?: (place: ExploreResult, categoryId: string | null, globalHour: number) => void`.
-
-### Timeline.tsx
-Add a `handleDropExploreCard` handler that:
-1. Calculates the drop time from `globalHour` (same logic as `handleDropOnTimeline`)
-2. Creates entry + entry_option in the database (reusing logic from `handleAddAtTime`)
-3. Triggers `fetchData()` to refresh
-4. Pass this handler to `ContinuousTimeline` as `onDropExploreCard`
+### `src/components/timeline/ExploreView.tsx`
+- Store `detailEditorialSummary` state alongside `detailReviews`
+- Pass it to PlaceOverview as `preloadedEditorialSummary`
 
 ---
 
-## Feature 3: "Add to Timeline" from PlaceOverview
+## Improvement 3: Photo Attribution
 
-### PlaceOverview.tsx
-No changes needed here -- the action buttons are rendered in `ExploreView.tsx` above `PlaceOverview` (lines 787-824).
+### `supabase/functions/google-places/index.ts`
+- In the details action (lines 126-162), change `photoUrls` from `string[]` to an array of `{ url: string, attribution: string }` objects
+- For each photo, extract `photo.authorAttributions[0]?.displayName` 
+- Return `photos` as array of `{ url, attribution }` instead of plain strings
 
-### ExploreView.tsx (detail content, lines 781-838)
-Add an "Add to Timeline" button alongside the existing "Add to Planner" / "Add at [time]" buttons. This button calls a new `onAddToTimeline` prop:
-```tsx
-<Button variant="outline" className="w-full gap-2" onClick={() => onAddToTimeline?.(selectedPlace)}>
-  <MapPin className="h-4 w-4" />
-  Add to Timeline
-</Button>
-```
+### `src/components/timeline/ExploreView.tsx`
+- Update `detailPhotos` to store `{ url: string, attribution: string }[]`
+- When building temp entry images, include attribution in a custom field
 
-Add `onAddToTimeline?: (place: ExploreResult) => void` to `ExploreViewProps`.
+### `src/components/timeline/ImageGallery.tsx`
+- Update `OptionImage` type usage or accept an optional `attribution` field
+- Render a small "Photo by [name]" text overlay at the bottom-right of each image in semi-transparent white
 
-### Timeline.tsx
-Add state: `floatingPlaceForTimeline` (stores the ExploreResult being placed).
+---
 
-When `onAddToTimeline` is called:
-1. Close Explore and PlaceOverview
-2. Set `floatingPlaceForTimeline` to the place
+## Improvement 4: Current Opening Hours
 
-When `floatingPlaceForTimeline` is set, render an instruction overlay:
-- Semi-transparent dark backdrop
-- Centered instruction text: "Tap a time slot on the timeline to place this entry"
-- Cancel button to exit the mode
-- The timeline remains interactive beneath the instruction bar
+### `supabase/functions/google-places/index.ts`
+- **Update details field mask** (line 112): Add `currentOpeningHours`
+- **Map in response**: Add `currentOpeningHours: result.currentOpeningHours?.weekdayDescriptions ?? null`
 
-When the user taps/clicks on the timeline (via the existing `onClickSlot` or `TimeSlotGrid` tap), detect that `floatingPlaceForTimeline` is set:
-- Create the entry at the tapped time position (reuse `handleAddAtTime` logic)
-- Clear `floatingPlaceForTimeline`
-- Show success toast
-
-Update the `onClickSlot` handler in Timeline.tsx to check for `floatingPlaceForTimeline` and create the entry at the clicked time if set.
+### `src/components/timeline/PlaceOverview.tsx`
+- In `PlaceDetailsSection`, compare `currentOpeningHours` with `regularOpeningHours`
+- If they differ, show a warning note: "Modified hours today" with an AlertTriangle icon
 
 ---
 
@@ -109,15 +68,9 @@ Update the `onClickSlot` handler in Timeline.tsx to check for `floatingPlaceForT
 
 | File | Changes |
 |------|---------|
-| `src/App.tsx` | Add `import 'leaflet/dist/leaflet.css'` |
-| `src/components/timeline/ExploreMap.tsx` | **New file** -- Leaflet map component with blue/gold markers, FitBounds, pin tap callbacks |
-| `src/components/timeline/ExploreView.tsx` | Replace static map with ExploreMap; desktop overlay mode; add `selectedMapPlaceId` state; add `onAddToTimeline` prop and button in detail content |
-| `src/components/timeline/ExploreCard.tsx` | Add `draggable` + `onDragStart` with JSON payload |
-| `src/components/timeline/ContinuousTimeline.tsx` | Add `onDropExploreCard` prop; update drop handler to parse JSON data |
-| `src/pages/Timeline.tsx` | Add `handleDropExploreCard` handler; add `floatingPlaceForTimeline` state; instruction overlay for tap-to-place mode; update `onClickSlot` to handle placement; pass new props to ExploreView and ContinuousTimeline |
-
-### Package installations
-- `leaflet`
-- `react-leaflet`
-- `@types/leaflet` (dev)
+| `supabase/functions/google-places/index.ts` | Increase review slice to 3 in mapPlace; add `editorialSummary` and `currentOpeningHours` to details field mask and response; return photo attributions |
+| `src/components/timeline/PlaceOverview.tsx` | Add `preloadedEditorialSummary` prop; render editorial summary quote; pass `currentOpeningHours` to PlaceDetailsSection for modified-hours warning |
+| `src/components/timeline/ExploreView.tsx` | Store `detailEditorialSummary` state; pass to PlaceOverview |
+| `src/components/timeline/ImageGallery.tsx` | Add optional attribution overlay on each image |
+| `src/types/trip.ts` | Add optional `attribution` field to `OptionImage` type |
 
