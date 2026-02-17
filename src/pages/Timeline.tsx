@@ -2287,7 +2287,12 @@ const Timeline = () => {
           setSheetOption(null);
           setSheetOpen(true);
         }}
-        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors"
+        className={cn(
+          "fixed bottom-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-all duration-200",
+          (sidebarOpen || exploreOpen) && !isMobile
+            ? (liveOpen ? 'right-[calc(25vw+24px)]' : 'right-[calc(30vw+24px)]')
+            : 'right-6'
+        )}
         title="Add entry"
       >
         <span className="text-2xl font-light">+</span>
@@ -2307,7 +2312,10 @@ const Timeline = () => {
           }
         }}
         className={cn(
-          "fixed bottom-24 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-200",
+          "fixed bottom-24 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-200",
+          (sidebarOpen || exploreOpen) && !isMobile
+            ? (liveOpen ? 'right-[calc(25vw+24px)]' : 'right-[calc(30vw+24px)]')
+            : 'right-6',
           currentDragPhase === 'detached'
             ? plannerFabHighlighted
               ? "bg-primary scale-125 text-primary-foreground"
@@ -2624,15 +2632,17 @@ const Timeline = () => {
             onOpenChange={(open) => {
               setSheetOpen(open);
               if (!open) {
-                setSheetMode(null);
-                setSheetEntry(null);
-                setSheetOption(null);
-                setPrefillStartTime(undefined);
-                setPrefillEndTime(undefined);
-                setPrefillCategory(undefined);
-                setTransportContext(null);
-                setGapContext(null);
-                setSheetResolvedTz(undefined);
+                setTimeout(() => {
+                  setSheetMode(null);
+                  setSheetEntry(null);
+                  setSheetOption(null);
+                  setPrefillStartTime(undefined);
+                  setPrefillEndTime(undefined);
+                  setPrefillCategory(undefined);
+                  setTransportContext(null);
+                  setGapContext(null);
+                  setSheetResolvedTz(undefined);
+                }, 300);
               }
             }}
             tripId={trip.id}
@@ -2648,6 +2658,12 @@ const Timeline = () => {
                     const freshOpt = fresh.options.find(o => o.id === sheetOption.id);
                     if (freshOpt) setSheetOption(freshOpt);
                   }
+                } else {
+                  // Entry was deleted — close the sheet cleanly
+                  setSheetOpen(false);
+                  setSheetEntry(null);
+                  setSheetOption(null);
+                  setSheetMode(null);
                 }
               }
 
@@ -2886,7 +2902,7 @@ const Timeline = () => {
       </div>
 
       {/* Undo/Redo floating buttons */}
-      <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} />
+      <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} sidebarOpen={sidebarOpen || exploreOpen} isMobile={isMobile} compact={liveOpen && (sidebarOpen || exploreOpen)} />
     </div>
   );
 };
