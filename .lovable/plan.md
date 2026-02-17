@@ -1,38 +1,51 @@
 
 
-# Snap Detection During Drag
+# Block Detection Utility + Chain Shift on Resize
 
-## What This Does
-When dragging a card on the timeline, if it comes within 20 minutes of another card's edge, the ghost outline will "jump" to the adjacent position and turn green with a checkmark label, indicating the cards will snap together.
+## Overview
+Create a shared utility to detect "blocks" (chains of adjacent entries connected by transport with no gaps), then use it during bottom-edge resize to shift all subsequent entries in the block by the same delta.
 
-## Technical Changes
+## Changes
 
-### File: `src/components/timeline/ContinuousTimeline.tsx`
+### 1. New file: `src/lib/blockDetection.ts`
 
-**1. Add `snapTarget` computed value (~line 462, after `overlapMap`)**
+A standalone utility with three exports:
+- **`getBlock(entryId, allEntries)`** -- finds the contiguous chain of scheduled entries around the given entry (2-minute gap tolerance). Returns `{ entries, transports, events }`.
+- **`blockHasLockedEntry(block)`** -- checks if any entry in the block is locked.
+- **`getEntriesAfterInBlock(entryId, block)`** -- returns all entries after the given one within the block.
 
-A new `useMemo` that runs during move drags. It iterates `sortedEntries`, skipping the dragged card and transport entries (`category === 'transfer'`), checking if the dragged card's start/end edge is within 20 minutes (0.333 hours) of any other card's end/start edge. Returns the best match with `entryId`, `side` ('above'/'below'), and `snapStartHour`.
+### 2. `ContinuousTimeline.tsx` -- Add `onChainShift` prop and resize-bottom logic
 
-**2. Modify ghost outline rendering (lines 1744-1758)**
+- Add new prop: `onChainShift?: (resizedEntryId: string, entryIdsToShift: string[], deltaMs: number) => void`
+- In `handleDragCommit`, in the resize path (line 328, the `else` branch), before calling `onEntryTimeChange`:
+  - If `dragType === 'resize-bottom'`, call `getBlock(entryId, allEntries)` and `getEntriesAfterInBlock(entryId, block)`
+  - If entries exist after, compute `deltaMs` (new end time minus original end time)
+  - Check if any entry after in the block is locked -- if so, show toast "Can't resize -- [name] is locked" and return (block the resize entirely)
+  - Otherwise call `onChainShift(entryId, afterEntryIds, deltaMs)` then proceed with the normal resize commit
+- Top-edge resize (`resize-top`) is unaffected
 
-The existing detached ghost outline currently uses `dragState.currentStartHour` directly. Change it to:
-- Compute `ghostStartGH` as `snapTarget.snapStartHour` when snap is active, otherwise `dragState.currentStartHour`
-- When snapped: change border from `border-primary/50` to `border-green-400/70`, background from `bg-primary/5` to `bg-green-400/10`, and add a small green label inside the ghost
+### 3. `Timeline.tsx` -- Implement `handleChainShift`
 
-**3. Modify time pills during move drag (lines 1709-1729)**
+- New callback that receives `(resizedEntryId, entryIdsToShift, deltaMs)`
+- For each entry ID, compute new start/end by adding `deltaMs` to current times
+- Batch update all entries in the database
+- Register undo/redo action that stores old and new times
+- Call `fetchData()` to refresh
+- Pass `onChainShift={handleChainShift}` to `ContinuousTimeline`
 
-Update the start/end global hours used for time pill positioning to use snapped position when `snapTarget` is non-null.
+## Behavior Summary
 
-**4. Modify Stage 1 (timeline) moving card (lines 1760-1797)**
+| Scenario | Result |
+|----------|--------|
+| Resize bottom of entry in a block | All subsequent entries in the block shift by the same delta |
+| Resize top of any entry | No chain shift (only that entry changes) |
+| Entry after in block is locked | Resize blocked with toast message |
+| Entry not in a block (isolated) | Normal resize, no chain shift |
+| Undo (Ctrl+Z) | Reverts chain shift for all affected entries |
 
-Update the `moveTop` calculation to use snapped position when `snapTarget` is non-null, so the in-timeline card also jumps to the snap position.
+## Technical Details
 
-**5. Add green connector line**
-
-When `snapTarget` is active, render a subtle green dashed vertical line between the snap target entry's edge and the ghost outline to visually indicate they will be linked.
-
-### No changes to:
-- Drag commit/release logic (unchanged per spec)
-- `useDragResize` hook
-- Any other files
-
+- The `getBlock` function uses a 2-minute gap tolerance (`GAP_TOLERANCE_MS = 120000`) to account for rounding in transport durations
+- Only scheduled entries (`is_scheduled !== false`) are considered for block membership
+- The lock check only looks at entries *after* the resized entry in the block, not the resized entry itself
+- `deltaMs` can be negative (shrinking the entry pulls the chain up)
