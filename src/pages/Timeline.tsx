@@ -903,6 +903,107 @@ const Timeline = () => {
     }
   }, [entries, scheduledEntries, tripId, pushAction, fetchData]);
 
+  // ─── Snap Release handler (auto-transport on drag snap) ───
+  const handleSnapRelease = useCallback(async (draggedEntryId: string, targetEntryId: string, side: 'above' | 'below') => {
+    // side === 'below': dragged card placed AFTER target. target=from, dragged=to
+    // side === 'above': dragged card placed BEFORE target. dragged=from, target=to
+    const fromEntryId = side === 'below' ? targetEntryId : draggedEntryId;
+    const toEntryId = side === 'below' ? draggedEntryId : targetEntryId;
+
+    const fromEntry = entries.find(e => e.id === fromEntryId);
+    const toEntry = entries.find(e => e.id === toEntryId);
+    if (!fromEntry || !toEntry || !tripId) return;
+
+    const fromOpt = fromEntry.options[0];
+    const toOpt = toEntry.options[0];
+    const fromAddr = fromOpt?.address || fromOpt?.location_name;
+    const toAddr = toOpt?.address || toOpt?.location_name;
+
+    // If no addresses on either side, just place adjacent without transport
+    if (!fromAddr || !toAddr) return;
+
+    const toastId = sonnerToast.loading('Calculating transport...');
+
+    try {
+      const { data: dirData, error: dirError } = await supabase.functions.invoke('google-directions', {
+        body: {
+          fromAddress: fromAddr,
+          toAddress: toAddr,
+          modes: ['walk', 'transit', 'drive', 'bicycle'],
+          departureTime: fromEntry.end_time,
+        },
+      });
+      if (dirError) throw dirError;
+
+      const defaultMode = (trip as any)?.default_transport_mode || 'transit';
+      const allResults: Array<{ mode: string; duration_min: number; distance_km: number; polyline?: string }> = dirData?.results ?? [];
+      const defaultResult = allResults.find((r: any) => r.mode === defaultMode) || allResults[0];
+      const durationMin = defaultResult?.duration_min ?? 15;
+      const blockDur = Math.ceil(durationMin / 5) * 5;
+
+      const transportStartMs = new Date(fromEntry.end_time).getTime();
+      const transportEndMs = transportStartMs + blockDur * 60000;
+
+      // Create transport entry
+      const { data: newTransport } = await supabase.from('entries').insert({
+        trip_id: fromEntry.trip_id,
+        start_time: new Date(transportStartMs).toISOString(),
+        end_time: new Date(transportEndMs).toISOString(),
+        is_scheduled: true,
+        from_entry_id: fromEntryId,
+        to_entry_id: toEntryId,
+      } as any).select().single();
+
+      if (newTransport) {
+        const toShort = toAddr.split(',')[0].trim();
+        const modeLabel = defaultMode === 'walk' ? 'Walk' : defaultMode === 'transit' ? 'Transit' : defaultMode === 'drive' ? 'Drive' : defaultMode === 'bicycle' ? 'Cycle' : 'Transit';
+        await supabase.from('entry_options').insert({
+          entry_id: newTransport.id,
+          name: `${modeLabel} to ${toShort}`,
+          category: 'transfer',
+          departure_location: fromAddr,
+          arrival_location: toAddr,
+          distance_km: defaultResult?.distance_km ?? null,
+          route_polyline: defaultResult?.polyline ?? null,
+          transport_modes: allResults.length > 0 ? allResults : [{ mode: defaultMode, duration_min: durationMin, distance_km: 0, polyline: null }],
+        } as any);
+      }
+
+      // Shift the "to" entry to after the transport
+      const toOldStart = toEntry.start_time;
+      const toOldEnd = toEntry.end_time;
+      const toDuration = new Date(toOldEnd).getTime() - new Date(toOldStart).getTime();
+      await supabase.from('entries').update({
+        start_time: new Date(transportEndMs).toISOString(),
+        end_time: new Date(transportEndMs + toDuration).toISOString(),
+      }).eq('id', toEntryId);
+
+      sonnerToast.dismiss(toastId);
+      sonnerToast.success('Snapped with transport');
+
+      pushAction({
+        description: 'Snap with transport',
+        undo: async () => {
+          if (newTransport) {
+            await supabase.from('entry_options').delete().eq('entry_id', newTransport.id);
+            await supabase.from('entries').delete().eq('id', newTransport.id);
+          }
+          await supabase.from('entries').update({
+            start_time: toOldStart,
+            end_time: toOldEnd,
+          }).eq('id', toEntryId);
+        },
+        redo: async () => { await fetchData(); },
+      });
+
+      await fetchData();
+    } catch (err) {
+      sonnerToast.dismiss(toastId);
+      sonnerToast.error('Failed to calculate transport');
+      console.error('Snap release failed:', err);
+    }
+  }, [entries, tripId, trip, fetchData, pushAction]);
+
   // ─── Proximity toast helper ───
   const checkProximityAndPrompt = useCallback((droppedEntryId: string) => {
     const sorted = [...scheduledEntries].sort(
@@ -2455,6 +2556,7 @@ const Timeline = () => {
                   onCurrentDayChange={setCurrentDayIndex}
                   onTrimDay={handleTrimDay}
                   onMagnetSnap={handleMagnetSnap}
+                  onSnapRelease={handleSnapRelease}
                   pixelsPerHour={pixelsPerHour}
                   onResetZoom={() => setZoomLevel(1.0)}
                   binRef={binRef}
