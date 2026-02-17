@@ -1,93 +1,92 @@
 
-
-# Unified Planner to Timeline Drag
+# Unified Explore to Timeline Drag
 
 ## Overview
-Replace the existing touch-based drag system in `SidebarEntryCard` with a unified system that uses document-level touch listeners (surviving sidebar DOM changes), and add desktop mouse-drag support. The floating card and ghost outline match the timeline's visual style. The existing HTML5 drag-and-drop is kept as a fallback for desktop.
+Add touch-hold drag (and desktop mouse-drag) to ExploreCards so they can be dragged directly onto the timeline, producing the same floating card and ghost outline as sidebar drags. Reuses the existing `handleDropExploreCard` function which already creates entries from ExploreResults at a given global hour.
 
 ## Changes
 
-### 1. `SidebarEntryCard.tsx` -- Add unified drag callbacks and rewrite touch handling
+### 1. `ExploreCard.tsx` -- Add touch-hold and mouse-drag system
 
-**New props added to interface:**
-- `onSidebarDragStart?: (entry: EntryWithOptions, position: { x: number; y: number }) => void`
-- `onSidebarDragMove?: (x: number, y: number) => void`
-- `onSidebarDragEnd?: () => void`
+**New props:**
+- `onExploreDragStart?: (place: ExploreResult, position: { x: number; y: number }) => void`
+- `onExploreDragMove?: (x: number, y: number) => void`
+- `onExploreDragEnd?: () => void`
 
-**Touch handling rewrite (replace existing `onTouchStart`/`onTouchMove`/`onTouchEnd`):**
-- Remove the React-level `onTouchMove` and `onTouchEnd` handlers from the div
-- In `onTouchStart`: register document-level `touchmove` (passive: false), `touchend`, and `touchcancel` listeners
+**Touch handling (identical pattern to SidebarEntryCard from Prompt 8):**
+- `onTouchStart`: register document-level `touchmove` (passive: false), `touchend`, `touchcancel`
 - 300ms hold timer with 10px movement threshold cancellation
-- On hold trigger: call `onSidebarDragStart`, then subsequent `touchmove` calls `onSidebarDragMove`, and `touchend` calls `onSidebarDragEnd`
-- All listeners cleaned up on end/cancel
-- Keep `draggable` and `onDragStart` for HTML5 desktop fallback
+- On hold: call `onExploreDragStart(place, pos)`, vibrate 20ms
+- Move/end call `onExploreDragMove`/`onExploreDragEnd`
+- Keep existing `draggable` + `onDragStart` for HTML5 fallback
 
-**Mouse drag for desktop (new `onMouseDown`):**
-- On mousedown, register document-level `mousemove` and `mouseup`
-- Use a 5px movement threshold before starting drag (to distinguish from clicks)
-- Once threshold crossed: call `onSidebarDragStart`, then `onSidebarDragMove` on each `mousemove`, `onSidebarDragEnd` on `mouseup`
-- Clean up listeners on mouseup
-- Prevent default to avoid conflicting with HTML5 drag
+**Mouse drag for desktop:**
+- `onMouseDown`: register document-level `mousemove`/`mouseup`
+- 5px movement threshold before starting
+- Calls same drag callbacks
 
-### 2. `PlannerContent.tsx` -- Thread new callbacks through
+### 2. `ExploreView.tsx` -- Thread drag callbacks
 
-**New props on PlannerContentProps:**
-- `onSidebarDragStart?: (entry: EntryWithOptions, position: { x: number; y: number }) => void`
-- `onSidebarDragMove?: (x: number, y: number) => void`
-- `onSidebarDragEnd?: () => void`
+**New props on `ExploreViewProps`:**
+- `onExploreDragStart?: (place: ExploreResult, position: { x: number; y: number }) => void`
+- `onExploreDragMove?: (x: number, y: number) => void`
+- `onExploreDragEnd?: () => void`
 
-**Pass to every `SidebarEntryCard` instance** in both `renderCategoryRow` and `renderOtherRow`.
+**Pass to all 3 ExploreCard render sites:**
+- Map view cards (line ~1218)
+- "Your Places" cards (line ~1347)
+- Main results list cards (line ~1371)
 
-### 3. `CategorySidebar.tsx` -- Thread new callbacks through
+Each passes the callbacks through, with `onExploreDragStart` wrapping the place and also inferring the category:
+```
+onExploreDragStart={(place, pos) => onExploreDragStart?.(place, pos)}
+```
 
-**New props on CategorySidebarProps:**
-- `onSidebarDragStart?: (entry: EntryWithOptions, position: { x: number; y: number }) => void`
-- `onSidebarDragMove?: (x: number, y: number) => void`
-- `onSidebarDragEnd?: () => void`
-
-**Pass to `PlannerContent`.**
-
-### 4. `Timeline.tsx` -- Manage sidebar drag state and render visuals
+### 3. `Timeline.tsx` -- Add explore drag state and visuals
 
 **New state:**
 ```
-sidebarDrag: { entry: EntryWithOptions; clientX: number; clientY: number } | null
+exploreDrag: {
+  place: ExploreResult;
+  categoryId: string | null;
+  clientX: number;
+  clientY: number;
+  globalHour: number | null;
+} | null
 ```
 
 **New callbacks:**
-- `handleSidebarDragStartUnified(entry, pos)`: sets `sidebarDrag` state, hides planner on mobile (`touchDragHidePlanner = true`), starts 5-second cancel timeout
-- `handleSidebarDragMoveUnified(x, y)`: updates `sidebarDrag.clientX/clientY`, computes `globalHour` from timeline area (same logic as existing `handleTouchMove` at lines 2009-2035), resets cancel timeout on movement
-- `handleSidebarDragEndUnified()`: reads computed `globalHour`, calls existing `handleDropOnTimeline(entry.id, globalHour)` which already handles scheduling + Smart Drop. Cleans up state.
+- `handleExploreDragStartUnified(place, pos)`: sets `exploreDrag` state, closes explore panel on mobile, starts 5-second cancel timeout
+- `handleExploreDragMoveUnified(x, y)`: updates position, computes `globalHour` from timeline area (same logic as sidebar drag), auto-scroll near edges
+- `handleExploreDragEndUnified()`: reads `globalHour`, calls existing `handleDropExploreCard(place, categoryId, globalHour)` which already handles creating the entry with photos in the background. Cleans up state.
 
-**Pass to both `CategorySidebar` instances** (mobile and desktop).
+**Pass to both ExploreView instances** (desktop embedded at line ~2892, mobile at line ~3063):
+```
+onExploreDragStart={handleExploreDragStartUnified}
+onExploreDragMove={handleExploreDragMoveUnified}
+onExploreDragEnd={handleExploreDragEndUnified}
+```
 
 **Floating card render (fixed position, z-[60]):**
-- Rendered at page level (outside sidebar DOM) when `sidebarDrag` is set
-- Shows a compact `SidebarEntryCard` at 200px width, centered on finger/cursor with slight offset
-- Shows time pill below the card when over the timeline area (same style as existing touch drag ghost)
+- Rendered at page level when `exploreDrag` is set
+- Shows a simplified card: rounded-xl with place name, address, rating, and category emoji
+- Time pill shows computed drop time when over the timeline area
 
 **Ghost outline on timeline:**
-- When `sidebarDrag` is active and `globalHour` is computed, render a ghost outline on the timeline grid at the computed position
-- Width matches the timeline entry column, height based on entry duration
-- Uses green snap style when within 20min of another card (reuses existing snap detection)
+- When `exploreDrag` is active and `globalHour` is computed, the ghost outline appears at the computed position (1-hour default height)
+- Uses green snap style when within 20min of another card (same logic as existing snap detection)
 
-**Remove old touch drag system:**
-- The old `touchDragEntry`/`touchDragPosition`/`touchDragGlobalHour` state and related `handleTouchDragStart`/`cleanupTouchDrag`/document-level listener effect (lines 1970-2067) are replaced by the new unified system
-- The old touch drag ghost render (lines 3152-3178) is replaced by the new floating card
+### Key Reuse
 
-## Behavior Summary
+The `handleDropExploreCard` function already exists at line 1938 and handles:
+- Converting globalHour to ISO timestamps with timezone awareness
+- Calling `handleAddAtTime` which creates the entry + option in the database
+- Background photo fetching
+- Smart Drop (from Prompt 7) applies automatically since `handleAddAtTime` calls `handleEntryTimeChange` internally
 
-| Platform | Interaction | Result |
-|----------|-------------|--------|
-| Mobile touch | 300ms hold on sidebar card | Floating card follows finger, ghost on timeline, drop schedules entry |
-| Desktop mouse | Click + drag sidebar card | Floating card follows cursor, ghost on timeline, drop schedules entry |
-| Desktop HTML5 | Native drag (fallback) | Existing behavior preserved via `draggable` + `onDragStart` |
-| Snap | Drop within 20min of card | Green snap ghost, transport created on release |
-| Smart Drop | Drop on unlocked card | Pushed card down (from Prompt 7) |
+No database changes needed -- uses existing `entries` and `entry_options` tables.
 
 ## Files Modified
-- `src/components/timeline/SidebarEntryCard.tsx` -- new drag callbacks, document-level listeners
-- `src/components/timeline/PlannerContent.tsx` -- thread callbacks
-- `src/components/timeline/CategorySidebar.tsx` -- thread callbacks  
-- `src/pages/Timeline.tsx` -- state management, floating card, ghost outline, replace old touch drag
-
+- `src/components/timeline/ExploreCard.tsx` -- touch-hold + mouse-drag callbacks
+- `src/components/timeline/ExploreView.tsx` -- thread callbacks to all ExploreCard instances
+- `src/pages/Timeline.tsx` -- explore drag state, floating card, ghost outline, pass callbacks to ExploreView
