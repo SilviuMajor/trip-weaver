@@ -216,6 +216,7 @@ const ExploreView = ({
     if (categoryId) return [categoryId];
     return EXPLORE_CATEGORIES.map(c => c.id);
   });
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const originManuallySet = useRef(false);
   const fetchAbortRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -225,6 +226,9 @@ const ExploreView = ({
   const { adminUser } = useAdminAuth();
 
   const destination = trip?.destination || null;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const originLat = originLocation?.lat;
+  const originLng = originLocation?.lng;
 
   // Derive header title
   const headerTitle = useMemo(() => {
@@ -701,6 +705,32 @@ const ExploreView = ({
     return sorted;
   }, [filteredResults, travelTimes]);
 
+  // Build map image URL with multi-marker support
+  const mapImageUrl = useMemo(() => {
+    if (viewMode !== 'map') return null;
+    const markers: { lat: number; lng: number; color: string }[] = [];
+
+    // Blue: scheduled entries with coordinates
+    entries.forEach(entry => {
+      const opt = entry.options[0];
+      if (opt?.latitude && opt?.longitude && entry.is_scheduled) {
+        markers.push({ lat: opt.latitude, lng: opt.longitude, color: '0x4285F4' });
+      }
+    });
+
+    // Gold: explore results
+    sortedResults.forEach(result => {
+      if (result.lat && result.lng) {
+        markers.push({ lat: result.lat, lng: result.lng, color: '0xFFD700' });
+      }
+    });
+
+    if (markers.length === 0) return null;
+    const markersParam = encodeURIComponent(JSON.stringify(markers));
+    const center = originLat && originLng ? `${originLat},${originLng}` : `${markers[0].lat},${markers[0].lng}`;
+    return `${supabaseUrl}/functions/v1/static-map?center=${center}&zoom=14&size=800x600&markers=${markersParam}`;
+  }, [viewMode, originLat, originLng, entries, sortedResults, supabaseUrl]);
+
   if (!open) return null;
 
   // Determine if multi-category mode (for card category inference)
@@ -778,14 +808,19 @@ const ExploreView = ({
           </h2>
         </div>
         <div className="flex items-center gap-1">
-          <Button variant="secondary" size="icon" className="h-7 w-7">
+          <Button
+            variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+            size="icon"
+            className={cn('h-7 w-7', viewMode !== 'list' && 'text-muted-foreground')}
+            onClick={() => setViewMode('list')}
+          >
             <List className="h-3.5 w-3.5" />
           </Button>
           <Button
-            variant="ghost"
+            variant={viewMode === 'map' ? 'secondary' : 'ghost'}
             size="icon"
-            className="h-7 w-7 text-muted-foreground"
-            onClick={() => toast({ title: 'Map view coming soon' })}
+            className={cn('h-7 w-7', viewMode !== 'map' && 'text-muted-foreground')}
+            onClick={() => setViewMode('map')}
           >
             <MapIcon className="h-3.5 w-3.5" />
           </Button>
@@ -1067,141 +1102,208 @@ const ExploreView = ({
         </div>
       )}
 
-      {/* Results */}
-      <ScrollArea className="flex-1">
-        <div className="px-3 py-2 space-y-2">
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      {/* Results — Map or List */}
+      {viewMode === 'map' ? (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Map image */}
+          <div className="relative w-full flex-1 min-h-[250px] bg-muted">
+            {mapImageUrl ? (
+              <img src={mapImageUrl} alt="Map" className="w-full h-full object-cover" />
+            ) : loading ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                No results to show on map
+              </div>
+            )}
+            {/* Legend */}
+            <div className="absolute bottom-2 left-2 flex gap-2 text-[10px] bg-background/80 backdrop-blur-sm rounded-md px-2 py-1">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> Your plans</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400" /> Suggestions</span>
             </div>
-          )}
-
-          {/* Zero results inline form */}
-          {!loading && results.length === 0 && searchQuery.trim() && (
-            <div className="py-6 px-1">
-              <div className="text-center mb-4">
-                <p className="text-sm font-medium">No results for "{searchQuery}"</p>
-                <p className="text-xs text-muted-foreground mt-1">Add it manually instead:</p>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Name</label>
-                  <Input
-                    value={manualName}
-                    onChange={(e) => setManualName(e.target.value)}
-                    placeholder="Place name"
-                    className="h-9 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Location</label>
-                  <PlacesAutocomplete
-                    value={manualLocationQuery}
-                    onChange={setManualLocationQuery}
-                    onPlaceSelect={(details) => {
-                      setManualPlaceDetails(details);
-                      setManualLocationQuery(details.name);
-                    }}
-                    placeholder="Search for address..."
-                    tripLocation={originLocation ? { lat: originLocation.lat, lng: originLocation.lng } : undefined}
-                  />
-                </div>
-                <Button
-                  className="w-full gap-2"
-                  onClick={handleManualAdd}
-                  disabled={!manualName.trim()}
+          </div>
+          {/* Horizontal card scroll */}
+          <div className="border-t border-border">
+            <div className="flex gap-2 overflow-x-auto p-3 scrollbar-hide">
+              {sortedResults.map(place => {
+                const inTrip = existingPlaceIds.has(place.placeId) || addedPlaceIds.has(place.placeId);
+                const minutes = travelTimes.get(place.placeId);
+                const modeEmoji = TRAVEL_MODES.find(m => m.id === travelMode)?.emoji ?? '🚶';
+                const travelTimeStr = minutes != null ? `${modeEmoji} ${minutes}m` : undefined;
+                const cardCategoryId = isMultiCategory ? inferCategoryFromTypes(place.types) : selectedCategories[0];
+                return (
+                  <div key={place.placeId} className="w-[200px] shrink-0">
+                    <ExploreCard
+                      place={place}
+                      categoryId={cardCategoryId}
+                      onAddToPlanner={() => handleAdd(place)}
+                      onTap={() => handleCardTap(place)}
+                      isInTrip={inTrip}
+                      travelTime={travelTimeStr ?? null}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            {/* Load more + add manually */}
+            <div className="px-3 pb-2 space-y-1">
+              {canLoadMore && (
+                <button
+                  className="w-full py-2 text-sm text-primary hover:underline disabled:opacity-50"
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
                 >
-                  <Plus className="h-4 w-4" />
-                  Add to Planner
-                </Button>
+                  {loadingMore ? 'Loading more...' : 'Load more results'}
+                </button>
+              )}
+              {results.length > 0 && (
+                <button
+                  className="w-full py-2 text-sm text-primary hover:underline"
+                  onClick={onAddManually}
+                >
+                  Can't find it? Add manually →
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <ScrollArea className="flex-1">
+          <div className="px-3 py-2 space-y-2">
+            {loading && (
+              <div className="flex items-center justify-center py-12">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
               </div>
+            )}
+
+            {/* Zero results inline form */}
+            {!loading && results.length === 0 && searchQuery.trim() && (
+              <div className="py-6 px-1">
+                <div className="text-center mb-4">
+                  <p className="text-sm font-medium">No results for "{searchQuery}"</p>
+                  <p className="text-xs text-muted-foreground mt-1">Add it manually instead:</p>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Name</label>
+                    <Input
+                      value={manualName}
+                      onChange={(e) => setManualName(e.target.value)}
+                      placeholder="Place name"
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Location</label>
+                    <PlacesAutocomplete
+                      value={manualLocationQuery}
+                      onChange={setManualLocationQuery}
+                      onPlaceSelect={(details) => {
+                        setManualPlaceDetails(details);
+                        setManualLocationQuery(details.name);
+                      }}
+                      placeholder="Search for address..."
+                      tripLocation={originLocation ? { lat: originLocation.lat, lng: originLocation.lng } : undefined}
+                    />
+                  </div>
+                  <Button
+                    className="w-full gap-2"
+                    onClick={handleManualAdd}
+                    disabled={!manualName.trim()}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add to Planner
+                  </Button>
+                </div>
+                <button
+                  className="w-full mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={onAddManually}
+                >
+                  Or open the full entry form →
+                </button>
+              </div>
+            )}
+
+            {!loading && results.length === 0 && !searchQuery.trim() && initialLoadDone.current && (
+              <div className="text-center py-12">
+                <p className="text-sm text-muted-foreground">No places found nearby</p>
+              </div>
+            )}
+
+            {yourPlaces.length > 0 && !loading && (
+              <div className="mb-3">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 px-1">
+                  From your places
+                </p>
+                <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+                  {yourPlaces.map(place => {
+                    const asExplore = globalToExploreResult(place);
+                    const inTrip = existingPlaceIds.has(asExplore.placeId) || addedPlaceIds.has(asExplore.placeId);
+                    return (
+                      <div key={place.id} className="shrink-0" style={{ width: 200 }}>
+                        <ExploreCard
+                          place={asExplore}
+                          categoryId={place.category}
+                          onAddToPlanner={() => handleAdd(asExplore)}
+                          onTap={() => handleCardTap(asExplore)}
+                          isInTrip={inTrip}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {!loading && sortedResults.map((place) => {
+              const inTrip = existingPlaceIds.has(place.placeId) || addedPlaceIds.has(place.placeId);
+              const minutes = travelTimes.get(place.placeId);
+              const modeEmoji = TRAVEL_MODES.find(m => m.id === travelMode)?.emoji ?? '🚶';
+              const travelTimeStr = minutes != null ? `${modeEmoji} ${minutes}m` : undefined;
+              const travelTimeLoading = !!originLocation && minutes == null && results.length > 0;
+              const hours = getCompactHours(place.openingHours);
+              const cardCategoryId = isMultiCategory ? inferCategoryFromTypes(place.types) : selectedCategories[0];
+              return (
+                <ExploreCard
+                  key={place.placeId}
+                  place={place}
+                  categoryId={cardCategoryId}
+                  onAddToPlanner={() => handleAdd(place)}
+                  onTap={() => handleCardTap(place)}
+                  isInTrip={inTrip}
+                  travelTime={travelTimeStr ?? null}
+                  travelTimeLoading={travelTimeLoading}
+                  compactHours={hours.text}
+                  crossTripName={crossTripMatches.get(place.placeId) || null}
+                />
+              );
+            })}
+
+            {/* Load more button */}
+            {!loading && canLoadMore && (
               <button
-                className="w-full mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                className="w-full py-3 text-sm text-primary hover:underline disabled:opacity-50"
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore ? 'Loading more...' : 'Load more results'}
+              </button>
+            )}
+
+            {/* Add manually link */}
+            {!loading && results.length > 0 && (
+              <button
+                className="w-full py-3 text-sm text-primary hover:underline"
                 onClick={onAddManually}
               >
-                Or open the full entry form →
+                Can't find it? Add manually →
               </button>
-            </div>
-          )}
-
-          {!loading && results.length === 0 && !searchQuery.trim() && initialLoadDone.current && (
-            <div className="text-center py-12">
-              <p className="text-sm text-muted-foreground">No places found nearby</p>
-            </div>
-          )}
-
-          {yourPlaces.length > 0 && !loading && (
-            <div className="mb-3">
-              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 px-1">
-                From your places
-              </p>
-              <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
-                {yourPlaces.map(place => {
-                  const asExplore = globalToExploreResult(place);
-                  const inTrip = existingPlaceIds.has(asExplore.placeId) || addedPlaceIds.has(asExplore.placeId);
-                  return (
-                    <div key={place.id} className="shrink-0" style={{ width: 200 }}>
-                      <ExploreCard
-                        place={asExplore}
-                        categoryId={place.category}
-                        onAddToPlanner={() => handleAdd(asExplore)}
-                        onTap={() => handleCardTap(asExplore)}
-                        isInTrip={inTrip}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {!loading && sortedResults.map((place) => {
-            const inTrip = existingPlaceIds.has(place.placeId) || addedPlaceIds.has(place.placeId);
-            const minutes = travelTimes.get(place.placeId);
-            const modeEmoji = TRAVEL_MODES.find(m => m.id === travelMode)?.emoji ?? '🚶';
-            const travelTimeStr = minutes != null ? `${modeEmoji} ${minutes}m` : undefined;
-            const travelTimeLoading = !!originLocation && minutes == null && results.length > 0;
-            const hours = getCompactHours(place.openingHours);
-            // Infer category per card in multi-category mode
-            const cardCategoryId = isMultiCategory ? inferCategoryFromTypes(place.types) : selectedCategories[0];
-            return (
-              <ExploreCard
-                key={place.placeId}
-                place={place}
-                categoryId={cardCategoryId}
-                onAddToPlanner={() => handleAdd(place)}
-                onTap={() => handleCardTap(place)}
-                isInTrip={inTrip}
-                travelTime={travelTimeStr ?? null}
-                travelTimeLoading={travelTimeLoading}
-                compactHours={hours.text}
-                crossTripName={crossTripMatches.get(place.placeId) || null}
-              />
-            );
-          })}
-
-          {/* Load more button */}
-          {!loading && canLoadMore && (
-            <button
-              className="w-full py-3 text-sm text-primary hover:underline disabled:opacity-50"
-              onClick={handleLoadMore}
-              disabled={loadingMore}
-            >
-              {loadingMore ? 'Loading more...' : 'Load more results'}
-            </button>
-          )}
-
-          {/* Add manually link */}
-          {!loading && results.length > 0 && (
-            <button
-              className="w-full py-3 text-sm text-primary hover:underline"
-              onClick={onAddManually}
-            >
-              Can't find it? Add manually →
-            </button>
-          )}
-        </div>
-      </ScrollArea>
+            )}
+          </div>
+        </ScrollArea>
+      )}
 
       {/* Detail sheet */}
       {isMobile ? (
