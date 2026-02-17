@@ -66,6 +66,7 @@ interface ContinuousTimelineProps {
   onDragEnd?: () => void;
   onDragPhaseChange?: (phase: 'timeline' | 'detached' | null) => void;
   binRef?: React.RefObject<HTMLDivElement>;
+  onSnapRelease?: (draggedEntryId: string, targetEntryId: string, side: 'above' | 'below') => void;
 }
 
 const ContinuousTimeline = ({
@@ -110,6 +111,7 @@ const ContinuousTimeline = ({
   onDragEnd,
   onDragPhaseChange,
   binRef,
+  onSnapRelease,
 }: ContinuousTimelineProps) => {
   const totalDays = days.length;
   const totalHours = totalDays * 24;
@@ -128,6 +130,9 @@ const ContinuousTimeline = ({
 
   // Previous dragState ref for detecting drag end
   const prevDragStateRef = useRef<boolean>(false);
+
+  // Snap target ref (updated by useMemo below, read by handleDragCommit)
+  const snapTargetRef = useRef<{ entryId: string; side: 'above' | 'below'; snapStartHour: number } | null>(null);
 
   // dragPhase is now computed via useMemo below (after dragState is available)
 
@@ -270,6 +275,30 @@ const ContinuousTimeline = ({
     if (!entry) return;
     if (entry.is_locked) return;
 
+    // If snap target is active during move, use snapped position and signal parent
+    if (dragType === 'move' && snapTargetRef.current) {
+      const snap = snapTargetRef.current;
+      const origDurationMs = new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime();
+      const snappedStartGH = snap.snapStartHour;
+      const snappedDayIndex = Math.floor(snappedStartGH / 24);
+      const clampedSnapDayIndex = Math.max(0, Math.min(snappedDayIndex, days.length - 1));
+      const snapDateStr = format(days[clampedSnapDayIndex], 'yyyy-MM-dd');
+      const snapTzInfo = dayTimezoneMap.get(snapDateStr);
+      const snapTz = tz || snapTzInfo?.activeTz || homeTimezone;
+      const toTimeStrSnap = (hour: number) => {
+        const localHour = hour % 24;
+        const minutes = Math.round(localHour * 60);
+        const h = Math.floor(minutes / 60) % 24;
+        const m = minutes % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      };
+      const newStartIso = localToUTC(snapDateStr, toTimeStrSnap(snappedStartGH), snapTz);
+      const newEndIso = new Date(new Date(newStartIso).getTime() + origDurationMs).toISOString();
+      onEntryTimeChange(entryId, newStartIso, newEndIso);
+      onSnapRelease?.(entryId, snap.entryId, snap.side);
+      return;
+    }
+
     const dayIndex = Math.floor(newStartGH / 24);
     const clampedDayIndex = Math.max(0, Math.min(dayIndex, days.length - 1));
     const dayDate = days[clampedDayIndex];
@@ -337,7 +366,7 @@ const ContinuousTimeline = ({
         onEntryTimeChange(linked.id, newLinkedStartIso, newLinkedEndIso);
       });
     }
-  }, [onEntryTimeChange, sortedEntries, days, dayTimezoneMap, homeTimezone, allEntries, onDragCommitOverride]);
+  }, [onEntryTimeChange, sortedEntries, days, dayTimezoneMap, homeTimezone, allEntries, onDragCommitOverride, onSnapRelease]);
 
   const { dragState, wasDraggedRef, clientXRef, clientYRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
     pixelsPerHour,
@@ -496,6 +525,9 @@ const ContinuousTimeline = ({
 
     return bestSnap;
   }, [dragState, sortedEntries, getEntryGlobalHours]);
+
+  // Keep ref in sync for handleDragCommit
+  snapTargetRef.current = snapTarget;
 
   // Conflict toast
   const prevConflictCountRef = useRef(0);
