@@ -16,7 +16,7 @@ import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { analyzeConflict, generateRecommendations } from '@/lib/conflictEngine';
 import { toast } from '@/hooks/use-toast';
 import { toast as sonnerToast } from 'sonner';
-import { Trash2, LayoutGrid } from 'lucide-react';
+import { Trash2, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
 import TripNavBar from '@/components/timeline/TripNavBar';
@@ -2270,7 +2270,7 @@ const Timeline = () => {
         )}
         title="Planner"
       >
-        <LayoutGrid className="h-5 w-5" />
+        <ClipboardList className="h-5 w-5" />
       </button>
 
       {loading ? (

@@ -46,7 +46,7 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
 
   const hasImage = !!photoUrl;
 
-  // Glossy backgrounds
+  // Glossy backgrounds for no-image fallback
   const glossyBg = isDark
     ? `linear-gradient(145deg, hsl(${hue}, 30%, 16%), hsl(${hue}, 15%, 9%))`
     : `linear-gradient(145deg, hsl(${hue}, 25%, 92%), hsl(${hue}, 15%, 86%))`;
@@ -54,15 +54,6 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
     ? 'linear-gradient(152deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.02) 40%, transparent 55%)'
     : 'linear-gradient(152deg, rgba(255,255,255,0.6) 25%, rgba(255,255,255,0.3) 40%, transparent 55%)';
   const glossyBorder = isDark ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.06)';
-
-  const textColor = hasImage ? 'text-white' : isDark ? 'text-white' : 'text-foreground';
-  const subTextColor = hasImage ? 'text-white/70' : isDark ? 'text-white/60' : 'text-muted-foreground';
-
-  const durPillStyle: React.CSSProperties = hasImage
-    ? { background: 'rgba(255,255,255,0.22)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' }
-    : isDark
-      ? { background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff' }
-      : { background: 'rgba(0,0,0,0.06)', border: '1px solid rgba(0,0,0,0.08)', color: 'hsl(25, 30%, 20%)' };
 
   const priceDisplay = formatPriceLevel(place.priceLevel);
   const isClosedText = compactHours?.toLowerCase().includes('closed');
@@ -79,7 +70,7 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
       {hasImage ? (
         <>
           <img src={photoUrl!} alt={place.name} className="absolute inset-0 h-full w-full object-cover" />
-          <div className="absolute inset-0 z-[5]" style={{ background: 'linear-gradient(152deg, transparent 25%, rgba(10,8,6,0.3) 35%, rgba(10,8,6,0.7) 50%, rgba(10,8,6,0.92) 65%)' }} />
+          <div className="absolute inset-0 z-[5]" style={{ background: 'linear-gradient(148deg, transparent 15%, rgba(10,8,6,0.20) 25%, rgba(10,8,6,0.65) 38%, rgba(10,8,6,0.96) 50%)' }} />
         </>
       ) : (
         <>
@@ -88,7 +79,7 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
         </>
       )}
 
-      {/* Corner flag */}
+      {/* Corner flag — top-left */}
       <div
         className="absolute top-0 left-0 z-20 flex items-center justify-center"
         style={{ background: color, padding: '5px 7px', borderRadius: '14px 0 8px 0' }}
@@ -96,90 +87,70 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
         <span className="text-white" style={{ fontSize: 13, lineHeight: 1 }}>{emoji}</span>
       </div>
 
-      {/* Travel time pill — top-right */}
+      {/* Planner button — top-right */}
+      {isInTrip ? (
+        <div
+          className="absolute top-2 right-2 z-20 h-8 w-8 rounded-full flex items-center justify-center bg-orange-500 shadow-lg shadow-orange-500/30 scale-105 transition-all"
+        >
+          <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />
+        </div>
+      ) : (
+        <button
+          className="absolute top-2 right-2 z-20 h-8 w-8 rounded-full flex items-center justify-center bg-orange-400/35 backdrop-blur-sm border border-orange-400/30 hover:bg-orange-400/50 transition-colors"
+          onClick={(e) => { e.stopPropagation(); onAddToPlanner(); }}
+        >
+          <ClipboardList className="h-3.5 w-3.5 text-white opacity-90" />
+        </button>
+      )}
+
+      {/* Travel time pill — bottom-left */}
       {travelTime ? (
         <div
-          className="absolute top-2 right-2 z-20 rounded-full text-[11px] font-bold px-2.5 py-1"
-          style={durPillStyle}
+          className="absolute bottom-2.5 left-2.5 z-20 rounded-full text-[11px] font-bold text-white/80 px-2 py-0.5"
+          style={{ background: 'rgba(255,255,255,0.12)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.08)' }}
         >
           {travelTime}
         </div>
       ) : travelTimeLoading ? (
         <div
-          className="absolute top-2 right-2 z-20 w-10 h-5 rounded-full animate-pulse"
-          style={{ ...durPillStyle, opacity: 0.5 }}
+          className="absolute bottom-2.5 left-2.5 z-20 w-10 h-5 rounded-full animate-pulse"
+          style={{ background: 'rgba(255,255,255,0.12)', opacity: 0.5 }}
         />
       ) : null}
 
-      {/* Content — bottom area */}
-      <div className={cn('absolute bottom-0 left-0 right-0 z-10 px-3 py-2.5')}>
-        <div className="flex items-end justify-between gap-2">
-          {/* Left: name + details */}
-          <div className="flex-1 min-w-0">
-            <p className={cn('truncate text-sm font-bold leading-tight', textColor)} style={{ textShadow: hasImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
-              {place.name}
-            </p>
-            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-              {place.address && (
-                <span className={cn('truncate text-[10px] leading-tight', subTextColor)}>
-                  📍 {place.address}
-                </span>
-              )}
-              {priceDisplay && place.address && (
-                <span className={cn('text-[10px]', subTextColor)}>·</span>
-              )}
-              {priceDisplay && (
-                <span className={cn('text-[10px]', subTextColor)}>{priceDisplay}</span>
-              )}
-            </div>
-            {compactHours && (
-              <p className={cn(
-                'text-[9px] leading-tight mt-0.5',
-                isClosedText ? (hasImage ? 'text-red-300' : 'text-destructive') : subTextColor
-              )}>
-                {compactHours}
-              </p>
-            )}
-            {crossTripName && (
-              <div className={cn('text-[9px] leading-tight mt-0.5', hasImage ? 'text-white/60' : 'text-muted-foreground')}>
-                📌 In your {crossTripName} trip
-              </div>
-            )}
-            {isInTrip && (
-              <span className={cn('text-[9px] font-semibold', hasImage ? 'text-green-300' : 'text-green-600 dark:text-green-400')}>
-                ✓ Added
-              </span>
+      {/* Content — bottom-right, right-aligned */}
+      <div className="absolute bottom-0 right-0 z-10 px-3 py-2.5 text-right" style={{ maxWidth: '72%' }}>
+        {compactHours && (
+          <p className={cn(
+            'text-[9px] leading-tight',
+            isClosedText ? 'text-red-300' : 'text-white/55'
+          )}>
+            {compactHours}
+          </p>
+        )}
+        <p className="truncate text-sm font-bold leading-tight text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.3)' }}>
+          {place.name}
+        </p>
+        {(place.address || priceDisplay) && (
+          <p className="truncate text-[10px] leading-tight text-white/60 mt-0.5">
+            {place.address && <>📍 {place.address}</>}
+            {place.address && priceDisplay && <> · </>}
+            {priceDisplay}
+          </p>
+        )}
+        {place.rating != null && (
+          <div className="flex items-center gap-1 justify-end mt-0.5">
+            <span className="text-[13px] font-bold text-amber-300">⭐ {place.rating.toFixed(1)}</span>
+            {place.userRatingCount != null && (
+              <span className="text-[10px] text-white/45">({Number(place.userRatingCount).toLocaleString()})</span>
             )}
           </div>
-
-          {/* Right: rating + planner icon */}
-          <div className="shrink-0 flex flex-col items-end gap-1">
-            {place.rating != null && (
-              <div className="text-right">
-                <span className={cn('text-sm font-bold leading-tight', textColor)}>
-                  ⭐ {place.rating.toFixed(1)}
-                </span>
-                {place.userRatingCount != null && (
-                  <p className={cn('text-[9px] leading-tight', subTextColor)}>
-                    ({Number(place.userRatingCount).toLocaleString()})
-                  </p>
-                )}
-              </div>
-            )}
-            {isInTrip ? (
-              <div className="h-8 w-8 rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm">
-                <Check className="h-4 w-4 text-white" />
-              </div>
-            ) : (
-              <button
-                className="h-8 w-8 rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm hover:bg-white/30 transition-colors"
-                onClick={(e) => { e.stopPropagation(); onAddToPlanner(); }}
-              >
-                <ClipboardList className="h-4 w-4 text-white" />
-              </button>
-            )}
+        )}
+        {crossTripName && (
+          <div className="text-[9px] leading-tight mt-0.5 text-white/60">
+            📌 In your {crossTripName} trip
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
