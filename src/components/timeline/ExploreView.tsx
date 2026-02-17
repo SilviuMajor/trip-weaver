@@ -53,6 +53,7 @@ interface ExploreViewProps {
   createContext?: { startTime?: string; endTime?: string } | null;
   onAddAtTime?: (place: ExploreResult, startTime: string, endTime: string) => void;
   initialOrigin?: { name: string; lat: number; lng: number } | null;
+  embedded?: boolean;
 }
 
 // ─── Explore categories (exclude transport types) ───
@@ -186,6 +187,7 @@ const ExploreView = ({
   createContext,
   onAddAtTime,
   initialOrigin,
+  embedded = false,
 }: ExploreViewProps) => {
   const [results, setResults] = useState<ExploreResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -764,7 +766,7 @@ const ExploreView = ({
   })() : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
+    <div className={embedded ? "flex flex-col h-full" : "fixed inset-0 z-50 flex flex-col bg-background"}>
       {/* Header */}
       <div className="flex items-center gap-2 border-b px-3 py-2.5">
         <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={onClose}>

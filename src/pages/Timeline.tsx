@@ -172,6 +172,9 @@ const Timeline = () => {
   const [binHighlighted, setBinHighlighted] = useState(false);
   const binRef = useRef<HTMLDivElement>(null);
 
+  // Sidebar HTML5 drag state (for drag-to-bin from Planner sidebar)
+  const [sidebarDragActive, setSidebarDragActive] = useState(false);
+
   // Planner FAB drop target state
   const plannerFabRef = useRef<HTMLButtonElement>(null);
   const [plannerFabHighlighted, setPlannerFabHighlighted] = useState(false);
@@ -179,6 +182,20 @@ const Timeline = () => {
   // Three-stage drag phase from ContinuousTimeline
   const [currentDragPhase, setCurrentDragPhase] = useState<'timeline' | 'detached' | null>(null);
 
+  // Detect HTML5 sidebar drags for drag-to-bin
+  useEffect(() => {
+    const handleDragStart = () => setSidebarDragActive(true);
+    const handleDragEnd = () => {
+      setSidebarDragActive(false);
+      setBinHighlighted(false);
+    };
+    window.addEventListener('dragstart', handleDragStart);
+    window.addEventListener('dragend', handleDragEnd);
+    return () => {
+      window.removeEventListener('dragstart', handleDragStart);
+      window.removeEventListener('dragend', handleDragEnd);
+    };
+  }, []);
 
 
   // Redirect if no user
@@ -2451,8 +2468,14 @@ const Timeline = () => {
             {/* Desktop Planner panel */}
             {!isMobile && (
               <CategorySidebar
-                open={sidebarOpen}
-                onOpenChange={setSidebarOpen}
+                open={sidebarOpen || exploreOpen}
+                onOpenChange={(open) => {
+                  if (!open && exploreOpen) {
+                    setExploreOpen(false);
+                    setExploreCategoryId(null);
+                  }
+                  setSidebarOpen(open);
+                }}
                 entries={entries}
                 trip={trip}
                 onDragStart={handleSidebarDragStart}
@@ -2477,6 +2500,31 @@ const Timeline = () => {
                 onInsert={handleInsert}
                 onTouchDragStart={handleTouchDragStart}
                 compact={liveOpen && sidebarOpen}
+                exploreOpen={exploreOpen}
+                exploreContent={trip ? (
+                  <ExploreView
+                    open={exploreOpen}
+                    onClose={() => { setExploreOpen(false); setExploreCategoryId(null); }}
+                    trip={trip}
+                    entries={entries}
+                    categoryId={exploreCategoryId}
+                    isEditor={isEditor}
+                    onAddToPlanner={handleAddToPlanner}
+                    onCardTap={() => {}}
+                    onAddManually={() => {
+                      setExploreOpen(false);
+                      setPrefillCategory(exploreCategoryId || undefined);
+                      setExploreCategoryId(null);
+                      setSheetMode('create');
+                      setSheetEntry(null);
+                      setSheetOption(null);
+                      setSheetOpen(true);
+                    }}
+                    createContext={prefillStartTime ? { startTime: prefillStartTime, endTime: prefillEndTime } : null}
+                    onAddAtTime={handleAddAtTime}
+                    embedded
+                  />
+                ) : undefined}
               />
             )}
           </div>
@@ -2610,7 +2658,8 @@ const Timeline = () => {
             }}
           />
 
-          {trip && (
+          {/* On mobile, ExploreView renders as full-screen overlay */}
+          {trip && isMobile && (
             <ExploreView
               open={exploreOpen}
               onClose={() => { setExploreOpen(false); setExploreCategoryId(null); }}
@@ -2719,7 +2768,7 @@ const Timeline = () => {
         ref={binRef}
         className={cn(
           "fixed bottom-6 left-6 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-200",
-          dragActiveEntryId && currentDragPhase === 'detached'
+          (dragActiveEntryId && currentDragPhase === 'detached') || sidebarDragActive
             ? binHighlighted
               ? "bg-red-500 scale-125"
               : "bg-red-400/80 scale-100"
@@ -2727,6 +2776,33 @@ const Timeline = () => {
               ? "scale-0 opacity-0 pointer-events-none"
               : "bg-muted/60 scale-100 opacity-40 hover:opacity-70"
         )}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          setBinHighlighted(true);
+        }}
+        onDragLeave={() => setBinHighlighted(false)}
+        onDrop={async (e) => {
+          e.preventDefault();
+          setBinHighlighted(false);
+          setSidebarDragActive(false);
+          const entryId = e.dataTransfer.getData('text/plain');
+          if (!entryId) return;
+          const entry = entries.find(en => en.id === entryId);
+          if (!entry) return;
+          if (entry.is_locked) {
+            sonnerToast.error("Can't delete — unlock first");
+            return;
+          }
+          const cat = entry.options[0]?.category;
+          if (cat === 'flight' || cat === 'airport_processing') {
+            sonnerToast.error("Can't delete flights by dragging");
+            return;
+          }
+          await supabase.from('entries').delete().eq('id', entryId);
+          sonnerToast.success(entry.options[0]?.name ? `Deleted ${entry.options[0].name}` : 'Entry deleted');
+          fetchData();
+        }}
       >
         <Trash2 className="h-5 w-5 text-white" />
       </div>

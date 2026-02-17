@@ -125,7 +125,7 @@ const GlobalExplore = () => {
   // ── State 2: ExploreView (no external category pills — ExploreView handles it) ──
   if (selectedLocation) {
     return (
-      <div className="fixed inset-0 flex flex-col bg-background">
+      <div className="fixed inset-0 flex flex-col bg-background max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center gap-2 border-b px-3 py-2.5">
           <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setSelectedLocation(null)}>

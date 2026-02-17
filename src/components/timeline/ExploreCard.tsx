@@ -112,23 +112,38 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
       ) : null}
 
       {/* Content — bottom area */}
-      <div className={cn('absolute bottom-0 left-0 right-0 z-10 px-3 py-2.5 flex items-end justify-between gap-2')}>
-        {/* Left: rating + price + cross-trip */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {place.rating != null && (
-              <span className={cn('text-[10px] leading-tight', subTextColor)}>
-                ⭐ {place.rating.toFixed(1)}
-                {place.userRatingCount != null && (
-                  <span> ({Number(place.userRatingCount).toLocaleString()})</span>
-                )}
-              </span>
+      <div className={cn('absolute bottom-0 left-0 right-0 z-10 px-3 py-2.5')}>
+        <div className="flex items-end justify-between gap-2">
+          {/* Left: name + details */}
+          <div className="flex-1 min-w-0">
+            <p className={cn('truncate text-sm font-bold leading-tight', textColor)} style={{ textShadow: hasImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
+              {place.name}
+            </p>
+            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+              {place.address && (
+                <span className={cn('truncate text-[10px] leading-tight', subTextColor)}>
+                  📍 {place.address}
+                </span>
+              )}
+              {priceDisplay && place.address && (
+                <span className={cn('text-[10px]', subTextColor)}>·</span>
+              )}
+              {priceDisplay && (
+                <span className={cn('text-[10px]', subTextColor)}>{priceDisplay}</span>
+              )}
+            </div>
+            {compactHours && (
+              <p className={cn(
+                'text-[9px] leading-tight mt-0.5',
+                isClosedText ? (hasImage ? 'text-red-300' : 'text-destructive') : subTextColor
+              )}>
+                {compactHours}
+              </p>
             )}
-            {priceDisplay && place.rating != null && (
-              <span className={cn('text-[10px]', subTextColor)}>·</span>
-            )}
-            {priceDisplay && (
-              <span className={cn('text-[10px]', subTextColor)}>{priceDisplay}</span>
+            {crossTripName && (
+              <div className={cn('text-[9px] leading-tight mt-0.5', hasImage ? 'text-white/60' : 'text-muted-foreground')}>
+                📌 In your {crossTripName} trip
+              </div>
             )}
             {isInTrip && (
               <span className={cn('text-[9px] font-semibold', hasImage ? 'text-green-300' : 'text-green-600 dark:text-green-400')}>
@@ -136,46 +151,35 @@ const ExploreCard = ({ place, categoryId, onAddToPlanner, onTap, travelTime, tra
               </span>
             )}
           </div>
-          {crossTripName && (
-            <div className={cn('text-[9px] leading-tight mt-0.5', hasImage ? 'text-white/60' : 'text-muted-foreground')}>
-              📌 In your {crossTripName} trip
-            </div>
-          )}
-        </div>
 
-        {/* Right: planner icon */}
-        {isInTrip ? (
-          <div className="h-8 w-8 rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm shrink-0">
-            <Check className="h-4 w-4 text-white" />
+          {/* Right: rating + planner icon */}
+          <div className="shrink-0 flex flex-col items-end gap-1">
+            {place.rating != null && (
+              <div className="text-right">
+                <span className={cn('text-sm font-bold leading-tight', textColor)}>
+                  ⭐ {place.rating.toFixed(1)}
+                </span>
+                {place.userRatingCount != null && (
+                  <p className={cn('text-[9px] leading-tight', subTextColor)}>
+                    ({Number(place.userRatingCount).toLocaleString()})
+                  </p>
+                )}
+              </div>
+            )}
+            {isInTrip ? (
+              <div className="h-8 w-8 rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm">
+                <Check className="h-4 w-4 text-white" />
+              </div>
+            ) : (
+              <button
+                className="h-8 w-8 rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm hover:bg-white/30 transition-colors"
+                onClick={(e) => { e.stopPropagation(); onAddToPlanner(); }}
+              >
+                <ClipboardList className="h-4 w-4 text-white" />
+              </button>
+            )}
           </div>
-        ) : (
-          <button
-            className="h-8 w-8 rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm shrink-0 hover:bg-white/30 transition-colors"
-            onClick={(e) => { e.stopPropagation(); onAddToPlanner(); }}
-          >
-            <ClipboardList className="h-4 w-4 text-white" />
-          </button>
-        )}
-      </div>
-
-      {/* Name + address + hours — positioned above the bottom row */}
-      <div className={cn('absolute bottom-8 right-0 z-10 text-right max-w-[80%] px-3', textColor)}>
-        <p className="truncate text-sm font-bold leading-tight" style={{ textShadow: hasImage ? '0 1px 3px rgba(0,0,0,0.3)' : undefined }}>
-          {place.name}
-        </p>
-        {place.address && (
-          <p className={cn('truncate text-[10px] leading-tight mt-0.5', subTextColor)}>
-            📍 {place.address}
-          </p>
-        )}
-        {compactHours && (
-          <p className={cn(
-            'text-[9px] leading-tight mt-0.5',
-            isClosedText ? (hasImage ? 'text-red-300' : 'text-destructive') : subTextColor
-          )}>
-            {compactHours}
-          </p>
-        )}
+        </div>
       </div>
     </div>
   );
