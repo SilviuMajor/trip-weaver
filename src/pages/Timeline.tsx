@@ -389,8 +389,8 @@ const Timeline = () => {
   }, [trip, tripId, exploreCategoryId, homeTimezone, fetchData]);
 
   // Handle adding an Explore result as a scheduled entry at a specific time
-  const handleAddAtTime = useCallback(async (place: ExploreResult, startTime: string, endTime: string) => {
-    if (!trip || !tripId) return;
+  const handleAddAtTime = useCallback(async (place: ExploreResult, startTime: string, endTime: string): Promise<string | null> => {
+    if (!trip || !tripId) return null;
     setExploreOpen(false);
     setExploreCategoryId(null);
     setExploreSearchQuery(null);
@@ -429,6 +429,9 @@ const Timeline = () => {
       await fetchData();
       if (trip) await autoExtendTripIfNeeded(tripId, endTime, trip, fetchData);
 
+      // Return the new entry ID for proximity checks
+      const newEntryId = d.id;
+
       if (place.openingHours) {
         const { isConflict, message } = checkOpeningHoursConflict(place.openingHours as string[], startTime);
         if (isConflict) {
@@ -466,8 +469,11 @@ const Timeline = () => {
           }
         })();
       }
+
+      return newEntryId;
     } catch (err: any) {
       toast({ title: `Failed to add ${place.name}`, description: err.message, variant: 'destructive' });
+      return null;
     }
   }, [trip, tripId, exploreCategoryId, fetchData]);
 
@@ -1492,40 +1498,35 @@ const Timeline = () => {
       }
     }
 
-    // Live travel calculation
+    // Auto-create transport for nearby adjacent cards (0-30 min gap)
     const updatedEntry = { ...entry, start_time: startIso, end_time: endIso, is_scheduled: true };
-    const dayEntries = getEntriesForDay(dayDate);
-    const sortedDay = [...dayEntries, updatedEntry].sort(
+    const nonTransportScheduled = scheduledEntries.filter(e => {
+      const cat = e.options[0]?.category;
+      return cat !== 'transfer' && cat !== 'airport_processing' && !e.linked_flight_id && e.id !== placedEntryId;
+    });
+    const sorted = [...nonTransportScheduled, updatedEntry].sort(
       (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
     );
-    const placedIdx = sortedDay.findIndex(e => e.id === placedEntryId);
-    const prevEntry = placedIdx > 0 ? sortedDay[placedIdx - 1] : null;
-    const nextEntry = placedIdx < sortedDay.length - 1 ? sortedDay[placedIdx + 1] : null;
+    const placedIdx = sorted.findIndex(e => e.id === placedEntryId);
 
-    try {
-      const { prevTravel, nextTravel } = await calculateTravel(updatedEntry, prevEntry, nextEntry);
-
-      const conflict = analyzeConflict(
-        updatedEntry,
-        prevEntry,
-        nextEntry,
-        prevTravel?.durationMin ?? null,
-        nextTravel?.durationMin ?? null,
-      );
-
-      if (conflict.discrepancyMin > 0) {
-        const recs = generateRecommendations(conflict, sortedDay, placedEntryId);
-        setCurrentConflict(conflict);
-        setCurrentRecommendations(recs);
-        setPendingPlacement(updatedEntry);
-        setConflictOpen(true);
-      } else {
-        toast({ title: 'Placed on timeline ✨' });
+    // Check card before
+    if (placedIdx > 0) {
+      const prev = sorted[placedIdx - 1];
+      const gapMin = (new Date(startIso).getTime() - new Date(prev.end_time).getTime()) / 60000;
+      if (gapMin >= 0 && gapMin <= 30) {
+        handleSnapRelease(placedEntryId, prev.id, 'below');
       }
-    } catch {
-      // Travel calc failed silently, still placed
-      toast({ title: 'Placed on timeline ✨' });
     }
+    // Check card after
+    if (placedIdx < sorted.length - 1) {
+      const next = sorted[placedIdx + 1];
+      const gapMin = (new Date(next.start_time).getTime() - new Date(endIso).getTime()) / 60000;
+      if (gapMin >= 0 && gapMin <= 30) {
+        handleSnapRelease(next.id, placedEntryId, 'below');
+      }
+    }
+
+    toast({ title: 'Placed on timeline ✨' });
   };
 
   // Handle drop of ExploreCard onto timeline
@@ -1554,8 +1555,36 @@ const Timeline = () => {
     const endDateStr = format(daysArr[endDayIndex], 'yyyy-MM-dd');
     const endIso = localToUTC(endDateStr, `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`, resolvedTz);
 
-    await handleAddAtTime(place, startIso, endIso);
-  }, [trip, tripId, dayTimezoneMap, homeTimezone, handleAddAtTime]);
+    const newEntryId = await handleAddAtTime(place, startIso, endIso);
+
+    // Auto-create transport for nearby adjacent cards (0-30 min gap)
+    if (newEntryId) {
+      const nonTransportScheduled = scheduledEntries.filter(e => {
+        const cat = e.options[0]?.category;
+        return cat !== 'transfer' && cat !== 'airport_processing' && !e.linked_flight_id && e.id !== newEntryId;
+      });
+      const placedEntry = { id: newEntryId, start_time: startIso, end_time: endIso };
+      const sorted = [...nonTransportScheduled, placedEntry].sort(
+        (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+      );
+      const placedIdx = sorted.findIndex(e => e.id === newEntryId);
+
+      if (placedIdx > 0) {
+        const prev = sorted[placedIdx - 1];
+        const gapMin = (new Date(startIso).getTime() - new Date(prev.end_time).getTime()) / 60000;
+        if (gapMin >= 0 && gapMin <= 30) {
+          handleSnapRelease(newEntryId, prev.id, 'below');
+        }
+      }
+      if (placedIdx < sorted.length - 1) {
+        const next = sorted[placedIdx + 1];
+        const gapMin = (new Date(next.start_time).getTime() - new Date(endIso).getTime()) / 60000;
+        if (gapMin >= 0 && gapMin <= 30) {
+          handleSnapRelease(next.id, newEntryId, 'below');
+        }
+      }
+    }
+  }, [trip, tripId, dayTimezoneMap, homeTimezone, handleAddAtTime, scheduledEntries, handleSnapRelease]);
 
   // Handle "Add to Timeline" from PlaceOverview
   const handleAddToTimeline = useCallback((place: ExploreResult) => {

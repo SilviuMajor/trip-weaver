@@ -1851,11 +1851,16 @@ const ContinuousTimeline = ({
                 )}
                 style={{ top: ghostTop, height: ghostHeight }}
               >
-                {isSnapped && (
-                  <div className="absolute top-1 left-2 flex items-center gap-1 text-[10px] font-semibold text-green-500">
-                    <span>✓</span><span>Snap</span>
-                  </div>
-                )}
+                {isSnapped && (() => {
+                  const targetName = sortedEntries.find(e => e.id === snapTarget!.entryId)?.options[0]?.name;
+                  const shortName = targetName?.split(',')[0]?.trim() || 'event';
+                  const label = snapTarget!.side === 'below' ? `after ${shortName}` : `before ${shortName}`;
+                  return (
+                    <div className="absolute top-1 left-2 flex items-center gap-1 text-[10px] font-semibold text-green-500">
+                      <span>✓</span><span>Snap {label}</span>
+                    </div>
+                  );
+                })()}
               </div>
             </>
           );
