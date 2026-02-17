@@ -1,49 +1,38 @@
 
-# Fix: Timeline Freezes Due to 26,600-Day Loop
 
-## Root Cause
+# Snap Detection During Drag
 
-The trip's `end_date` was corrupted to `2099-01-01` (the reference date used for unscheduled entries). The `autoExtendTripIfNeeded` function doesn't filter out unscheduled entries, so when one is created with a timestamp at `2099-01-01`, it extends `end_date` to that date.
+## What This Does
+When dragging a card on the timeline, if it comes within 20 minutes of another card's edge, the ghost outline will "jump" to the adjacent position and turn green with a checkmark label, indicating the cards will snap together.
 
-The `days` useMemo then loops from `2026-02-21` to `2099-01-01`, creating ~26,600 Date objects and attempting to render them all -- freezing the browser instantly.
+## Technical Changes
 
-## Fix 1: Guard `autoExtendTripIfNeeded` against reference dates
+### File: `src/components/timeline/ContinuousTimeline.tsx`
 
-In `autoExtendTripIfNeeded` (line 44-51), skip entries whose date matches or exceeds the reference date:
+**1. Add `snapTarget` computed value (~line 462, after `overlapMap`)**
 
-```typescript
-const entryDateStr = format(new Date(entryEndIso), 'yyyy-MM-dd');
-if (entryDateStr >= REFERENCE_DATE_STR) return; // Don't extend for unscheduled entries
-```
+A new `useMemo` that runs during move drags. It iterates `sortedEntries`, skipping the dragged card and transport entries (`category === 'transfer'`), checking if the dragged card's start/end edge is within 20 minutes (0.333 hours) of any other card's end/start edge. Returns the best match with `entryId`, `side` ('above'/'below'), and `snapStartHour`.
 
-This prevents the corruption from happening again.
+**2. Modify ghost outline rendering (lines 1744-1758)**
 
-## Fix 2: Cap the `days` array as a safety net
+The existing detached ghost outline currently uses `dragState.currentStartHour` directly. Change it to:
+- Compute `ghostStartGH` as `snapTarget.snapStartHour` when snap is active, otherwise `dragState.currentStartHour`
+- When snapped: change border from `border-primary/50` to `border-green-400/70`, background from `bg-primary/5` to `bg-green-400/10`, and add a small green label inside the ghost
 
-In the `days` useMemo (line 489-504), add a safety cap so even if bad data exists, the app won't freeze:
+**3. Modify time pills during move drag (lines 1709-1729)**
 
-```typescript
-const end = parseISO(trip.end_date!);
-const maxEnd = addDays(start, 60); // Safety cap: max 60 days
-const cappedEnd = end < maxEnd ? end : maxEnd;
-```
+Update the start/end global hours used for time pill positioning to use snapped position when `snapTarget` is non-null.
 
-Use `cappedEnd` instead of `end` in the while loop.
+**4. Modify Stage 1 (timeline) moving card (lines 1760-1797)**
 
-## Fix 3: Repair the corrupted data
+Update the `moveTop` calculation to use snapped position when `snapTarget` is non-null, so the in-timeline card also jumps to the snap position.
 
-Run a database update to fix the current trip's `end_date`. The last scheduled entry is on `2026-02-23`, so `end_date` should be `2026-02-23`:
+**5. Add green connector line**
 
-```sql
-UPDATE trips
-SET end_date = '2026-02-23'
-WHERE id = '561a31b0-7657-47b4-adba-30b87df48741'
-  AND end_date = '2099-01-01';
-```
+When `snapTarget` is active, render a subtle green dashed vertical line between the snap target entry's edge and the ghost outline to visually indicate they will be linked.
 
-## Files Changed
+### No changes to:
+- Drag commit/release logic (unchanged per spec)
+- `useDragResize` hook
+- Any other files
 
-| File | Change |
-|------|--------|
-| `src/pages/Timeline.tsx` | Add reference date guard in `autoExtendTripIfNeeded`; add safety cap in `days` useMemo |
-| Database | Fix corrupted `end_date` for the affected trip |
