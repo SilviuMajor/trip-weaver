@@ -1,92 +1,138 @@
 
-# Unified Explore to Timeline Drag
+
+# Fix Planner/Explore Drag Ghost Outline + Photos
 
 ## Overview
-Add touch-hold drag (and desktop mouse-drag) to ExploreCards so they can be dragged directly onto the timeline, producing the same floating card and ghost outline as sidebar drags. Reuses the existing `handleDropExploreCard` function which already creates entries from ExploreResults at a given global hour.
+Two issues to fix: (1) Planner and Explore drags don't show a ghost outline on the ContinuousTimeline grid, and (2) the floating card during sidebar drag uses a SidebarEntryCard instead of matching the timeline's EntryCard visual. Photos issue appears already fixed (filtered option_images query exists at line 273).
 
 ## Changes
 
-### 1. `ExploreCard.tsx` -- Add touch-hold and mouse-drag system
+### 1. ContinuousTimeline.tsx -- Add `externalDragGlobalHour` and `externalDragDurationHours` props
 
-**New props:**
-- `onExploreDragStart?: (place: ExploreResult, position: { x: number; y: number }) => void`
-- `onExploreDragMove?: (x: number, y: number) => void`
-- `onExploreDragEnd?: () => void`
+Add two new optional props to `ContinuousTimelineProps`:
+- `externalDragGlobalHour?: number | null` -- the global hour where the external card would land
+- `externalDragDurationHours?: number | null` -- duration in hours of the externally-dragged card
 
-**Touch handling (identical pattern to SidebarEntryCard from Prompt 8):**
-- `onTouchStart`: register document-level `touchmove` (passive: false), `touchend`, `touchcancel`
-- 300ms hold timer with 10px movement threshold cancellation
-- On hold: call `onExploreDragStart(place, pos)`, vibrate 20ms
-- Move/end call `onExploreDragMove`/`onExploreDragEnd`
-- Keep existing `draggable` + `onDragStart` for HTML5 fallback
+Destructure them in the component.
 
-**Mouse drag for desktop:**
-- `onMouseDown`: register document-level `mousemove`/`mouseup`
-- 5px movement threshold before starting
-- Calls same drag callbacks
+After the existing ghost outline block (line ~1986, after the detached move ghost), render a new ghost outline for external drags:
 
-### 2. `ExploreView.tsx` -- Thread drag callbacks
-
-**New props on `ExploreViewProps`:**
-- `onExploreDragStart?: (place: ExploreResult, position: { x: number; y: number }) => void`
-- `onExploreDragMove?: (x: number, y: number) => void`
-- `onExploreDragEnd?: () => void`
-
-**Pass to all 3 ExploreCard render sites:**
-- Map view cards (line ~1218)
-- "Your Places" cards (line ~1347)
-- Main results list cards (line ~1371)
-
-Each passes the callbacks through, with `onExploreDragStart` wrapping the place and also inferring the category:
 ```
-onExploreDragStart={(place, pos) => onExploreDragStart?.(place, pos)}
+{externalDragGlobalHour != null && externalDragDurationHours != null && (() => {
+  const ghostTop = externalDragGlobalHour * pixelsPerHour;
+  const ghostHeight = externalDragDurationHours * pixelsPerHour;
+  return (
+    <div
+      className="absolute left-0 right-0 z-[11] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 pointer-events-none transition-all duration-75"
+      style={{ top: ghostTop, height: Math.max(ghostHeight, 20) }}
+    >
+      <div className="absolute -left-[72px] top-0 z-[60] pointer-events-none">
+        <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">
+          {formatGlobalHourToDisplay(externalDragGlobalHour)}
+        </span>
+      </div>
+    </div>
+  );
+})()}
 ```
 
-### 3. `Timeline.tsx` -- Add explore drag state and visuals
+This uses the exact same visual treatment (className, positioning math) as the existing timeline ghost at lines 1969-1983, ensuring visual consistency.
 
-**New state:**
-```
-exploreDrag: {
-  place: ExploreResult;
-  categoryId: string | null;
-  clientX: number;
-  clientY: number;
-  globalHour: number | null;
-} | null
-```
+### 2. Timeline.tsx -- Pass external drag state to ContinuousTimeline
 
-**New callbacks:**
-- `handleExploreDragStartUnified(place, pos)`: sets `exploreDrag` state, closes explore panel on mobile, starts 5-second cancel timeout
-- `handleExploreDragMoveUnified(x, y)`: updates position, computes `globalHour` from timeline area (same logic as sidebar drag), auto-scroll near edges
-- `handleExploreDragEndUnified()`: reads `globalHour`, calls existing `handleDropExploreCard(place, categoryId, globalHour)` which already handles creating the entry with photos in the background. Cleans up state.
+On the `<ContinuousTimeline>` component (line ~2795), add:
 
-**Pass to both ExploreView instances** (desktop embedded at line ~2892, mobile at line ~3063):
 ```
-onExploreDragStart={handleExploreDragStartUnified}
-onExploreDragMove={handleExploreDragMoveUnified}
-onExploreDragEnd={handleExploreDragEndUnified}
+externalDragGlobalHour={
+  (sidebarDrag?.globalHour ?? exploreDrag?.globalHour) ?? null
+}
+externalDragDurationHours={
+  sidebarDrag
+    ? (new Date(sidebarDrag.entry.end_time).getTime() - new Date(sidebarDrag.entry.start_time).getTime()) / 3600000
+    : exploreDrag
+      ? 1
+      : null
+}
 ```
 
-**Floating card render (fixed position, z-[60]):**
-- Rendered at page level when `exploreDrag` is set
-- Shows a simplified card: rounded-xl with place name, address, rating, and category emoji
-- Time pill shows computed drop time when over the timeline area
+This covers both sidebar and explore drags. Sidebar drags use the entry's actual duration; explore drags default to 1 hour.
 
-**Ghost outline on timeline:**
-- When `exploreDrag` is active and `globalHour` is computed, the ghost outline appears at the computed position (1-hour default height)
-- Uses green snap style when within 20min of another card (same logic as existing snap detection)
+### 3. Timeline.tsx -- Replace floating SidebarEntryCard with EntryCard during sidebar drag
 
-### Key Reuse
+Replace the sidebar drag floating card (lines 3211-3235) to use `EntryCard` instead of `SidebarEntryCard`, matching the timeline's Stage 1 visual:
 
-The `handleDropExploreCard` function already exists at line 1938 and handles:
-- Converting globalHour to ISO timestamps with timezone awareness
-- Calling `handleAddAtTime` which creates the entry + option in the database
-- Background photo fetching
-- Smart Drop (from Prompt 7) applies automatically since `handleAddAtTime` calls `handleEntryTimeChange` internally
+```
+{sidebarDrag && (() => {
+  const opt = sidebarDrag.entry.options[0];
+  if (!opt) return null;
+  const durationMs = new Date(sidebarDrag.entry.end_time).getTime() - new Date(sidebarDrag.entry.start_time).getTime();
+  const durationHours = durationMs / 3600000;
+  const moveHeight = durationHours * pixelsPerHour;
+  const cardWidth = Math.min(window.innerWidth * 0.6, 300);
+  return (
+    <div className="fixed inset-0 z-[200] pointer-events-none">
+      <div
+        style={{
+          position: 'fixed',
+          left: sidebarDrag.clientX - cardWidth / 2,
+          top: sidebarDrag.clientY - 40,
+          width: cardWidth,
+          height: Math.max(moveHeight, 60),
+          willChange: 'transform',
+        }}
+      >
+        <div className="h-full ring-2 ring-primary/60 shadow-lg shadow-primary/20 rounded-2xl overflow-hidden">
+          <EntryCard
+            option={opt}
+            startTime={sidebarDrag.entry.start_time}
+            endTime={sidebarDrag.entry.end_time}
+            formatTime={(iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}
+            isPast={false}
+            optionIndex={0}
+            totalOptions={1}
+            votingLocked={votingLocked}
+            hasVoted={false}
+            onVoteChange={() => {}}
+            cardSizeClass="h-full"
+            height={Math.max(moveHeight, 60)}
+            notes={sidebarDrag.entry.notes}
+            isLocked={sidebarDrag.entry.is_locked}
+          />
+        </div>
+        {sidebarDrag.globalHour !== null && sidebarDrag.globalHour >= 0 && (
+          <div className="mt-1 flex justify-center">
+            <span className="rounded-full bg-primary px-2.5 py-0.5 text-[11px] font-bold text-primary-foreground shadow-md">
+              {String(Math.floor((sidebarDrag.globalHour % 24))).padStart(2, '0')}:
+              {String(Math.round(((sidebarDrag.globalHour % 1) * 60))).padStart(2, '0')}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+})()}
+```
 
-No database changes needed -- uses existing `entries` and `entry_options` tables.
+This matches the Stage 1 in-timeline card (lines 1999-2025 of ContinuousTimeline) with ring-2 ring-primary/60, shadow-lg shadow-primary/20, rounded-2xl overflow-hidden.
+
+Import `EntryCard` at the top of Timeline.tsx (add alongside the existing SidebarEntryCard import).
+
+### 4. Photos -- Verify current state
+
+The option_images query (lines 271-278) is already filtered by option IDs:
+```
+optionIds.length > 0
+  ? supabase.from('option_images').select('*').in('option_id', optionIds).order('sort_order')
+  : Promise.resolve({ data: [] as any[] }),
+```
+
+This was fixed in a previous prompt. If photos still aren't appearing, it may be because:
+- The `handleAddAtTime` function (used by explore drag) creates the entry but the background photo fetch hasn't completed yet when `fetchData()` is called
+- This is expected behavior: the card appears immediately with name/rating, photos fill in moments later after the google-places details call completes
+
+No code change needed for photos -- the current implementation is correct.
 
 ## Files Modified
-- `src/components/timeline/ExploreCard.tsx` -- touch-hold + mouse-drag callbacks
-- `src/components/timeline/ExploreView.tsx` -- thread callbacks to all ExploreCard instances
-- `src/pages/Timeline.tsx` -- explore drag state, floating card, ghost outline, pass callbacks to ExploreView
+- `src/components/timeline/ContinuousTimeline.tsx` -- add `externalDragGlobalHour` and `externalDragDurationHours` props, render ghost outline
+- `src/pages/Timeline.tsx` -- pass external drag state to ContinuousTimeline, replace floating SidebarEntryCard with EntryCard, import EntryCard
+
