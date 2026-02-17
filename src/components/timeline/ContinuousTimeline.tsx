@@ -46,6 +46,7 @@ interface ContinuousTimelineProps {
   onGenerateTransport?: (fromEntryId: string, toEntryId: string, prefillTime: string, resolvedTz?: string) => void;
   onEntryTimeChange?: (entryId: string, newStartIso: string, newEndIso: string) => Promise<void>;
   onDropFromPanel?: (entryId: string, globalHour: number) => void;
+  onDropExploreCard?: (place: any, categoryId: string | null, globalHour: number) => void;
   onModeSwitchConfirm?: (entryId: string, mode: string, newDurationMin: number, distanceKm: number, polyline?: string | null) => Promise<void>;
   onDeleteTransport?: (entryId: string) => Promise<void>;
   dayTimezoneMap: Map<string, { activeTz: string; flights: FlightTzInfo[] }>;
@@ -89,6 +90,7 @@ const ContinuousTimeline = ({
   onGenerateTransport,
   onEntryTimeChange,
   onDropFromPanel,
+  onDropExploreCard,
   onModeSwitchConfirm,
   onDeleteTransport,
   dayTimezoneMap,
@@ -723,20 +725,34 @@ const ContinuousTimeline = ({
         }}
         onTouchEnd={handleSlotTouchEnd}
         onDragOver={(e) => {
-          if (onDropFromPanel) {
+          if (onDropFromPanel || onDropExploreCard) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
           }
         }}
         onDrop={(e) => {
-          if (!onDropFromPanel) return;
           e.preventDefault();
-          const entryId = e.dataTransfer.getData('text/plain');
-          if (!entryId) return;
           const rect = e.currentTarget.getBoundingClientRect();
           const y = e.clientY - rect.top;
           const globalHour = y / pixelsPerHour;
           const snapped = Math.round(globalHour * 4) / 4;
+
+          // Check for Explore card JSON data first
+          const jsonData = e.dataTransfer.getData('application/json');
+          if (jsonData) {
+            try {
+              const parsed = JSON.parse(jsonData);
+              if (parsed.source === 'explore' && onDropExploreCard) {
+                onDropExploreCard(parsed.place, parsed.categoryId, snapped);
+                return;
+              }
+            } catch {}
+          }
+
+          // Fallback: existing entry ID drag
+          if (!onDropFromPanel) return;
+          const entryId = e.dataTransfer.getData('text/plain');
+          if (!entryId) return;
           onDropFromPanel(entryId, snapped);
         }}
       >

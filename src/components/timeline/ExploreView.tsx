@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import ExploreCard from './ExploreCard';
 import PlaceOverview from './PlaceOverview';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
+import ExploreMap from './ExploreMap';
 import type { Trip, EntryWithOptions, EntryOption, GlobalPlace } from '@/types/trip';
 
 // ─── Types ───
@@ -55,6 +56,7 @@ interface ExploreViewProps {
   initialOrigin?: { name: string; lat: number; lng: number } | null;
   embedded?: boolean;
   initialSearchQuery?: string | null;
+  onAddToTimeline?: (place: ExploreResult) => void;
 }
 
 // ─── Explore categories (exclude transport types) ───
@@ -200,6 +202,7 @@ const ExploreView = ({
   initialOrigin,
   embedded = false,
   initialSearchQuery,
+  onAddToTimeline,
 }: ExploreViewProps) => {
   const [results, setResults] = useState<ExploreResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -232,6 +235,8 @@ const ExploreView = ({
     return EXPLORE_CATEGORIES.map(c => c.id);
   });
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  const [selectedMapPlaceId, setSelectedMapPlaceId] = useState<string | null>(null);
+  const mapCardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const originManuallySet = useRef(false);
   const fetchAbortRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -746,31 +751,7 @@ const ExploreView = ({
     return sorted;
   }, [filteredResults, travelTimes]);
 
-  // Build map image URL with multi-marker support
-  const mapImageUrl = useMemo(() => {
-    if (viewMode !== 'map') return null;
-    const markers: { lat: number; lng: number; color: string }[] = [];
-
-    // Blue: scheduled entries with coordinates
-    entries.forEach(entry => {
-      const opt = entry.options[0];
-      if (opt?.latitude && opt?.longitude && entry.is_scheduled) {
-        markers.push({ lat: opt.latitude, lng: opt.longitude, color: '0x4285F4' });
-      }
-    });
-
-    // Gold: explore results
-    sortedResults.forEach(result => {
-      if (result.lat && result.lng) {
-        markers.push({ lat: result.lat, lng: result.lng, color: '0xFFD700' });
-      }
-    });
-
-    if (markers.length === 0) return null;
-    const markersParam = encodeURIComponent(JSON.stringify(markers));
-    const center = originLat && originLng ? `${originLat},${originLng}` : `${markers[0].lat},${markers[0].lng}`;
-    return `${supabaseUrl}/functions/v1/static-map?center=${center}&zoom=14&size=800x600&markers=${markersParam}`;
-  }, [viewMode, originLat, originLng, entries, sortedResults, supabaseUrl]);
+  // Map image URL no longer needed — using interactive Leaflet map
 
   if (!open) return null;
 
@@ -819,6 +800,19 @@ const ExploreView = ({
               >
                 <ClipboardList className="h-4 w-4" />
                 Add to Planner
+              </Button>
+            )}
+            {onAddToTimeline && (
+              <Button
+                variant="outline"
+                className="w-full gap-2"
+                onClick={() => {
+                  setDetailOpen(false);
+                  onAddToTimeline(selectedPlace);
+                }}
+              >
+                <MapPin className="h-4 w-4" />
+                Add to Timeline
               </Button>
             )}
           </div>
@@ -1146,72 +1140,104 @@ const ExploreView = ({
 
       {/* Results — Map or List */}
       {viewMode === 'map' ? (
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Map image */}
-          <div className="relative w-full flex-1 min-h-[250px] bg-muted">
-            {mapImageUrl ? (
-              <img src={mapImageUrl} alt="Map" className="w-full h-full object-cover" />
-            ) : loading ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-              </div>
-            ) : (
-              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                No results to show on map
-              </div>
-            )}
-            {/* Legend */}
-            <div className="absolute bottom-2 left-2 flex gap-2 text-[10px] bg-background/80 backdrop-blur-sm rounded-md px-2 py-1">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> Your plans</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400" /> Suggestions</span>
-            </div>
-          </div>
-          {/* Horizontal card scroll */}
-          <div className="border-t border-border">
-            <div className="flex gap-2 overflow-x-auto p-3 scrollbar-hide">
-              {sortedResults.map(place => {
-                const inTrip = existingPlaceIds.has(place.placeId) || addedPlaceIds.has(place.placeId);
-                const minutes = travelTimes.get(place.placeId);
-                const modeEmoji = TRAVEL_MODES.find(m => m.id === travelMode)?.emoji ?? '🚶';
-                const travelTimeStr = minutes != null ? `${modeEmoji} ${minutes}m` : undefined;
-                const cardCategoryId = isMultiCategory ? inferCategoryFromTypes(place.types) : selectedCategories[0];
-                return (
-                  <div key={place.placeId} className="w-[200px] shrink-0">
-                    <ExploreCard
-                      place={place}
-                      categoryId={cardCategoryId}
-                      onAddToPlanner={() => handleAdd(place)}
-                      onTap={() => handleCardTap(place)}
-                      isInTrip={inTrip}
-                      travelTime={travelTimeStr ?? null}
-                      isLoading={detailLoading === place.placeId}
-                    />
+        (() => {
+          const mapContent = (
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Interactive Leaflet Map */}
+              <div className="relative w-full flex-1 min-h-[250px]">
+                {originLat && originLng ? (
+                  <ExploreMap
+                    entries={entries}
+                    sortedResults={sortedResults}
+                    originLat={originLat}
+                    originLng={originLng}
+                    onPinTap={(placeId) => {
+                      setSelectedMapPlaceId(placeId);
+                      const el = mapCardRefs.current.get(placeId);
+                      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                    }}
+                    selectedPlaceId={selectedMapPlaceId}
+                  />
+                ) : loading ? (
+                  <div className="flex items-center justify-center h-full bg-muted">
+                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                   </div>
-                );
-              })}
+                ) : (
+                  <div className="flex items-center justify-center h-full text-sm text-muted-foreground bg-muted">
+                    No results to show on map
+                  </div>
+                )}
+              </div>
+              {/* Horizontal card scroll */}
+              <div className="border-t border-border">
+                <div className="flex gap-2 overflow-x-auto p-3 scrollbar-hide">
+                  {sortedResults.map(place => {
+                    const inTrip = existingPlaceIds.has(place.placeId) || addedPlaceIds.has(place.placeId);
+                    const minutes = travelTimes.get(place.placeId);
+                    const modeEmoji = TRAVEL_MODES.find(m => m.id === travelMode)?.emoji ?? '🚶';
+                    const travelTimeStr = minutes != null ? `${modeEmoji} ${minutes}m` : undefined;
+                    const cardCategoryId = isMultiCategory ? inferCategoryFromTypes(place.types) : selectedCategories[0];
+                    return (
+                      <div
+                        key={place.placeId}
+                        ref={(el) => { if (el) mapCardRefs.current.set(place.placeId, el); }}
+                        className={cn('w-[200px] shrink-0 rounded-[14px] transition-shadow', selectedMapPlaceId === place.placeId && 'ring-2 ring-primary')}
+                      >
+                        <ExploreCard
+                          place={place}
+                          categoryId={cardCategoryId}
+                          onAddToPlanner={() => handleAdd(place)}
+                          onTap={() => handleCardTap(place)}
+                          isInTrip={inTrip}
+                          travelTime={travelTimeStr ?? null}
+                          isLoading={detailLoading === place.placeId}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Load more + add manually */}
+                <div className="px-3 pb-2 space-y-1">
+                  {canLoadMore && (
+                    <button
+                      className="w-full py-2 text-sm text-primary hover:underline disabled:opacity-50"
+                      onClick={handleLoadMore}
+                      disabled={loadingMore}
+                    >
+                      {loadingMore ? 'Loading more...' : 'Load more results'}
+                    </button>
+                  )}
+                  {results.length > 0 && (
+                    <button
+                      className="w-full py-2 text-sm text-primary hover:underline"
+                      onClick={onAddManually}
+                    >
+                      Can't find it? Add manually →
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
-            {/* Load more + add manually */}
-            <div className="px-3 pb-2 space-y-1">
-              {canLoadMore && (
-                <button
-                  className="w-full py-2 text-sm text-primary hover:underline disabled:opacity-50"
-                  onClick={handleLoadMore}
-                  disabled={loadingMore}
-                >
-                  {loadingMore ? 'Loading more...' : 'Load more results'}
-                </button>
-              )}
-              {results.length > 0 && (
-                <button
-                  className="w-full py-2 text-sm text-primary hover:underline"
-                  onClick={onAddManually}
-                >
-                  Can't find it? Add manually →
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+          );
+
+          // Desktop: render as large overlay
+          if (!isMobile && !embedded) {
+            return (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={() => setViewMode('list')}>
+                <div className="relative flex flex-col rounded-xl overflow-hidden bg-background shadow-2xl" style={{ width: '80vw', height: '80vh' }} onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+                    <h3 className="text-sm font-semibold">Map View</h3>
+                    <button className="text-muted-foreground hover:text-foreground text-lg" onClick={() => setViewMode('list')}>✕</button>
+                  </div>
+                  {mapContent}
+                </div>
+              </div>
+            );
+          }
+
+          // Mobile / embedded: inline
+          return mapContent;
+        })()
       ) : (
         <ScrollArea className="flex-1">
           <div className="px-3 py-2 space-y-2">
