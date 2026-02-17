@@ -44,6 +44,7 @@ async function autoExtendTripIfNeeded(
   if (trip.start_date) {
     // Dated trip: check against end_date
     const entryDateStr = format(new Date(entryEndIso), 'yyyy-MM-dd');
+    if (entryDateStr >= REFERENCE_DATE_STR) return; // Don't extend for unscheduled entries
     if (!trip.end_date || entryDateStr > trip.end_date) {
       await supabase.from('trips').update({ end_date: entryDateStr }).eq('id', tripId);
       toast({ title: `Trip extended to ${format(parseISO(entryDateStr), 'EEE d MMM')}` });
@@ -494,9 +495,11 @@ const Timeline = () => {
     }
     const start = parseISO(trip.start_date!);
     const end = parseISO(trip.end_date!);
+    const maxEnd = addDays(start, 60); // Safety cap: max 60 days
+    const cappedEnd = end < maxEnd ? end : maxEnd;
     const result: Date[] = [];
     let current = startOfDay(start);
-    while (current <= end) {
+    while (current <= cappedEnd) {
       result.push(new Date(current));
       current = addDays(current, 1);
     }
