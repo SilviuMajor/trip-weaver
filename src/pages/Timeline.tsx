@@ -209,74 +209,91 @@ const Timeline = () => {
     }
   }, [currentUser, navigate, tripId]);
 
+  // Concurrent fetch guard
+  const fetchingRef = useRef(false);
+
   // Data fetching
   const fetchData = useCallback(async () => {
     if (!tripId) return;
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
 
-    const { data: tripData } = await supabase
-      .from('trips')
-      .select('*')
-      .eq('id', tripId)
-      .single();
+    try {
+      const { data: tripData } = await supabase
+        .from('trips')
+        .select('*')
+        .eq('id', tripId)
+        .single();
 
-    if (!tripData) {
+      if (!tripData) {
+        setLoading(false);
+        return;
+      }
+
+      setTrip(tripData as unknown as Trip);
+
+      // Step 1: Fetch entries and weather in parallel
+      const [entriesRes, weatherRes] = await Promise.all([
+        supabase.from('entries').select('*').eq('trip_id', tripId).order('start_time'),
+        supabase.from('weather_cache').select('*').eq('trip_id', tripId),
+      ]);
+
+      setWeatherData((weatherRes.data ?? []) as WeatherData[]);
+
+      const entriesData = entriesRes.data;
+      if (!entriesData || entriesData.length === 0) {
+        setEntries([]);
+        setLoading(false);
+        return;
+      }
+
+      // Step 2: Fetch entry_options filtered by entry IDs
+      const entryIds = entriesData.map(e => e.id);
+      const [optionsRes] = await Promise.all([
+        supabase.from('entry_options').select('*').in('entry_id', entryIds),
+      ]);
+
+      // Step 3: Fetch option_images (filtered by option IDs) and votes in parallel
+      const optionIds = (optionsRes.data ?? []).map((o: any) => o.id);
+      const [imagesRes, votesRes] = await Promise.all([
+        optionIds.length > 0
+          ? supabase.from('option_images').select('*').in('option_id', optionIds).order('sort_order')
+          : Promise.resolve({ data: [] as any[] }),
+        supabase.from('votes').select('option_id, user_id'),
+      ]);
+
+      const options = (optionsRes.data ?? []) as unknown as EntryOption[];
+      const images = imagesRes.data ?? [];
+      const votes = votesRes.data ?? [];
+
+      const voteCounts: Record<string, number> = {};
+      votes.forEach(v => {
+        voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1;
+      });
+
+      if (currentUser) {
+        setUserVotes(
+          votes.filter(v => v.user_id === currentUser.id).map(v => v.option_id)
+        );
+      }
+
+      const optionsWithImages = options.map(o => ({
+        ...o,
+        vote_count: voteCounts[o.id] || 0,
+        images: images.filter(img => img.option_id === o.id),
+      }));
+
+      const entriesWithOptions: EntryWithOptions[] = (entriesData as Entry[]).map(entry => ({
+        ...entry,
+        options: optionsWithImages.filter(o => o.entry_id === entry.id),
+      }));
+
+      setEntries(entriesWithOptions);
       setLoading(false);
-      return;
+      return entriesWithOptions;
+    } finally {
+      fetchingRef.current = false;
     }
-
-    setTrip(tripData as unknown as Trip);
-
-    const [entriesRes, weatherRes] = await Promise.all([
-      supabase.from('entries').select('*').eq('trip_id', tripId).order('start_time'),
-      supabase.from('weather_cache').select('*').eq('trip_id', tripId),
-    ]);
-
-    setWeatherData((weatherRes.data ?? []) as WeatherData[]);
-
-    const entriesData = entriesRes.data;
-    if (!entriesData || entriesData.length === 0) {
-      setEntries([]);
-      setLoading(false);
-      return;
-    }
-
-    const entryIds = entriesData.map(e => e.id);
-
-    const [optionsRes, imagesRes, votesRes] = await Promise.all([
-      supabase.from('entry_options').select('*').in('entry_id', entryIds),
-      supabase.from('option_images').select('*').order('sort_order'),
-      supabase.from('votes').select('option_id, user_id'),
-    ]);
-
-    const options = (optionsRes.data ?? []) as unknown as EntryOption[];
-    const images = imagesRes.data ?? [];
-    const votes = votesRes.data ?? [];
-
-    const voteCounts: Record<string, number> = {};
-    votes.forEach(v => {
-      voteCounts[v.option_id] = (voteCounts[v.option_id] || 0) + 1;
-    });
-
-    if (currentUser) {
-      setUserVotes(
-        votes.filter(v => v.user_id === currentUser.id).map(v => v.option_id)
-      );
-    }
-
-    const optionsWithImages = options.map(o => ({
-      ...o,
-      vote_count: voteCounts[o.id] || 0,
-      images: images.filter(img => img.option_id === o.id),
-    }));
-
-    const entriesWithOptions: EntryWithOptions[] = (entriesData as Entry[]).map(entry => ({
-      ...entry,
-      options: optionsWithImages.filter(o => o.entry_id === entry.id),
-    }));
-
-    setEntries(entriesWithOptions);
-    setLoading(false);
-    return entriesWithOptions;
   }, [currentUser, tripId]);
 
   fetchDataRef.current = fetchData;
@@ -469,7 +486,7 @@ const Timeline = () => {
   const isUndated = !trip?.start_date;
   const REFERENCE_DATE = '2099-01-01';
 
-  const getDays = (): Date[] => {
+  const days = useMemo((): Date[] => {
     if (!trip) return [];
     if (isUndated) {
       const count = trip.duration_days ?? 3;
@@ -477,18 +494,17 @@ const Timeline = () => {
     }
     const start = parseISO(trip.start_date!);
     const end = parseISO(trip.end_date!);
-    const days: Date[] = [];
+    const result: Date[] = [];
     let current = startOfDay(start);
     while (current <= end) {
-      days.push(new Date(current));
+      result.push(new Date(current));
       current = addDays(current, 1);
     }
-    return days;
-  };
+    return result;
+  }, [trip?.start_date, trip?.end_date, trip?.duration_days, isUndated]);
 
   const handleTrimDay = async (side: 'start' | 'end') => {
     if (!trip || !tripId) return;
-    const days = getDays();
     if (days.length <= 1) return;
 
     if (side === 'end') {
@@ -537,8 +553,6 @@ const Timeline = () => {
   const dayTimezoneMap = useMemo(() => {
     const map = new Map<string, { activeTz: string; flights: Array<{ originTz: string; destinationTz: string; flightStartHour: number; flightEndHour: number; flightEndUtc: string }> }>();
     if (!trip) return map;
-
-    const days = getDays();
 
     // Auto-detect starting TZ from first flight's departure airport
     let currentTz = homeTimezone;
@@ -600,14 +614,12 @@ const Timeline = () => {
     }
 
     return map;
-  }, [trip, scheduledEntries, homeTimezone]);
+  }, [days, scheduledEntries, homeTimezone]);
 
   // Compute per-day location (lat/lng) based on flights for sun gradient & weather
   const dayLocationMap = useMemo(() => {
     const map = new Map<string, { lat: number; lng: number }>();
     if (!trip) return map;
-
-    const days = getDays();
 
     // Find all flights sorted chronologically
     const allFlights = scheduledEntries
@@ -670,7 +682,7 @@ const Timeline = () => {
     }
 
     return map;
-  }, [trip, scheduledEntries, homeTimezone]);
+  }, [days, scheduledEntries, homeTimezone]);
 
   // ─── Magnet Snap handler ───
   const handleMagnetSnap = useCallback(async (entryId: string) => {
@@ -1591,7 +1603,7 @@ const Timeline = () => {
   const handleDropExploreCard = useCallback(async (place: ExploreResult, categoryId: string | null, globalHour: number) => {
     if (!trip || !tripId) return;
 
-    const daysArr = getDays();
+    const daysArr = days;
     const dayIndex = Math.max(0, Math.min(Math.floor(globalHour / 24), daysArr.length - 1));
     const dayDate = daysArr[dayIndex];
     const dateStr = format(dayDate, 'yyyy-MM-dd');
@@ -2044,12 +2056,11 @@ const Timeline = () => {
 
   // Day labels for the day picker
   const dayLabels = useMemo(() => {
-    const d = getDays();
-    return d.map((day, i) => {
+    return days.map((day, i) => {
       if (isUndated) return `Day ${i + 1}`;
       return `Day ${i + 1} — ${format(day, 'EEE d MMM')}`;
     });
-  }, [trip, isUndated]);
+  }, [days, isUndated]);
 
   const handleToggleLock = async (entryId: string, currentLocked: boolean) => {
     const { error } = await supabase
@@ -2231,7 +2242,7 @@ const Timeline = () => {
     }
   };
 
-  const days = getDays();
+  // days is already memoized above
 
   if (!currentUser) return null;
 
