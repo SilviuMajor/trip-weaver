@@ -14,6 +14,7 @@ import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { useTravelCalculation } from '@/hooks/useTravelCalculation';
 import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { analyzeConflict, generateRecommendations } from '@/lib/conflictEngine';
+import { getBlock, getEntriesAfterInBlock } from '@/lib/blockDetection';
 import { toast } from '@/hooks/use-toast';
 import { toast as sonnerToast } from 'sonner';
 import { Trash2, ClipboardList } from 'lucide-react';
@@ -1037,7 +1038,81 @@ const Timeline = () => {
     });
 
     await fetchData();
+
+    // Fire-and-forget transport recalculation for shifted transports
+    const transportIds = entryIdsToShift.filter(id => {
+      const entry = entries.find(e => e.id === id);
+      return entry?.options[0]?.category === 'transfer';
+    });
+    if (transportIds.length > 0) {
+      recalculateTransports(transportIds);
+    }
   }, [entries, pushAction, fetchData]);
+
+  // ─── Transport recalculation after chain shift ───
+  const recalculateTransports = useCallback(async (transportEntryIds: string[]) => {
+    for (const tid of transportEntryIds) {
+      const transport = entries.find(e => e.id === tid);
+      if (!transport) continue;
+      const opt = transport.options[0];
+      if (!opt?.departure_location || !opt?.arrival_location) continue;
+
+      try {
+        const { data } = await supabase.functions.invoke('google-directions', {
+          body: {
+            fromAddress: opt.departure_location,
+            toAddress: opt.arrival_location,
+            modes: ['walk', 'transit', 'drive', 'bicycle'],
+            departureTime: transport.start_time,
+          },
+        });
+
+        const defaultMode = (trip as any)?.default_transport_mode || 'transit';
+        const allResults = data?.results ?? [];
+        const defaultResult = allResults.find((r: any) => r.mode === defaultMode) || allResults[0];
+
+        if (defaultResult) {
+          const newDurationMin = Math.ceil(defaultResult.duration_min / 5) * 5;
+          const newEndMs = new Date(transport.start_time).getTime() + newDurationMin * 60000;
+
+          await supabase.from('entries').update({
+            end_time: new Date(newEndMs).toISOString(),
+          }).eq('id', tid);
+
+          await supabase.from('entry_options').update({
+            distance_km: defaultResult.distance_km ?? null,
+            route_polyline: defaultResult.polyline ?? null,
+            transport_modes: allResults,
+          }).eq('entry_id', tid);
+
+          // If transport grew longer, shift subsequent entries forward (expand only)
+          const freshEntries = await fetchData() as EntryWithOptions[] | undefined;
+          if (freshEntries) {
+            const block = getBlock(tid, freshEntries);
+            const afterInBlock = getEntriesAfterInBlock(tid, block);
+
+            for (const ae of afterInBlock) {
+              const aeStart = new Date(ae.start_time).getTime();
+              if (aeStart < newEndMs) {
+                const shift = newEndMs - aeStart;
+                const aeDur = new Date(ae.end_time).getTime() - aeStart;
+                await supabase.from('entries').update({
+                  start_time: new Date(aeStart + shift).toISOString(),
+                  end_time: new Date(aeStart + shift + aeDur).toISOString(),
+                }).eq('id', ae.id);
+              } else {
+                break;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Transport recalc failed for', tid, err);
+      }
+    }
+
+    await fetchData();
+  }, [entries, trip, fetchData]);
 
   // ─── Proximity toast helper ───
   const checkProximityAndPrompt = useCallback((droppedEntryId: string) => {
