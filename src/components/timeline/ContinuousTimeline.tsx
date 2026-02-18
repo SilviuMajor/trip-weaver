@@ -562,11 +562,26 @@ const ContinuousTimeline = ({
           : nameLower.startsWith('cycle') || nameLower.startsWith('bic') ? 'bicycle'
           : 'transit';
         const durMin = Math.round((new Date(transportEntry.end_time).getTime() - new Date(transportEntry.start_time).getTime()) / 60000);
+
+        // Adjust visual bounds for flight group checkout/checkin
+        let adjFromEndGH = fromGH.endGH;
+        let adjToStartGH = toGH.startGH;
+        const fromGroup = flightGroupMap.get(from.id);
+        if (fromGroup?.checkout) {
+          const coDur = (new Date(fromGroup.checkout.end_time).getTime() - new Date(fromGroup.checkout.start_time).getTime()) / 3600000;
+          adjFromEndGH = fromGH.endGH + coDur;
+        }
+        const toGroup = flightGroupMap.get(to.id);
+        if (toGroup?.checkin) {
+          const ciDur = (new Date(toGroup.checkin.end_time).getTime() - new Date(toGroup.checkin.start_time).getTime()) / 3600000;
+          adjToStartGH = toGH.startGH - ciDur;
+        }
+
         connectors.push({
           fromEntryId: from.id,
           toEntryId: to.id,
-          fromEndGH: fromGH.endGH,
-          toStartGH: toGH.startGH,
+          fromEndGH: adjFromEndGH,
+          toStartGH: adjToStartGH,
           mode: currentMode,
           durationMin: durMin,
           destinationName: tOpt?.arrival_location || to.options[0]?.name || 'Next',
@@ -574,11 +589,25 @@ const ContinuousTimeline = ({
           transportEntryId: transportEntry.id,
         });
       } else {
+        // Adjust visual bounds for flight group checkout/checkin (no-transport gap)
+        let adjFromEndGH = fromGH.endGH;
+        let adjToStartGH = toGH.startGH;
+        const fromGroup = flightGroupMap.get(from.id);
+        if (fromGroup?.checkout) {
+          const coDur = (new Date(fromGroup.checkout.end_time).getTime() - new Date(fromGroup.checkout.start_time).getTime()) / 3600000;
+          adjFromEndGH = fromGH.endGH + coDur;
+        }
+        const toGroup = flightGroupMap.get(to.id);
+        if (toGroup?.checkin) {
+          const ciDur = (new Date(toGroup.checkin.end_time).getTime() - new Date(toGroup.checkin.start_time).getTime()) / 3600000;
+          adjToStartGH = toGH.startGH - ciDur;
+        }
+
         connectors.push({
           fromEntryId: from.id,
           toEntryId: to.id,
-          fromEndGH: fromGH.endGH,
-          toStartGH: toGH.startGH,
+          fromEndGH: adjFromEndGH,
+          toStartGH: adjToStartGH,
           mode: 'transit',
           durationMin: 0,
           destinationName: to.options[0]?.name || 'Next',
@@ -586,7 +615,7 @@ const ContinuousTimeline = ({
       }
     }
     return connectors;
-  }, [visibleEntries, sortedEntries, getEntryGlobalHours]);
+  }, [visibleEntries, sortedEntries, getEntryGlobalHours, flightGroupMap]);
 
   // First hint-eligible entry index
   const firstHintIndex = useMemo(() => {
