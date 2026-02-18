@@ -1279,22 +1279,46 @@ const ContinuousTimeline = ({
         {connectorData.map((conn) => {
           const topPx = conn.fromEndGH * pixelsPerHour;
           const gapPx = (conn.toStartGH - conn.fromEndGH) * pixelsPerHour;
+          const gapMinutes = Math.max(1, Math.round((conn.toStartGH - conn.fromEndGH) * 60));
           const connHeight = Math.max(gapPx, 20);
           const connTop = gapPx >= 20 ? topPx : topPx - (20 - gapPx) / 2;
+
+          // Find the actual transport entry to pass down
+          const transportEntry = conn.transportEntryId
+            ? sortedEntries.find(e => e.id === conn.transportEntryId)
+            : null;
+          const transportOption = transportEntry?.options[0];
+
+          // If no real transport entry, skip rendering (placeholder connectors removed)
+          if (!transportEntry || !transportOption) return null;
+
+          const transportMinutes = Math.round(
+            (new Date(transportEntry.end_time).getTime() - new Date(transportEntry.start_time).getTime()) / 60000
+          );
+
+          const toEntry = sortedEntries.find(e => e.id === conn.toEntryId);
 
           return (
             <div
               key={`conn-${conn.fromEntryId}-${conn.toEntryId}`}
               className="absolute left-0 right-0 pr-1 z-[12]"
-              style={{ top: connTop, height: connHeight }}
+              style={{
+                top: connTop,
+                height: connHeight,
+                overflow: gapPx < 14 ? 'visible' : undefined,
+                zIndex: gapPx < 14 ? 5 : 12,
+              }}
             >
               <TransportConnector
-                mode={conn.mode}
-                durationMin={conn.durationMin}
-                destinationName={conn.destinationName}
-                distanceKm={conn.distanceKm}
-                isLoading={conn.durationMin === 0 && !conn.transportEntryId}
-                onCogTap={() => {
+                entry={transportEntry}
+                option={transportOption}
+                height={connHeight}
+                gapHeight={gapPx}
+                gapMinutes={gapMinutes}
+                transportMinutes={transportMinutes}
+                fromLabel={transportOption.departure_location || undefined}
+                toLabel={transportOption.arrival_location || conn.destinationName}
+                onTap={() => {
                   if (conn.transportEntryId && onTransportCogTap) {
                     onTransportCogTap(conn.transportEntryId);
                   } else if (conn.transportEntryId) {
@@ -1302,7 +1326,14 @@ const ContinuousTimeline = ({
                     if (tEntry) onCardTap(tEntry, tEntry.options[0]);
                   }
                 }}
-                height={connHeight}
+                onAddAtArrival={onAddBetween ? () => {
+                  onAddBetween(transportEntry.end_time, {
+                    fromName: transportOption.arrival_location || transportOption.name || '',
+                    toName: toEntry?.options[0]?.name || '',
+                    fromAddress: transportOption.arrival_location || '',
+                    toAddress: toEntry?.options[0]?.location_name || toEntry?.options[0]?.departure_location || '',
+                  });
+                } : undefined}
               />
             </div>
           );
