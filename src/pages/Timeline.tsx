@@ -157,16 +157,8 @@ const Timeline = () => {
 
   // Transport overlay state
   const [transportOverlayOpen, setTransportOverlayOpen] = useState(false);
-  const [transportOverlayData, setTransportOverlayData] = useState<{
-    entryId: string;
-    fromAddress: string;
-    toAddress: string;
-    currentMode: string;
-    durationMin: number;
-    distanceKm?: number | null;
-    allModes: Array<{ mode: string; duration_min: number; distance_km: number; polyline?: string }>;
-    departureTime: string;
-  } | null>(null);
+  const [transportOverlayEntry, setTransportOverlayEntry] = useState<EntryWithOptions | null>(null);
+  const [transportOverlayOption, setTransportOverlayOption] = useState<EntryOption | null>(null);
 
   // Unified sidebar drag state (replaces old touch drag)
   const [sidebarDrag, setSidebarDrag] = useState<{
@@ -1107,6 +1099,18 @@ const Timeline = () => {
   }, [dayTimezoneMap, homeTimezone]);
 
   const handleCardTap = (entry: EntryWithOptions, option: EntryOption) => {
+    // Check if this is a transport entry — open dedicated overlay instead of EntrySheet
+    const isTransport = option.category === 'transfer' ||
+      (entry.from_entry_id != null && entry.to_entry_id != null) ||
+      ['drive to', 'walk to', 'transit to', 'cycle to'].some(p => (option.name || '').toLowerCase().startsWith(p));
+
+    if (isTransport) {
+      setTransportOverlayEntry(entry);
+      setTransportOverlayOption(option);
+      setTransportOverlayOpen(true);
+      return;
+    }
+
     setSheetResolvedTz(resolveTimezoneForTime(entry.start_time));
     setSheetMode('view');
     setSheetEntry(entry);
@@ -1458,25 +1462,8 @@ const Timeline = () => {
     const opt = entry.options[0];
     if (!opt) return;
 
-    const nameLower = opt.name?.toLowerCase() || '';
-    const currentMode = nameLower.startsWith('walk') ? 'walk'
-      : nameLower.startsWith('drive') ? 'drive'
-      : nameLower.startsWith('cycle') ? 'bicycle'
-      : 'transit';
-
-    const durMin = Math.round((new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 60000);
-    const allModes = (opt as any).transport_modes ?? [];
-
-    setTransportOverlayData({
-      entryId: transportEntryId,
-      fromAddress: opt.departure_location || '',
-      toAddress: opt.arrival_location || '',
-      currentMode,
-      durationMin: durMin,
-      distanceKm: (opt as any).distance_km,
-      allModes,
-      departureTime: entry.start_time,
-    });
+    setTransportOverlayEntry(entry);
+    setTransportOverlayOption(opt);
     setTransportOverlayOpen(true);
   }, [entries]);
 
@@ -2912,19 +2899,28 @@ const Timeline = () => {
             onSkip={handleSkipConflict}
           />
 
-          {transportOverlayData && (
+          {transportOverlayOpen && transportOverlayEntry && transportOverlayOption && (
             <TransportOverlay
               open={transportOverlayOpen}
-              onOpenChange={setTransportOverlayOpen}
-              transportEntryId={transportOverlayData.entryId}
-              fromAddress={transportOverlayData.fromAddress}
-              toAddress={transportOverlayData.toAddress}
-              currentMode={transportOverlayData.currentMode}
-              durationMin={transportOverlayData.durationMin}
-              distanceKm={transportOverlayData.distanceKm}
-              allModes={transportOverlayData.allModes}
-              departureTime={transportOverlayData.departureTime}
-              onModeSwitchConfirm={handleModeSwitchConfirm}
+              onClose={() => {
+                setTransportOverlayOpen(false);
+                setTransportOverlayEntry(null);
+                setTransportOverlayOption(null);
+              }}
+              entry={transportOverlayEntry}
+              option={transportOverlayOption}
+              formatTime={(iso) => {
+                const tz = resolveTimezoneForTime(iso);
+                const d = new Date(iso);
+                return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: tz });
+              }}
+              onSaved={fetchData}
+              onDelete={async () => {
+                await handleDeleteTransport(transportOverlayEntry.id);
+                setTransportOverlayOpen(false);
+                setTransportOverlayEntry(null);
+                setTransportOverlayOption(null);
+              }}
             />
           )}
 
