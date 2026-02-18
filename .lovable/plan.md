@@ -1,133 +1,90 @@
 
 
-# Memoize getEntryGlobalHours + Batch Transport Updates
+# Fix Flight Transport -- Airport Coordinates + Auto-Generate
 
 ## Summary
-Two performance improvements: (1) cache the expensive `getEntryGlobalHours` computation per entry in a Map, eliminating 400+ redundant `Intl.DateTimeFormat` calls per render, and (2) batch sequential transport DB updates into a single `Promise.all`.
-
----
-
-## Change 1: Memoize getEntryGlobalHours in ContinuousTimeline.tsx
-
-### 1a. Add memoized map + lookup (after `sortedEntries`, ~line 278)
-
-```typescript
-const entryGlobalHoursMap = useMemo(() => {
-  const map = new Map<string, { startGH: number; endGH: number; resolvedTz: string }>();
-  for (const entry of sortedEntries) {
-    map.set(entry.id, getEntryGlobalHours(entry));
-  }
-  return map;
-}, [sortedEntries, getEntryGlobalHours]);
-
-const getEntryGH = useCallback((entry: EntryWithOptions): { startGH: number; endGH: number; resolvedTz: string } => {
-  return entryGlobalHoursMap.get(entry.id) ?? getEntryGlobalHours(entry);
-}, [entryGlobalHoursMap, getEntryGlobalHours]);
-```
-
-### 1b. Replace all `getEntryGlobalHours(...)` call sites with `getEntryGH(...)`
-
-There are ~25 call sites across the file. All instances of `getEntryGlobalHours(entry)`, `getEntryGlobalHours(e)`, `getEntryGlobalHours(other)`, `getEntryGlobalHours(origEntry)`, `getEntryGlobalHours(blockEntries[0])`, etc. will be replaced with the equivalent `getEntryGH(...)` call.
-
-The affected useMemo/useCallback blocks and their approximate line numbers:
-- `transportSnapTargets` (~line 506)
-- `lockedBoundaries` (~line 520)
-- `connectorData` (~lines 589-590)
-- `overlapMap` (~lines 678-679)
-- `overlapLayout` (~line 694)
-- `snapTarget` (~lines 724-725, 746)
-- RAF loop for floating card (~line 896)
-- Hour label hide-for-pill (~line 1080)
-- Gap buttons render (~lines 1274-1275)
-- Main card render: resize branch (~line 1437), normal branch (~line 1439)
-- `hasEntryDirectlyAbove` / `hasEntryDirectlyBelow` (~lines 1482, 1487)
-- Drag hours for init (~line 1494)
-- Time pills during move drag (~lines 1864-1865, 1870)
-- Ghost outline during detached drag (~lines 1945-1946, 1952)
-
-### 1c. Update dependency arrays
-
-All useMemo/useCallback blocks that currently list `getEntryGlobalHours` in their dependency array will be updated to use `getEntryGH` instead. The original `getEntryGlobalHours` useCallback definition remains -- it's the computation engine -- but `getEntryGH` becomes the only accessor.
-
----
-
-## Change 2: Batch Transport DB Updates in Timeline.tsx
-
-### Current code (lines 1225-1256)
-
-The transport reposition loop runs sequential `await` calls for each transport:
-```typescript
-for (const transport of linkedTransports) {
-  // ...checks...
-  updateEntryLocally(transport.id, { ... });
-  await supabase.from('entries').update(...).eq('id', transport.id);
-}
-```
-
-### New code
-
-Replace the sequential loop with parallel execution. Separate into three phases:
-1. Collect optimistic local updates and DB promises
-2. Apply all local updates immediately (already instant)
-3. Fire all DB updates in parallel via `Promise.all`
-
-```typescript
-const transportDbPromises: Promise<any>[] = [];
-const transportDeletions: Promise<any>[] = [];
-
-for (const transport of linkedTransports) {
-  const fromId = transport.from_entry_id;
-  const toId = transport.to_entry_id;
-  if (!fromId || !toId) continue;
-
-  const toEntry = entries.find(e => e.id === toId);
-  if (toEntry?.is_locked) continue;
-
-  const fromEndTime = fromId === entryId ? newEndIso : (entries.find(e => e.id === fromId)?.end_time ?? null);
-  const toStartTime = toId === entryId ? newStartIso : (entries.find(e => e.id === toId)?.start_time ?? null);
-  if (!fromEndTime || !toStartTime) continue;
-
-  const gapMin = (new Date(toStartTime).getTime() - new Date(fromEndTime).getTime()) / 60000;
-
-  if (gapMin > 90) {
-    setEntries(prev => prev.filter(e => e.id !== transport.id));
-    transportDeletions.push(
-      supabase.from('entry_options').delete().eq('entry_id', transport.id)
-        .then(() => supabase.from('entries').delete().eq('id', transport.id))
-    );
-  } else {
-    const durationMs = new Date(transport.end_time).getTime() - new Date(transport.start_time).getTime();
-    const newStart = fromEndTime;
-    const newEnd = new Date(new Date(newStart).getTime() + durationMs).toISOString();
-    updateEntryLocally(transport.id, { start_time: newStart, end_time: newEnd });
-    transportDbPromises.push(
-      supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', transport.id)
-    );
-  }
-}
-
-await Promise.all([...transportDbPromises, ...transportDeletions]);
-```
-
-Note: Deletions are chained (options must be deleted before entries due to FK constraint) but multiple transports are deleted in parallel with each other.
+Three fixes: (1) add lat/lng to all ~410 airports, (2) propagate coordinates when selecting/parsing airports so flight entry_options and checkin/checkout entries store real coordinates, (3) auto-generate transport after flight creation, and (4) update address resolution to prefer coordinates for flights.
 
 ---
 
 ## Files Modified
-- `src/components/timeline/ContinuousTimeline.tsx` -- add `entryGlobalHoursMap` + `getEntryGH`, replace ~25 call sites
-- `src/pages/Timeline.tsx` -- batch transport DB updates with `Promise.all`
+
+### 1. `src/lib/airports.ts`
+- Add `lat` and `lng` fields to the `Airport` interface
+- Add real terminal-area coordinates to all ~410 airports in the AIRPORTS array
+- This is the largest change by line count but purely data
+
+### 2. `src/components/timeline/EntrySheet.tsx`
+
+**2a. Add coordinate state variables** (after line 131):
+```typescript
+const [departureLat, setDepartureLat] = useState<number | null>(null);
+const [departureLng, setDepartureLng] = useState<number | null>(null);
+const [arrivalLat, setArrivalLat] = useState<number | null>(null);
+const [arrivalLng, setArrivalLng] = useState<number | null>(null);
+```
+
+**2b. Update airport change handlers** (currently ~line 506-514 area, the `handleDepartureAirportChange` / `handleArrivalAirportChange` which are called by `AirportPicker`):
+- Add `setDepartureLat(airport.lat)` / `setDepartureLng(airport.lng)` in departure handler
+- Add `setArrivalLat(airport.lat)` / `setArrivalLng(airport.lng)` in arrival handler
+
+**2c. Update `applyParsedFlight`** (line 441): When matching airports by IATA code, also set lat/lng from the matched airport object.
+
+**2d. Update flight option payload** (line 676-688): Set `latitude: isFlight ? arrivalLat : latitude` and `longitude: isFlight ? arrivalLng : longitude` on the option insert. Same for the edit update path (line 659-673).
+
+**2e. Update checkin entry creation** (line 726-734): Add `latitude: departureLat`, `longitude: departureLng`, and use full `departureLocation` for `location_name`.
+
+**2f. Update checkout entry creation** (line 745-753): Add `latitude: arrivalLat`, `longitude: arrivalLng`, use full `arrivalLocation` (not `.split(' - ')[0]`) for `location_name`.
+
+**2g. Reset new state in `reset()`** (line 303): Add resets for the 4 coordinate states.
+
+**2h. Update return flight handler** (line 804): When setting up return flight, swap the lat/lng too. Store them in ReturnFlightData or look up from AIRPORTS by IATA.
+
+### 3. `src/lib/entryHelpers.ts`
+
+**3a. Update `resolveFromAddress` and `resolveToAddress`**: For flights with coordinates, return coordinate string format `"lat,lng"` instead of text address. This ensures google-directions gets precise waypoints:
+
+```typescript
+export function resolveFromAddress(opt: { 
+  category?: string | null; latitude?: number | null; longitude?: number | null;
+  address?: string | null; location_name?: string | null; arrival_location?: string | null 
+}): string | null {
+  if (opt.category === 'flight') {
+    if (opt.latitude != null && opt.longitude != null) return `${opt.latitude},${opt.longitude}`;
+    return opt.arrival_location || null;
+  }
+  if (opt.latitude != null && opt.longitude != null) return `${opt.latitude},${opt.longitude}`;
+  return opt.address || opt.location_name || opt.arrival_location || null;
+}
+```
+
+Same pattern for `resolveToAddress`. This automatically fixes all transport generation paths (`handleSnapRelease`, gap buttons, etc.) since they all call these helpers.
+
+### 4. `src/pages/Timeline.tsx`
+
+**4a. Auto-generate transport after flight save** (in the `onSaved` callback, ~line 2839): After `fetchData()` returns fresh entries and the sheet entry refresh logic, add flight transport auto-generation:
+
+- Check if `sheetEntry` was a flight (via `prefillCategory === 'flight'` or checking the fresh entry's category)
+- Find checkout/checkin entries for the flight
+- Find adjacent non-transport, non-airport-processing entries before/after the flight group
+- Check no existing transport already bridges the gap
+- Call `handleSnapRelease` for each gap (reuses existing transport creation logic)
+- This runs after `fetchData()` so checkin/checkout entries exist in `freshEntries`
+
+---
 
 ## What Is NOT Changed
-- `getEntryGlobalHours` definition (kept as computation engine)
-- Edge functions
-- `useDragResize` hook
-- Any other files
+- `AirportPicker` component -- just passes Airport objects, no UI changes
+- `FlightGroupCard` rendering -- visual layout unchanged
+- `google-directions` edge function -- already handles coordinate strings
+- `auto-generate-transport` edge function -- already prefers lat/lng
+- `useDragResize` / `ContinuousTimeline` drag mechanics
 
 ## Testing
-- Open a trip with 15+ entries -- timeline should render noticeably faster
-- Drag a card with 2+ linked transports -- check Network tab to confirm DB updates fire simultaneously
-- Verify overlap indicators still appear correctly
-- Verify gap buttons appear in correct positions
-- Verify magnet snap icons still work
-- Verify flight group rendering (checkin/checkout bounds) unchanged
+- Create a flight LHR to AMS -- verify entry_option has latitude/longitude of Schiphol
+- Verify checkout entry has `location_name: "AMS - Schiphol"` with coordinates
+- Add an activity after the flight -- transport should auto-generate from Schiphol coordinates
+- Parse a flight from PDF -- verify coordinates are set from matched airport
+- Click gap button between flight and activity -- should use coordinates (check Network tab for coordinate strings in google-directions call)
+- Verify transport durations are accurate (coordinates vs text geocoding)
 
