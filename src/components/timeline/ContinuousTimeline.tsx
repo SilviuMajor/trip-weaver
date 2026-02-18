@@ -4,6 +4,7 @@ import { calculateSunTimes } from '@/lib/sunCalc';
 import type { EntryWithOptions, EntryOption, WeatherData, TransportMode } from '@/types/trip';
 import { cn } from '@/lib/utils';
 import { haversineKm } from '@/lib/distance';
+import { resolveFromAddress, resolveToAddress } from '@/lib/entryHelpers';
 import { getBlock, getEntriesAfterInBlock } from '@/lib/blockDetection';
 import { localToUTC, getHourInTimezone, resolveEntryTz, getDateInTimezone, getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
 import { Plus, Lock, LockOpen, Trash2 } from 'lucide-react';
@@ -1269,7 +1270,7 @@ const ContinuousTimeline = ({
                       e.stopPropagation();
                       if (onAddBetween) {
                         const prefillTime = addMinutes(new Date(effectiveEndTime), 60).toISOString();
-                        onAddBetween(prefillTime, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
+                        onAddBetween(prefillTime, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0] ? resolveFromAddress(entry.options[0]) || '' : '', toAddress: nextEntry.options[0] ? resolveToAddress(nextEntry.options[0]) || '' : '' });
                       }
                     }}
                     className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
@@ -1282,7 +1283,7 @@ const ContinuousTimeline = ({
                       e.stopPropagation();
                       if (onAddBetween) {
                         const prefillTime = addMinutes(new Date(nextEntry.start_time), -60).toISOString();
-                        onAddBetween(prefillTime, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
+                        onAddBetween(prefillTime, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0] ? resolveFromAddress(entry.options[0]) || '' : '', toAddress: nextEntry.options[0] ? resolveToAddress(nextEntry.options[0]) || '' : '' });
                       }
                     }}
                     className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
@@ -1296,7 +1297,7 @@ const ContinuousTimeline = ({
                   onClick={(e) => {
                     e.stopPropagation();
                     if (onAddBetween) {
-                      onAddBetween(effectiveEndTime, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
+                      onAddBetween(effectiveEndTime, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0] ? resolveFromAddress(entry.options[0]) || '' : '', toAddress: nextEntry.options[0] ? resolveToAddress(nextEntry.options[0]) || '' : '' });
                     }
                   }}
                   className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
