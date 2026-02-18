@@ -740,8 +740,33 @@ const Timeline = () => {
     const toEntry = entries.find(e => e.id === toEntryId);
     if (!fromEntry || !toEntry || !tripId) return;
 
+    // For flights, find the checkout entry and use its end_time + ID
+    let effectiveFromId = fromEntryId;
+    let effectiveFromEndTime = fromEntry.end_time;
     const fromOpt = fromEntry.options[0];
+
+    if (fromOpt?.category === 'flight') {
+      const checkout = entries.find(e =>
+        e.linked_flight_id === fromEntryId && e.linked_type === 'checkout'
+      );
+      if (checkout) {
+        effectiveFromId = checkout.id;
+        effectiveFromEndTime = checkout.end_time;
+      }
+    }
+
+    // For toEntry — if it's a flight, use its checkin entry
+    let effectiveToId = toEntryId;
     const toOpt = toEntry.options[0];
+    if (toOpt?.category === 'flight') {
+      const checkin = entries.find(e =>
+        e.linked_flight_id === toEntryId && e.linked_type === 'checkin'
+      );
+      if (checkin) {
+        effectiveToId = checkin.id;
+      }
+    }
+
     const fromAddr = fromOpt ? resolveFromAddress(fromOpt) : null;
     const toAddr = toOpt ? resolveToAddress(toOpt) : null;
 
@@ -756,7 +781,7 @@ const Timeline = () => {
           fromAddress: fromAddr,
           toAddress: toAddr,
           modes: ['walk', 'transit', 'drive', 'bicycle'],
-          departureTime: fromEntry.end_time,
+          departureTime: effectiveFromEndTime,
         },
       });
       if (dirError) throw dirError;
@@ -767,15 +792,15 @@ const Timeline = () => {
       const durationMin = defaultResult?.duration_min ?? 15;
       const blockDur = Math.ceil(durationMin / 5) * 5;
 
-      const transportStartMs = new Date(fromEntry.end_time).getTime();
+      const transportStartMs = new Date(effectiveFromEndTime).getTime();
       const transportEndMs = transportStartMs + blockDur * 60000;
 
       // Delete any existing transport FROM the fromEntry to a different card
       const { data: oldFromTransports } = await supabase
         .from('entries')
         .select('id')
-        .eq('from_entry_id', fromEntryId)
-        .neq('to_entry_id', toEntryId);
+        .eq('from_entry_id', effectiveFromId)
+        .neq('to_entry_id', effectiveToId);
       for (const old of (oldFromTransports ?? [])) {
         const oldEntry = entries.find(e => e.id === old.id);
         if (oldEntry?.options[0]?.category === 'transfer') {
@@ -787,8 +812,8 @@ const Timeline = () => {
       const { data: oldToTransports } = await supabase
         .from('entries')
         .select('id')
-        .eq('to_entry_id', toEntryId)
-        .neq('from_entry_id', fromEntryId);
+        .eq('to_entry_id', effectiveToId)
+        .neq('from_entry_id', effectiveFromId);
       for (const old of (oldToTransports ?? [])) {
         const oldEntry = entries.find(e => e.id === old.id);
         if (oldEntry?.options[0]?.category === 'transfer') {
@@ -803,8 +828,8 @@ const Timeline = () => {
         start_time: new Date(transportStartMs).toISOString(),
         end_time: new Date(transportEndMs).toISOString(),
         is_scheduled: true,
-        from_entry_id: fromEntryId,
-        to_entry_id: toEntryId,
+        from_entry_id: effectiveFromId,
+        to_entry_id: effectiveToId,
       } as any).select().single();
 
       if (newTransport) {
