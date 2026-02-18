@@ -2857,6 +2857,56 @@ const Timeline = () => {
                 }
               }
 
+              // Auto-generate transport after flight save
+              if (prefillCategory === 'flight' && freshEntries) {
+                const savedEntry = sheetEntry ? freshEntries.find(e => e.id === sheetEntry.id) : null;
+                const flightEntry = savedEntry?.options[0]?.category === 'flight' ? savedEntry : null;
+                if (flightEntry) {
+                  const checkout = freshEntries.find(e => e.linked_flight_id === flightEntry.id && e.linked_type === 'checkout');
+                  const checkin = freshEntries.find(e => e.linked_flight_id === flightEntry.id && e.linked_type === 'checkin');
+                  const effectiveEndTime = checkout?.end_time ?? flightEntry.end_time;
+                  const effectiveStartTime = checkin?.start_time ?? flightEntry.start_time;
+
+                  const sorted = freshEntries
+                    .filter(e => e.is_scheduled && !e.linked_flight_id && e.id !== flightEntry.id)
+                    .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+
+                  const nextEntry = sorted.find(e => {
+                    const opt = e.options[0];
+                    return opt?.category !== 'transfer' && opt?.category !== 'airport_processing' &&
+                      new Date(e.start_time).getTime() > new Date(effectiveEndTime).getTime();
+                  });
+
+                  const prevEntry = [...sorted].reverse().find(e => {
+                    const opt = e.options[0];
+                    return opt?.category !== 'transfer' && opt?.category !== 'airport_processing' &&
+                      new Date(e.end_time).getTime() < new Date(effectiveStartTime).getTime();
+                  });
+
+                  if (nextEntry) {
+                    const hasExisting = freshEntries.some(e =>
+                      e.options[0]?.category === 'transfer' &&
+                      new Date(e.start_time).getTime() >= new Date(effectiveEndTime).getTime() &&
+                      new Date(e.start_time).getTime() < new Date(nextEntry.start_time).getTime()
+                    );
+                    if (!hasExisting) {
+                      handleSnapRelease(nextEntry.id, flightEntry.id, 'below');
+                    }
+                  }
+
+                  if (prevEntry) {
+                    const hasExisting = freshEntries.some(e =>
+                      e.options[0]?.category === 'transfer' &&
+                      new Date(e.end_time).getTime() <= new Date(effectiveStartTime).getTime() &&
+                      new Date(e.end_time).getTime() > new Date(prevEntry.end_time).getTime()
+                    );
+                    if (!hasExisting) {
+                      handleSnapRelease(flightEntry.id, prevEntry.id, 'above');
+                    }
+                  }
+                }
+              }
+
               // Auto-extend: check latest entry times after save
               if (trip && tripId) {
                 const { data: latest } = await supabase
