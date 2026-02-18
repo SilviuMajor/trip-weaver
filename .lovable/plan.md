@@ -1,64 +1,38 @@
 
 
-# Fix Flight Card Timezone Offset Bug
+# Fix Transport Position Bug (Bug 3)
+
+## Context
+Bugs 1 and 2 (timezone offset) are already fixed from the previous approved plan. Only Bug 3 remains: gap buttons between entries pass the flight's `end_time` instead of the checkout's `end_time` when creating transport or adding entries after a flight group.
 
 ## Problem
-After a timezone-crossing flight, all subsequent entries appear visually offset by the timezone delta. A London-to-Amsterdam flight (1h difference) creates a false 1-hour gap between the flight card bottom and the first post-flight entry.
-
-## Root Cause
-Flight end positions are calculated using departure timezone math (`depHour + utcDurH`) instead of computing the arrival hour in the arrival timezone.
+When clicking gap buttons below a flight group, `entry.end_time` (the flight landing time, e.g. 10:50) is used as the prefill/start time instead of the checkout's `end_time` (e.g. 11:20). This causes transport entries to overlap the checkout section.
 
 ## Changes
 
-### 1. `src/pages/Timeline.tsx` (line 634)
+### `src/components/timeline/ContinuousTimeline.tsx`
 
-In the `dayTimezoneMap` useMemo, replace:
-```
-flightEndHour: depHour + utcDurH,
-```
-with:
-```
-flightEndHour: getHour(f.end_time, opt.arrival_tz!),
-```
+In the gap buttons section (lines 1232-1279), compute an `effectiveEndTime` using `flightGroupMap` and replace all `entry.end_time` references with it.
 
-The `getHour` helper is already defined at line 621 and accepts any ISO string + timezone.
-
-### 2. `src/components/timeline/ContinuousTimeline.tsx` (lines 217-223)
-
-In `getEntryGlobalHours`, replace the flight branch:
+**Add before the gap button JSX (after line 1229):**
 ```typescript
-if (isFlight) {
-  const depTz = opt.departure_tz!;
-  const dayIdx = findDayIndex(entry.start_time, depTz);
-  const startLocal = getHourInTimezone(entry.start_time, depTz);
-  const startGH = dayIdx * 24 + startLocal;
-  const utcDurH = (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 3600000;
-  return { startGH, endGH: startGH + utcDurH, resolvedTz: depTz };
-}
-```
-with:
-```typescript
-if (isFlight) {
-  const depTz = opt.departure_tz!;
-  const arrTz = opt.arrival_tz!;
-  const dayIdx = findDayIndex(entry.start_time, depTz);
-  const startLocal = getHourInTimezone(entry.start_time, depTz);
-  const startGH = dayIdx * 24 + startLocal;
-  const endLocal = getHourInTimezone(entry.end_time, arrTz);
-  const endDayIdx = findDayIndex(entry.end_time, arrTz);
-  const endGH = endDayIdx * 24 + endLocal;
-  return { startGH, endGH, resolvedTz: depTz };
-}
+const effectiveEndTime = aGroup?.checkout?.end_time ?? entry.end_time;
 ```
 
-This handles red-eye/long-haul flights arriving on a different calendar day by using `findDayIndex` for the end time separately.
+**Three replacements inside the gap button JSX:**
+
+1. **Line 1241** (large gap, top "Add something" button):
+   - Replace `entry.end_time` with `effectiveEndTime` in the `addMinutes(new Date(entry.end_time), 60)` call
+
+2. **Line 1269** (normal gap, single "Add something" button):
+   - Replace `entry.end_time` with `effectiveEndTime` in `onAddBetween(entry.end_time, ...)`
+
+Line 1254 (large gap, bottom button) uses `nextEntry.start_time` which is correct and needs no change.
 
 ## Files Modified
-- `src/pages/Timeline.tsx` -- 1 line changed (line 634)
-- `src/components/timeline/ContinuousTimeline.tsx` -- flight branch rewritten (lines 217-223)
+- `src/components/timeline/ContinuousTimeline.tsx` — 3 lines changed (add effectiveEndTime variable, update 2 gap button calls)
 
 ## What Is NOT Changed
-- `resolveEntryTz` in `timezoneUtils.ts` (uses UTC comparison, already correct)
-- Non-flight entry positioning (already uses correct resolved timezone)
-- `resolveGlobalHourTz` (consumes `flightEndHour` which will now be correct)
-- Drag commit handler (already correct)
+- Timeline.tsx handlers (`handleAddBetween`, `handleGenerateTransportDirect`) — these have their own checkout lookups as a safety net
+- Connector `onAddAtArrival` (line 1334) — this uses the transport entry's own end_time which is correct
+- Magnet snap handling — already uses effectiveEndTime pattern
