@@ -1,97 +1,81 @@
 
 
-# Fix Flight-to-Activity Transport Location Resolution
+# Fix handleSnapRelease for Flight Groups
 
 ## Problem
-Transport from a flight to the next activity shows "15 min drive" with no other modes and 0 km distance. The airport is much further from the destination than 15 minutes. Only one transport mode appears instead of all four (walk, transit, drive, bicycle).
+When snapping a card after a flight group, `handleSnapRelease` has three issues:
+1. Uses flight's `end_time` (landing) as transport start instead of the checkout's `end_time`
+2. Sets `from_entry_id` to the flight ID instead of the checkout entry ID (connector renders at wrong position)
+3. Address resolution works for flights but not for checkout entries that become the `from_entry_id`
 
 ## Root Cause
-Flight entries have `address: null`, `location_name: null`, and `latitude/longitude: null`. The only location data is `arrival_location: "AMS - Schiphol"` (a display name, not a proper address). Multiple code paths fail to resolve this correctly:
+`handleSnapRelease` receives the flight entry as `fromEntry` (since `airport_processing` entries are filtered out of visible/sorted lists). It then uses the flight's `end_time` and `id` directly, without accounting for the checkout section that extends below the flight.
 
-1. **`handleSnapRelease`** (Timeline.tsx line 745) only checks `address || location_name` -- both null for flights, so it bails out without creating transport
-2. **Gap button `fromAddress`** (ContinuousTimeline.tsx line 1272/1299) falls through to `arrival_location` but passes "AMS - Schiphol" which Google Directions can't reliably geocode
-3. The existing transport in the DB has `departure_location: "AMS"` and only 1 mode (drive, 15min, 0km) -- Google interpreted the airport code as a city-center location
+The edge function (`auto-generate-transport`) already handles this correctly (lines 269-324): it looks up checkout end times and uses them. The client-side `handleSnapRelease` needs the same treatment.
 
-## Solution
+## Fix
 
-### 1. Create a shared location resolver helper
+### `src/pages/Timeline.tsx` — `handleSnapRelease` (lines 739-808)
 
-Add a helper function in `src/lib/entryHelpers.ts` (or similar) that correctly resolves the "from" and "to" addresses for any entry type:
+After finding `fromEntry` and `toEntry`, add a checkout lookup:
 
 ```typescript
-/** Resolve the address where you END UP after completing this entry */
-export function resolveFromAddress(opt: EntryOption): string | null {
-  // Flights: you end up at the arrival airport
-  if (opt.category === 'flight') {
-    return opt.arrival_location || null;
+const fromEntry = entries.find(e => e.id === fromEntryId);
+const toEntry = entries.find(e => e.id === toEntryId);
+if (!fromEntry || !toEntry || !tripId) return;
+
+// For flights, find the checkout entry and use its end_time + ID
+let effectiveFromId = fromEntryId;
+let effectiveFromEndTime = fromEntry.end_time;
+const fromOpt = fromEntry.options[0];
+
+if (fromOpt?.category === 'flight') {
+  const checkout = entries.find(e =>
+    e.linked_flight_id === fromEntryId && e.linked_type === 'checkout'
+  );
+  if (checkout) {
+    effectiveFromId = checkout.id;
+    effectiveFromEndTime = checkout.end_time;
   }
-  return opt.address || opt.location_name || opt.arrival_location || null;
 }
 
-/** Resolve the address where you NEED TO BE for this entry */
-export function resolveToAddress(opt: EntryOption): string | null {
-  // Flights: you need to be at the departure airport
-  if (opt.category === 'flight') {
-    return opt.departure_location || null;
+// Similarly for toEntry — if it's a flight, use its checkin entry
+let effectiveToId = toEntryId;
+const toOpt = toEntry.options[0];
+if (toOpt?.category === 'flight') {
+  const checkin = entries.find(e =>
+    e.linked_flight_id === toEntryId && e.linked_type === 'checkin'
+  );
+  if (checkin) {
+    effectiveToId = checkin.id;
   }
-  return opt.address || opt.location_name || opt.departure_location || null;
 }
 ```
 
-### 2. Fix `handleSnapRelease` in Timeline.tsx (line 745-746)
+Then replace:
+- Line 759: `departureTime: fromEntry.end_time` with `effectiveFromEndTime`
+- Line 770: `new Date(fromEntry.end_time)` with `new Date(effectiveFromEndTime)`
+- Line 806: `from_entry_id: fromEntryId` with `effectiveFromId`
+- Line 807: `to_entry_id: toEntryId` with `effectiveToId`
+- Lines 777, 791: update old transport cleanup queries to use `effectiveFromId` and `effectiveToId`
 
-Replace:
-```typescript
-const fromAddr = fromOpt?.address || fromOpt?.location_name;
-const toAddr = toOpt?.address || toOpt?.location_name;
-```
+The address resolution via `resolveFromAddress(fromOpt)` (line 745) stays the same -- it correctly returns `arrival_location` ("AMS - Schiphol") for flight entries.
 
-With calls to the new helper:
-```typescript
-const fromAddr = fromOpt ? resolveFromAddress(fromOpt) : null;
-const toAddr = toOpt ? resolveToAddress(toOpt) : null;
-```
+## Technical Details
 
-This ensures flights resolve to their arrival/departure locations.
+### Lines changed in `handleSnapRelease`:
+- Add ~15 lines of checkout/checkin lookup after line 741
+- Update 6 references from `fromEntryId`/`fromEntry.end_time` to `effectiveFromId`/`effectiveFromEndTime`
+- Update 2 references from `toEntryId` to `effectiveToId`
 
-### 3. Fix gap button `fromAddress` in ContinuousTimeline.tsx (lines 1272, 1285, 1299)
-
-Currently uses `entry.options[0]?.location_name || entry.options[0]?.arrival_location`. Replace with the same helper for consistency.
-
-For the "from" side (the entry above the gap):
-```typescript
-fromAddress: resolveFromAddress(entry.options[0]) || ''
-```
-
-For the "to" side (the entry below the gap):
-```typescript
-toAddress: resolveToAddress(nextEntry.options[0]) || ''
-```
-
-### 4. Fix `handleAddBetween` transport creation address resolution (line 745)
-
-Same pattern -- anywhere `fromOpt?.address || fromOpt?.location_name` is used to resolve an entry's location for transport purposes, replace with the shared helper.
-
-### 5. Verify the auto-generate edge function (already correct)
-
-The `auto-generate-transport` edge function already has proper flight-aware `resolveFromLocation` / `resolveToLocation` functions (lines 112-140). No changes needed there.
-
-## What about "AMS - Schiphol" not being a proper address?
-
-"AMS - Schiphol" is actually a recognizable name that Google Directions can geocode to Amsterdam Schiphol Airport. The current problem is not that the name is unrecognizable -- it's that the code paths never even reach `arrival_location`. Once the resolver falls through correctly, Google should return proper airport-to-destination routes with accurate durations (likely 20-40 min by transit from Schiphol to central Amsterdam).
+### What about existing broken transport entries?
+The two duplicate transport entries in the DB (`departure_location: "AMS"`, only drive mode, 15min/0km) will need to be deleted by the user. After the fix, re-snapping or using gap buttons will create correct transport with proper airport address and all 4 modes.
 
 ## Files Modified
-- `src/lib/entryHelpers.ts` -- add `resolveFromAddress` and `resolveToAddress` helpers
-- `src/pages/Timeline.tsx` -- fix `handleSnapRelease` address resolution (line 745-746)
-- `src/components/timeline/ContinuousTimeline.tsx` -- fix gap button `fromAddress`/`toAddress` resolution (lines 1272, 1285, 1299)
+- `src/pages/Timeline.tsx` -- fix `handleSnapRelease` to use checkout/checkin entry IDs and times for flight groups
 
 ## What Is NOT Changed
-- `auto-generate-transport` edge function (already has correct flight-aware resolution)
-- `TransportOverlay` (reads addresses from the transport entry option, which will now be correctly populated)
-- `EntryCard` refresh routes (reads from existing transport option data)
-
-## Testing
-- Delete the existing incorrect transport entry from the flight
-- Create/trigger transport again (via gap button or snap) between the flight and the cafe
-- Verify Google returns multiple modes (walk, transit, drive, bicycle) with realistic durations from Schiphol
-- Verify the transport connector shows the correct duration and all modes are available in the Transport Overlay
+- Gap button logic in ContinuousTimeline.tsx (already uses `effectiveEndTime` and `resolveFromAddress`)
+- `auto-generate-transport` edge function (already handles this correctly)
+- `resolveFromAddress` / `resolveToAddress` helpers (working correctly for flight category)
+- Connector rendering logic (will automatically render correctly once `from_entry_id` points to checkout)
