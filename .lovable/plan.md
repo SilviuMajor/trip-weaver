@@ -1,114 +1,133 @@
 
 
-# Optimistic Local State for Card Drag
+# Memoize getEntryGlobalHours + Batch Transport Updates
 
 ## Summary
-Replace the full `fetchData()` call after card drags and lock toggles with instant local state updates, eliminating the 200-500ms stutter caused by re-fetching all data from the database.
+Two performance improvements: (1) cache the expensive `getEntryGlobalHours` computation per entry in a Map, eliminating 400+ redundant `Intl.DateTimeFormat` calls per render, and (2) batch sequential transport DB updates into a single `Promise.all`.
 
 ---
 
-## Changes
+## Change 1: Memoize getEntryGlobalHours in ContinuousTimeline.tsx
 
-### 1. Add `updateEntryLocally` helper
-
-**File: `src/pages/Timeline.tsx`** (after entries state, ~line 76)
+### 1a. Add memoized map + lookup (after `sortedEntries`, ~line 278)
 
 ```typescript
-const updateEntryLocally = useCallback((entryId: string, updates: Partial<Entry>) => {
-  setEntries(prev => prev.map(e =>
-    e.id === entryId ? { ...e, ...updates } : e
-  ));
-}, []);
+const entryGlobalHoursMap = useMemo(() => {
+  const map = new Map<string, { startGH: number; endGH: number; resolvedTz: string }>();
+  for (const entry of sortedEntries) {
+    map.set(entry.id, getEntryGlobalHours(entry));
+  }
+  return map;
+}, [sortedEntries, getEntryGlobalHours]);
+
+const getEntryGH = useCallback((entry: EntryWithOptions): { startGH: number; endGH: number; resolvedTz: string } => {
+  return entryGlobalHoursMap.get(entry.id) ?? getEntryGlobalHours(entry);
+}, [entryGlobalHoursMap, getEntryGlobalHours]);
 ```
 
-### 2. Make `handleEntryTimeChange` optimistic (lines 1173-1344)
+### 1b. Replace all `getEntryGlobalHours(...)` call sites with `getEntryGH(...)`
 
-Restructure the function to:
+There are ~25 call sites across the file. All instances of `getEntryGlobalHours(entry)`, `getEntryGlobalHours(e)`, `getEntryGlobalHours(other)`, `getEntryGlobalHours(origEntry)`, `getEntryGlobalHours(blockEntries[0])`, etc. will be replaced with the equivalent `getEntryGH(...)` call.
 
-**a) Apply optimistic local update immediately** (before any DB call):
+The affected useMemo/useCallback blocks and their approximate line numbers:
+- `transportSnapTargets` (~line 506)
+- `lockedBoundaries` (~line 520)
+- `connectorData` (~lines 589-590)
+- `overlapMap` (~lines 678-679)
+- `overlapLayout` (~line 694)
+- `snapTarget` (~lines 724-725, 746)
+- RAF loop for floating card (~line 896)
+- Hour label hide-for-pill (~line 1080)
+- Gap buttons render (~lines 1274-1275)
+- Main card render: resize branch (~line 1437), normal branch (~line 1439)
+- `hasEntryDirectlyAbove` / `hasEntryDirectlyBelow` (~lines 1482, 1487)
+- Drag hours for init (~line 1494)
+- Time pills during move drag (~lines 1864-1865, 1870)
+- Ghost outline during detached drag (~lines 1945-1946, 1952)
+
+### 1c. Update dependency arrays
+
+All useMemo/useCallback blocks that currently list `getEntryGlobalHours` in their dependency array will be updated to use `getEntryGH` instead. The original `getEntryGlobalHours` useCallback definition remains -- it's the computation engine -- but `getEntryGH` becomes the only accessor.
+
+---
+
+## Change 2: Batch Transport DB Updates in Timeline.tsx
+
+### Current code (lines 1225-1256)
+
+The transport reposition loop runs sequential `await` calls for each transport:
 ```typescript
-updateEntryLocally(entryId, { start_time: newStartIso, end_time: newEndIso });
-```
-
-**b) Make undo/redo also update local state** (not just DB):
-```typescript
-pushAction({
-  description: desc,
-  undo: async () => {
-    await supabase.from('entries').update({ start_time: oldStart, end_time: oldEnd }).eq('id', entryId);
-    updateEntryLocally(entryId, { start_time: oldStart, end_time: oldEnd });
-  },
-  redo: async () => {
-    await supabase.from('entries').update({ start_time: newStartIso, end_time: newEndIso }).eq('id', entryId);
-    updateEntryLocally(entryId, { start_time: newStartIso, end_time: newEndIso });
-  },
-});
-```
-
-**c) Rollback on DB error**:
-```typescript
-if (error) {
-  updateEntryLocally(entryId, { start_time: oldStart, end_time: oldEnd });
-  return;
+for (const transport of linkedTransports) {
+  // ...checks...
+  updateEntryLocally(transport.id, { ... });
+  await supabase.from('entries').update(...).eq('id', transport.id);
 }
 ```
 
-**d) Reposition linked transports optimistically**:
-- Use local `entries` state to find linked transports (filter by `from_entry_id`/`to_entry_id` and `category === 'transfer'`) instead of querying DB
-- For each transport: call `updateEntryLocally` for instant visual update, then sync to DB
-- For transport deletion (gap > 90min): remove from local state via `setEntries(prev => prev.filter(...))`, then delete from DB
+### New code
 
-**e) Smart-drop push**: Also apply `updateEntryLocally` for the pushed overlapped card, and update undo/redo to include local state changes.
-
-**f) Remove `fetchData()` calls**: Remove the two `fetchData()` calls at lines 1269 and 1333. Keep `fetchData` only in `autoExtendTripIfNeeded` (which only fires when the trip duration changes -- rare) and in `handleSnapRelease` (which creates NEW transport entries).
-
-### 3. Make `handleToggleLock` optimistic (lines 2191-2201)
+Replace the sequential loop with parallel execution. Separate into three phases:
+1. Collect optimistic local updates and DB promises
+2. Apply all local updates immediately (already instant)
+3. Fire all DB updates in parallel via `Promise.all`
 
 ```typescript
-const handleToggleLock = async (entryId: string, currentLocked: boolean) => {
-  const newLocked = !currentLocked;
-  // Optimistic
-  updateEntryLocally(entryId, { is_locked: newLocked } as any);
-  // DB sync
-  const { error } = await supabase.from('entries')
-    .update({ is_locked: newLocked }).eq('id', entryId);
-  if (error) {
-    // Rollback
-    updateEntryLocally(entryId, { is_locked: currentLocked } as any);
-    toast({ title: 'Failed to toggle lock', description: error.message, variant: 'destructive' });
+const transportDbPromises: Promise<any>[] = [];
+const transportDeletions: Promise<any>[] = [];
+
+for (const transport of linkedTransports) {
+  const fromId = transport.from_entry_id;
+  const toId = transport.to_entry_id;
+  if (!fromId || !toId) continue;
+
+  const toEntry = entries.find(e => e.id === toId);
+  if (toEntry?.is_locked) continue;
+
+  const fromEndTime = fromId === entryId ? newEndIso : (entries.find(e => e.id === fromId)?.end_time ?? null);
+  const toStartTime = toId === entryId ? newStartIso : (entries.find(e => e.id === toId)?.start_time ?? null);
+  if (!fromEndTime || !toStartTime) continue;
+
+  const gapMin = (new Date(toStartTime).getTime() - new Date(fromEndTime).getTime()) / 60000;
+
+  if (gapMin > 90) {
+    setEntries(prev => prev.filter(e => e.id !== transport.id));
+    transportDeletions.push(
+      supabase.from('entry_options').delete().eq('entry_id', transport.id)
+        .then(() => supabase.from('entries').delete().eq('id', transport.id))
+    );
+  } else {
+    const durationMs = new Date(transport.end_time).getTime() - new Date(transport.start_time).getTime();
+    const newStart = fromEndTime;
+    const newEnd = new Date(new Date(newStart).getTime() + durationMs).toISOString();
+    updateEntryLocally(transport.id, { start_time: newStart, end_time: newEnd });
+    transportDbPromises.push(
+      supabase.from('entries').update({ start_time: newStart, end_time: newEnd }).eq('id', transport.id)
+    );
   }
-  // No fetchData()
-};
+}
+
+await Promise.all([...transportDbPromises, ...transportDeletions]);
 ```
 
-### 4. What still uses `fetchData()`
-
-These operations create or delete entire entries/options, so they genuinely need a full refresh:
-- `handleSnapRelease` -- creates new transport entries
-- `handleDropOnTimeline` -- creates new entries from panel
-- `handleModeSwitchConfirm` -- updates option data
-- `handleDeleteTransport` -- removes entries
-- `handleAutoGenerateTransport` -- creates multiple transports
-- `EntrySheet` / `HotelWizard` `onSaved` callbacks
-- Realtime sync (other users' changes)
+Note: Deletions are chained (options must be deleted before entries due to FK constraint) but multiple transports are deleted in parallel with each other.
 
 ---
 
 ## Files Modified
-- `src/pages/Timeline.tsx` -- add `updateEntryLocally`, refactor `handleEntryTimeChange` and `handleToggleLock`
+- `src/components/timeline/ContinuousTimeline.tsx` -- add `entryGlobalHoursMap` + `getEntryGH`, replace ~25 call sites
+- `src/pages/Timeline.tsx` -- batch transport DB updates with `Promise.all`
 
 ## What Is NOT Changed
-- `fetchData()` function itself (still needed for other operations)
-- `useRealtimeSync` (still syncs other users' changes)
+- `getEntryGlobalHours` definition (kept as computation engine)
 - Edge functions
-- `useDragResize` / `ContinuousTimeline` (drag mechanics unchanged)
+- `useDragResize` hook
+- Any other files
 
 ## Testing
-- Drag a card to a new time -- should update instantly with no flicker
-- Drag a card with a transport connector -- transport repositions instantly
-- Undo the drag -- reverts instantly
-- Drag on throttled 3G network -- should still feel instant
-- Lock/unlock a card -- toggles instantly with no flash
-- Create transport via magnet snap -- still works (uses fetchData)
-- Switch transport mode -- still works (uses fetchData)
-- Smart-drop push -- pushed card moves instantly
+- Open a trip with 15+ entries -- timeline should render noticeably faster
+- Drag a card with 2+ linked transports -- check Network tab to confirm DB updates fire simultaneously
+- Verify overlap indicators still appear correctly
+- Verify gap buttons appear in correct positions
+- Verify magnet snap icons still work
+- Verify flight group rendering (checkin/checkout bounds) unchanged
+
