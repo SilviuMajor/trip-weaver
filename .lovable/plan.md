@@ -1,84 +1,61 @@
 
 
-# Prompt 5: Transport Auto-Recalculate on Move + Prompt 6: Transport Overlay
+# Rewrite TransportConnector + Update Rendering
 
 ## Overview
-Two changes: (1) When cards move, auto-recalculate adjacent transport connectors and auto-delete transports when cards move far apart. (2) Create a lightweight transport overlay sheet for mode switching, replacing the full EntrySheet when tapping the cog on a connector.
+Replace the current minimal dot-line connector with a full-width colour-fill band that visually represents travel time vs buffer time. Add a "+" button for quick event insertion at the transport arrival time.
 
----
+## Changes
 
-## Prompt 5: Transport Auto-Recalculate on Move
+### 1. Rewrite `src/components/timeline/TransportConnector.tsx`
 
-### Timeline.tsx -- Replace transport reposition logic in `handleEntryTimeChange` (lines 1116-1147)
+Complete rewrite with new props and visual design:
 
-Replace the current "Auto-reposition linked transport entries" try/catch block with enhanced logic that:
+**Props**: Accept `entry`, `option` (EntryWithOptions/EntryOption types), `height`, `gapHeight`, `transportMinutes`, `gapMinutes`, `fromLabel`, `toLabel`, `onTap`, `onAddAtArrival`.
 
-1. **Queries linked transports** (same as now) via `from_entry_id` or `to_entry_id` matching `entryId`
-2. **For each linked transport**: calculates the gap between from-entry end and to-entry start
-   - If gap > 90 minutes: **delete** the transport entry (options + entry)
-   - Otherwise: **reposition** transport to start at from-entry's end time, preserving duration (same as current behavior)
-3. **After repositioning**: checks for newly-adjacent cards (within 0-30 min gap) that don't have transport, and calls `handleSnapRelease` to auto-create transport
+**Mode detection**: Parse mode from option name (walk/drive/bicycle/transit) using existing pattern from connectorData.
 
-### Timeline.tsx -- Clean up orphaned transports on card deletion
+**Colour scheme**: Per-mode colours for stripe, fill, background, and text. Different opacities for light vs dark mode (detect via `window.matchMedia` or CSS variable approach -- will use inline rgba so it works in both).
 
-There are two deletion sites:
-- **Bin drop** (line 2489): `supabase.from('entries').delete().eq('id', entryId)`
-- **EntrySheet delete** (line 2979): same pattern
+**Three rendering modes** based on `gapHeight`:
+- **Normal** (>=22px): Full text row (emoji + duration + destination + cog), fill band, "+" button at bottom-right
+- **Compact** (14-22px): Emoji + duration + cog only, smaller font, no "+" button
+- **Overflow** (<14px): 22px minimum height, centered on gap midpoint via negative top offset, backdrop-blur for readability, z-5
 
-Both need to be wrapped to first clean up transport entries referencing the deleted entry. Add a shared helper:
+**Structure**:
+- Outer div: full width, `position: absolute` when overflow, `position: relative` otherwise
+- Left stripe: 3px wide, full height, solid mode colour, rounded-l-sm
+- Fill area: starts from top, height = `min(100, transportMinutes/gapMinutes * 100)%`, mode colour at 12% opacity
+- Background: mode colour at 3% opacity (unfilled area)
+- Text row: top of band, left-aligned after stripe
+- "+" button: 20x20 circle, bottom-right, dashed border, calls `onAddAtArrival`
 
-```typescript
-const cleanupTransportsForEntry = async (deletedEntryId: string) => {
-  const { data: orphaned } = await supabase
-    .from('entries')
-    .select('id')
-    .or(`from_entry_id.eq.${deletedEntryId},to_entry_id.eq.${deletedEntryId}`);
-  if (orphaned) {
-    for (const t of orphaned) {
-      await supabase.from('entry_options').delete().eq('entry_id', t.id);
-      await supabase.from('entries').delete().eq('id', t.id);
-    }
-  }
-};
-```
+### 2. Update `src/components/timeline/ContinuousTimeline.tsx` -- Connector rendering (lines 1278-1309)
 
-Call this before deleting the entry itself at both deletion sites.
+**Enhance connectorData useMemo** (lines 529-586): Add `fromLabel`, `toLabel`, and `transportEntry` reference to each connector object so we can pass the full entry/option to TransportConnector.
 
-### Timeline.tsx -- Smart transport cleanup in handleSnapRelease
+**Update rendering block** (lines 1279-1309):
+- Compute `gapMinutes` and `transportMinutes` for each connector
+- For overflow mode (gapPx < 14): set container `overflow: visible` and z-index 5
+- Pass new props to TransportConnector: `entry`, `option`, `gapHeight`, `gapMinutes`, `transportMinutes`, `fromLabel`, `toLabel`, `onAddAtArrival`
+- `onAddAtArrival` calls `onAddBetween` with the transport entry's `end_time`
+- `onTap` still opens the transport overlay via `onTransportCogTap` or falls back to `onCardTap`
 
-Before creating a new transport in `handleSnapRelease` (line 754), check for and delete any existing transport FROM the fromEntry to a different card, and any transport TO the toEntry from a different card. This handles the "insert between" case where old A-to-C transport needs to be replaced by A-to-B and B-to-C.
+**Gap rendering update** (lines 1218-1276): 
+- The `hasTransferBetween` check at line 1220 already skips gap buttons when transport exists between entries
+- No changes needed to existing gap rendering -- the connector band replaces the dashed center line only in the connector rendering area, and gap buttons remain for non-transport gaps
 
----
+### 3. Files Modified
 
-## Prompt 6: Lightweight Transport Overlay
+- `src/components/timeline/TransportConnector.tsx` -- complete rewrite
+- `src/components/timeline/ContinuousTimeline.tsx` -- update connectorData memo and connector rendering block
 
-### Create `src/components/timeline/TransportOverlay.tsx`
+### Technical Details
 
-A bottom sheet (using the existing Sheet component) with:
-- Header showing "Transport" title + from/to addresses
-- 4 mode option cards: Walk, Transit, Drive, Cycle
-- Current mode highlighted with colored background + border
-- Each shows duration + distance from the `allModes` array
-- Unavailable modes greyed out
-- Tap a different mode: spinner, calls `onModeSwitchConfirm`, closes sheet
+**Overflow positioning**: The parent container div already handles overflow centering (line 1283: `connTop = topPx - (20 - gapPx) / 2`). Will update this to use 22px minimum and pass the computed values to TransportConnector. The component itself will handle backdrop-blur and elevated z-index internally based on `gapHeight < 14`.
 
-### Timeline.tsx -- Add overlay state and handler
+**No drag/snap changes**: This is purely visual. All drag, snap, and transport creation/deletion logic remains untouched.
 
-- `transportOverlayOpen` + `transportOverlayData` state
-- `handleTransportCogTap(transportEntryId)` callback that reads entry data and opens the overlay
-- Render `<TransportOverlay>` in JSX, wired to `handleModeSwitchConfirm`
+**Import changes**: TransportConnector import stays the same. Need to add `Settings, Plus` to imports in TransportConnector (from lucide-react).
 
-### ContinuousTimeline.tsx -- Wire cog tap to new overlay
-
-- Add `onTransportCogTap?: (transportEntryId: string) => void` prop
-- In connector rendering (line 1295), change `onCogTap` to call `onTransportCogTap` instead of `onCardTap`
-- Timeline.tsx passes `onTransportCogTap={handleTransportCogTap}` to ContinuousTimeline
-
----
-
-## Files Modified
-
-- `src/pages/Timeline.tsx` -- enhanced transport reposition logic, orphan cleanup helper, overlay state/handler, old transport cleanup in handleSnapRelease
-- `src/components/timeline/ContinuousTimeline.tsx` -- add `onTransportCogTap` prop, wire cog tap
-- `src/components/timeline/TransportOverlay.tsx` -- new file, lightweight mode-switching sheet
-
+**Dark/light mode**: Using inline rgba colours that work in both modes. The fill opacity differences (0.12 dark vs 0.15 light) can be handled with a simple `prefers-color-scheme` media query check or by using slightly higher base opacity that works well in both.
