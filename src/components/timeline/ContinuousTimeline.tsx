@@ -1228,6 +1228,7 @@ const ContinuousTimeline = ({
           const gapHeight = gapBottomPx - gapTopPx;
           const midGH = (aEndGH + bStartGH) / 2;
           const btnTop = midGH * pixelsPerHour - 12;
+          const effectiveEndTime = aGroup?.checkout?.end_time ?? entry.end_time;
 
           return (
             <div key={`gap-${entry.id}-${nextEntry.id}`}>
@@ -1238,7 +1239,7 @@ const ContinuousTimeline = ({
                     onClick={(e) => {
                       e.stopPropagation();
                       if (onAddBetween) {
-                        const prefillTime = addMinutes(new Date(entry.end_time), 60).toISOString();
+                        const prefillTime = addMinutes(new Date(effectiveEndTime), 60).toISOString();
                         onAddBetween(prefillTime, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
                       }
                     }}
@@ -1266,7 +1267,7 @@ const ContinuousTimeline = ({
                   onClick={(e) => {
                     e.stopPropagation();
                     if (onAddBetween) {
-                      onAddBetween(entry.end_time, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
+                      onAddBetween(effectiveEndTime, { fromName: entry.options[0]?.name ?? '', toName: nextEntry.options[0]?.name ?? '', fromAddress: entry.options[0]?.location_name || entry.options[0]?.arrival_location || '', toAddress: nextEntry.options[0]?.location_name || nextEntry.options[0]?.departure_location || '' });
                     }
                   }}
                   className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-background px-2 py-1 text-[10px] text-muted-foreground/60 transition-all hover:border-primary hover:bg-primary/10 hover:text-primary"
