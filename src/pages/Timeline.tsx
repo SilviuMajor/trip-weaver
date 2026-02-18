@@ -5,7 +5,7 @@ import { addDays, parseISO, startOfDay, format, isPast, isToday } from 'date-fns
 import { getDateInTimezone, localToUTC, resolveDropTz } from '@/lib/timezoneUtils';
 import { findCategory } from '@/lib/categories';
 import { inferCategoryFromTypes } from '@/lib/placeTypeMapping';
-import { checkOpeningHoursConflict } from '@/lib/entryHelpers';
+import { checkOpeningHoursConflict, resolveFromAddress, resolveToAddress } from '@/lib/entryHelpers';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGeolocation } from '@/hooks/useGeolocation';
@@ -742,8 +742,8 @@ const Timeline = () => {
 
     const fromOpt = fromEntry.options[0];
     const toOpt = toEntry.options[0];
-    const fromAddr = fromOpt?.address || fromOpt?.location_name;
-    const toAddr = toOpt?.address || toOpt?.location_name;
+    const fromAddr = fromOpt ? resolveFromAddress(fromOpt) : null;
+    const toAddr = toOpt ? resolveToAddress(toOpt) : null;
 
     // If no addresses on either side, just place adjacent without transport
     if (!fromAddr || !toAddr) return;

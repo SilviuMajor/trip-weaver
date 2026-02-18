@@ -59,6 +59,18 @@ export const getEntryDayHours = (hours: string[] | null, entryStartTime?: string
   return { text: hours[googleIndex] ?? null, dayName, googleIndex };
 };
 
+/** Resolve the address where you END UP after completing this entry (flight → arrival airport) */
+export function resolveFromAddress(opt: { category?: string | null; address?: string | null; location_name?: string | null; arrival_location?: string | null }): string | null {
+  if (opt.category === 'flight') return opt.arrival_location || null;
+  return opt.address || opt.location_name || opt.arrival_location || null;
+}
+
+/** Resolve the address where you NEED TO BE for this entry (flight → departure airport) */
+export function resolveToAddress(opt: { category?: string | null; address?: string | null; location_name?: string | null; departure_location?: string | null }): string | null {
+  if (opt.category === 'flight') return opt.departure_location || null;
+  return opt.address || opt.location_name || opt.departure_location || null;
+}
+
 export function formatTimeInTz(isoString: string, tz: string): string {
   const d = new Date(isoString);
   return d.toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
