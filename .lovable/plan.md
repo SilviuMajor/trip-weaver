@@ -1,39 +1,64 @@
 
-# Three Transport Fixes
 
-## Fix 1: TransportOverlay — Desktop Dialog, Mobile Drawer
+# Fix Flight Card Timezone Offset Bug
 
-**File**: `src/components/timeline/TransportOverlay.tsx`
+## Problem
+After a timezone-crossing flight, all subsequent entries appear visually offset by the timezone delta. A London-to-Amsterdam flight (1h difference) creates a false 1-hour gap between the flight card bottom and the first post-flight entry.
 
-Replace the `Sheet`/`SheetContent` wrapper with a responsive pattern using `useIsMobile()`:
-- Import `useIsMobile` from `@/hooks/use-mobile`
-- Import `Dialog`, `DialogContent` from `@/components/ui/dialog`
-- Import `Drawer`, `DrawerContent` from `@/components/ui/drawer`
-- Remove `Sheet`/`SheetContent`/`SheetHeader`/`SheetTitle`/`SheetDescription` imports
-- Extract all inner content (header through footer) into a `content` variable
-- On mobile: wrap in `Drawer` + `DrawerContent`
-- On desktop: wrap in `Dialog` + `DialogContent` with `sm:max-w-sm p-0`
+## Root Cause
+Flight end positions are calculated using departure timezone math (`depHour + utcDurH`) instead of computing the arrival hour in the arrival timezone.
 
-## Fix 2: Overflow Connector Z-Index
+## Changes
 
-**File**: `src/components/timeline/ContinuousTimeline.tsx` (line 1310)
+### 1. `src/pages/Timeline.tsx` (line 634)
 
-Change the connector container z-index from `gapPx < 14 ? 5 : 12` to `gapPx < 14 ? 25 : 12`. This ensures overflow connectors (22px band on tiny gaps) paint above adjacent cards which sit at z-10.
+In the `dayTimezoneMap` useMemo, replace:
+```
+flightEndHour: depHour + utcDurH,
+```
+with:
+```
+flightEndHour: getHour(f.end_time, opt.arrival_tz!),
+```
 
-**File**: `src/components/timeline/TransportConnector.tsx` (line 67)
+The `getHour` helper is already defined at line 621 and accepts any ISO string + timezone.
 
-Fix the `topOffset` calculation. Currently `-(22 - gapHeight) / 2` which is correct but should use `(gapHeight - 22) / 2` for clarity (same value, negative). No functional change needed — the current formula already produces the correct negative offset.
+### 2. `src/components/timeline/ContinuousTimeline.tsx` (lines 217-223)
 
-## Fix 3: Cog Position — After Emoji and Duration
+In `getEntryGlobalHours`, replace the flight branch:
+```typescript
+if (isFlight) {
+  const depTz = opt.departure_tz!;
+  const dayIdx = findDayIndex(entry.start_time, depTz);
+  const startLocal = getHourInTimezone(entry.start_time, depTz);
+  const startGH = dayIdx * 24 + startLocal;
+  const utcDurH = (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 3600000;
+  return { startGH, endGH: startGH + utcDurH, resolvedTz: depTz };
+}
+```
+with:
+```typescript
+if (isFlight) {
+  const depTz = opt.departure_tz!;
+  const arrTz = opt.arrival_tz!;
+  const dayIdx = findDayIndex(entry.start_time, depTz);
+  const startLocal = getHourInTimezone(entry.start_time, depTz);
+  const startGH = dayIdx * 24 + startLocal;
+  const endLocal = getHourInTimezone(entry.end_time, arrTz);
+  const endDayIdx = findDayIndex(entry.end_time, arrTz);
+  const endGH = endDayIdx * 24 + endLocal;
+  return { startGH, endGH, resolvedTz: depTz };
+}
+```
 
-**File**: `src/components/timeline/TransportConnector.tsx` (lines 119-133)
-
-Reorder the text row elements from: `[cog, emoji, duration, destination]` to: `[emoji, duration, cog, destination]`
-
-Move the `<button>` containing the Settings icon to after the duration `<span>`, before the destination `<span>`.
+This handles red-eye/long-haul flights arriving on a different calendar day by using `findDayIndex` for the end time separately.
 
 ## Files Modified
+- `src/pages/Timeline.tsx` -- 1 line changed (line 634)
+- `src/components/timeline/ContinuousTimeline.tsx` -- flight branch rewritten (lines 217-223)
 
-- `src/components/timeline/TransportOverlay.tsx` — responsive Dialog/Drawer wrapper
-- `src/components/timeline/ContinuousTimeline.tsx` — overflow z-index bump (line 1310)
-- `src/components/timeline/TransportConnector.tsx` — reorder text row elements
+## What Is NOT Changed
+- `resolveEntryTz` in `timezoneUtils.ts` (uses UTC comparison, already correct)
+- Non-flight entry positioning (already uses correct resolved timezone)
+- `resolveGlobalHourTz` (consumes `flightEndHour` which will now be correct)
+- Drag commit handler (already correct)
