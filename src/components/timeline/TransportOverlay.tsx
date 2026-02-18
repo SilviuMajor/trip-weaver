@@ -1,5 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Drawer, DrawerContent } from '@/components/ui/drawer';
 import { Settings, Loader2, RefreshCw, Trash2, MapPin, Navigation, Car } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
@@ -58,6 +60,7 @@ const detectMode = (name: string): string => {
 export default function TransportOverlay({
   open, onClose, entry, option, formatTime, onSaved, onDelete,
 }: TransportOverlayProps) {
+  const isMobile = useIsMobile();
   const [selectedMode, setSelectedMode] = useState(() => detectMode(option.name));
   const [switching, setSwitching] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -177,161 +180,176 @@ export default function TransportOverlay({
     onDelete?.();
   };
 
-  return (
-    <Sheet open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <SheetContent side="bottom" className="rounded-t-2xl px-4 pb-6 pt-4 max-h-[70vh] overflow-y-auto">
-        <SheetHeader className="mb-3">
-          <SheetTitle className="text-base font-semibold">
-            {fromShort} → {toShort}
-          </SheetTitle>
-          <SheetDescription className="text-xs text-muted-foreground">
-            {formatTime(entry.start_time)} – {formatTime(entry.end_time)}
-          </SheetDescription>
-        </SheetHeader>
+  const content = (
+    <div className="px-4 pb-6 pt-4 max-h-[70vh] overflow-y-auto">
+      {/* Header */}
+      <div className="mb-3">
+        <h3 className="text-base font-semibold">{fromShort} → {toShort}</h3>
+        <p className="text-xs text-muted-foreground">
+          {formatTime(entry.start_time)} – {formatTime(entry.end_time)}
+        </p>
+      </div>
 
-        {/* Mode Grid */}
-        {hasModes ? (
-          <div className="grid grid-cols-2 gap-2 mb-4">
-            {MODE_OPTIONS.map(({ mode, emoji, label }) => {
-              const data = allModes.find(m => m.mode === mode);
-              const isActive = mode === selectedMode;
-              const isSwitching = switching === mode;
-              const colors = MODE_COLORS[mode];
+      {/* Mode Grid */}
+      {hasModes ? (
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          {MODE_OPTIONS.map(({ mode, emoji, label }) => {
+            const data = allModes.find(m => m.mode === mode);
+            const isActive = mode === selectedMode;
+            const isSwitching = switching === mode;
+            const colors = MODE_COLORS[mode];
 
-              return (
-                <button
-                  key={mode}
-                  onClick={() => handleModeSwitch(mode)}
-                  disabled={!data || !!switching}
-                  className="relative rounded-xl p-3 text-left transition-all"
-                  style={{
-                    border: isActive ? `2px solid hsl(var(--primary))` : '2px solid transparent',
-                    background: data ? (isActive ? colors.bg : `${colors.bg.replace(/[\d.]+\)$/, '0.04)')}`) : undefined,
-                    opacity: data ? 1 : 0.4,
-                    cursor: data ? 'pointer' : 'not-allowed',
-                  }}
-                >
-                  <div className="flex items-start justify-between">
-                    <span className="text-[13px] font-medium" style={{ color: colors.text }}>
-                      {emoji} {label}
-                    </span>
-                    {data && (
-                      <span className="text-[17px] font-bold leading-tight" style={{ color: colors.text }}>
-                        {fmtDur(data.duration_min)}
-                      </span>
-                    )}
-                  </div>
-                  {data ? (
-                    <div className="text-[11px] text-muted-foreground mt-0.5">
-                      {fmtDist(data.distance_km)}
-                    </div>
-                  ) : (
-                    <div className="text-[11px] text-muted-foreground/50 mt-0.5">Unavailable</div>
-                  )}
-                  {isSwitching && (
-                    <Loader2 className="absolute top-2 right-2 h-4 w-4 animate-spin text-muted-foreground" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center py-6 mb-4 rounded-xl border border-dashed border-muted-foreground/30">
-            <p className="text-sm text-muted-foreground mb-3">No route data available</p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefreshRoutes}
-              disabled={refreshing}
-            >
-              {refreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-              Refresh routes
-            </Button>
-          </div>
-        )}
-
-        {/* Route Map */}
-        {(selectedModeData?.polyline || (option as any).route_polyline) ? (
-          <div className="mb-4 rounded-xl overflow-hidden border border-border" style={{ height: 160 }}>
-            <RouteMapPreview
-              polyline={selectedModeData?.polyline || (option as any).route_polyline || ''}
-              fromAddress={fromAddr}
-              toAddress={toAddr}
-              travelMode={selectedMode}
-              size="full"
-              destLat={destCoords?.lat}
-              destLng={destCoords?.lng}
-              destName={toShort}
-              className="h-full [&>div:first-child]:h-full [&_img]:h-full"
-            />
-          </div>
-        ) : (
-          <div className="mb-4 rounded-xl border border-border bg-muted/30 flex items-center justify-center" style={{ height: 160 }}>
-            <p className="text-xs text-muted-foreground">No route available</p>
-          </div>
-        )}
-
-        {/* Deep Links */}
-        <div className="mb-4">
-          <p className="text-[11px] font-medium text-muted-foreground mb-2 uppercase tracking-wide">Open directions</p>
-          <div className="flex gap-2">
-            <a
-              href={googleMapsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 flex flex-col items-center gap-1 py-2 px-2 rounded-xl border border-border bg-muted/30 hover:bg-muted/50 transition-colors"
-            >
-              <MapPin className="h-[18px] w-[18px] text-foreground" />
-              <span className="text-[10px] font-bold text-foreground">Google Maps</span>
-            </a>
-            {!isAndroid && (
-              <a
-                href={appleMapsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 flex flex-col items-center gap-1 py-2 px-2 rounded-xl border border-border bg-muted/30 hover:bg-muted/50 transition-colors"
+            return (
+              <button
+                key={mode}
+                onClick={() => handleModeSwitch(mode)}
+                disabled={!data || !!switching}
+                className="relative rounded-xl p-3 text-left transition-all"
+                style={{
+                  border: isActive ? `2px solid hsl(var(--primary))` : '2px solid transparent',
+                  background: data ? (isActive ? colors.bg : `${colors.bg.replace(/[\d.]+\)$/, '0.04)')}`) : undefined,
+                  opacity: data ? 1 : 0.4,
+                  cursor: data ? 'pointer' : 'not-allowed',
+                }}
               >
-                <Navigation className="h-[18px] w-[18px] text-foreground" />
-                <span className="text-[10px] font-bold text-foreground">Apple Maps</span>
-              </a>
-            )}
-            <a
-              href={uberUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 flex flex-col items-center gap-1 py-2 px-2 rounded-xl border border-border bg-muted/30 hover:bg-muted/50 transition-colors"
-            >
-              <Car className="h-[18px] w-[18px] text-foreground" />
-              <span className="text-[10px] font-bold text-foreground">Uber</span>
-            </a>
-          </div>
+                <div className="flex items-start justify-between">
+                  <span className="text-[13px] font-medium" style={{ color: colors.text }}>
+                    {emoji} {label}
+                  </span>
+                  {data && (
+                    <span className="text-[17px] font-bold leading-tight" style={{ color: colors.text }}>
+                      {fmtDur(data.duration_min)}
+                    </span>
+                  )}
+                </div>
+                {data ? (
+                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                    {fmtDist(data.distance_km)}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-muted-foreground/50 mt-0.5">Unavailable</div>
+                )}
+                {isSwitching && (
+                  <Loader2 className="absolute top-2 right-2 h-4 w-4 animate-spin text-muted-foreground" />
+                )}
+              </button>
+            );
+          })}
         </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between pt-2 border-t border-border">
+      ) : (
+        <div className="flex flex-col items-center justify-center py-6 mb-4 rounded-xl border border-dashed border-muted-foreground/30">
+          <p className="text-sm text-muted-foreground mb-3">No route data available</p>
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             onClick={handleRefreshRoutes}
             disabled={refreshing}
-            className="text-xs"
           >
-            {refreshing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+            {refreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
             Refresh routes
           </Button>
-          {onDelete && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleDelete}
-              className="text-xs text-destructive hover:text-destructive"
-            >
-              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-              Remove
-            </Button>
-          )}
         </div>
-      </SheetContent>
-    </Sheet>
+      )}
+
+      {/* Route Map */}
+      {(selectedModeData?.polyline || (option as any).route_polyline) ? (
+        <div className="mb-4 rounded-xl overflow-hidden border border-border" style={{ height: 160 }}>
+          <RouteMapPreview
+            polyline={selectedModeData?.polyline || (option as any).route_polyline || ''}
+            fromAddress={fromAddr}
+            toAddress={toAddr}
+            travelMode={selectedMode}
+            size="full"
+            destLat={destCoords?.lat}
+            destLng={destCoords?.lng}
+            destName={toShort}
+            className="h-full [&>div:first-child]:h-full [&_img]:h-full"
+          />
+        </div>
+      ) : (
+        <div className="mb-4 rounded-xl border border-border bg-muted/30 flex items-center justify-center" style={{ height: 160 }}>
+          <p className="text-xs text-muted-foreground">No route available</p>
+        </div>
+      )}
+
+      {/* Deep Links */}
+      <div className="mb-4">
+        <p className="text-[11px] font-medium text-muted-foreground mb-2 uppercase tracking-wide">Open directions</p>
+        <div className="flex gap-2">
+          <a
+            href={googleMapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 flex flex-col items-center gap-1 py-2 px-2 rounded-xl border border-border bg-muted/30 hover:bg-muted/50 transition-colors"
+          >
+            <MapPin className="h-[18px] w-[18px] text-foreground" />
+            <span className="text-[10px] font-bold text-foreground">Google Maps</span>
+          </a>
+          {!isAndroid && (
+            <a
+              href={appleMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex flex-col items-center gap-1 py-2 px-2 rounded-xl border border-border bg-muted/30 hover:bg-muted/50 transition-colors"
+            >
+              <Navigation className="h-[18px] w-[18px] text-foreground" />
+              <span className="text-[10px] font-bold text-foreground">Apple Maps</span>
+            </a>
+          )}
+          <a
+            href={uberUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 flex flex-col items-center gap-1 py-2 px-2 rounded-xl border border-border bg-muted/30 hover:bg-muted/50 transition-colors"
+          >
+            <Car className="h-[18px] w-[18px] text-foreground" />
+            <span className="text-[10px] font-bold text-foreground">Uber</span>
+          </a>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between pt-2 border-t border-border">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleRefreshRoutes}
+          disabled={refreshing}
+          className="text-xs"
+        >
+          {refreshing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+          Refresh routes
+        </Button>
+        {onDelete && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleDelete}
+            className="text-xs text-destructive hover:text-destructive"
+          >
+            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+            Remove
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+        <DrawerContent className="rounded-t-2xl">
+          {content}
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-sm p-0">
+        {content}
+      </DialogContent>
+    </Dialog>
   );
 }
