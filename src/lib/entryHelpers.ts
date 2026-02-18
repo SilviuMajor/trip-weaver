@@ -60,14 +60,22 @@ export const getEntryDayHours = (hours: string[] | null, entryStartTime?: string
 };
 
 /** Resolve the address where you END UP after completing this entry (flight → arrival airport) */
-export function resolveFromAddress(opt: { category?: string | null; address?: string | null; location_name?: string | null; arrival_location?: string | null }): string | null {
-  if (opt.category === 'flight') return opt.arrival_location || null;
+export function resolveFromAddress(opt: { category?: string | null; latitude?: number | null; longitude?: number | null; address?: string | null; location_name?: string | null; arrival_location?: string | null }): string | null {
+  if (opt.category === 'flight') {
+    if (opt.latitude != null && opt.longitude != null) return `${opt.latitude},${opt.longitude}`;
+    return opt.arrival_location || null;
+  }
+  if (opt.latitude != null && opt.longitude != null) return `${opt.latitude},${opt.longitude}`;
   return opt.address || opt.location_name || opt.arrival_location || null;
 }
 
 /** Resolve the address where you NEED TO BE for this entry (flight → departure airport) */
-export function resolveToAddress(opt: { category?: string | null; address?: string | null; location_name?: string | null; departure_location?: string | null }): string | null {
-  if (opt.category === 'flight') return opt.departure_location || null;
+export function resolveToAddress(opt: { category?: string | null; latitude?: number | null; longitude?: number | null; address?: string | null; location_name?: string | null; departure_location?: string | null }): string | null {
+  if (opt.category === 'flight') {
+    if (opt.latitude != null && opt.longitude != null) return `${opt.latitude},${opt.longitude}`;
+    return opt.departure_location || null;
+  }
+  if (opt.latitude != null && opt.longitude != null) return `${opt.latitude},${opt.longitude}`;
   return opt.address || opt.location_name || opt.departure_location || null;
 }
 

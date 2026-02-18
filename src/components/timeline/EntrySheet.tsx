@@ -129,6 +129,10 @@ const EntrySheet = ({
   const [arrivalTz, setArrivalTz] = useState('Europe/Amsterdam');
   const [departureTerminal, setDepartureTerminal] = useState('');
   const [arrivalTerminal, setArrivalTerminal] = useState('');
+  const [departureLat, setDepartureLat] = useState<number | null>(null);
+  const [departureLng, setDepartureLng] = useState<number | null>(null);
+  const [arrivalLat, setArrivalLat] = useState<number | null>(null);
+  const [arrivalLng, setArrivalLng] = useState<number | null>(null);
   const [checkinHours, setCheckinHours] = useState(2);
   const [checkoutMin, setCheckoutMin] = useState(30);
 
@@ -342,6 +346,10 @@ const EntrySheet = ({
     setPlaceGoogleMapsUri(null);
     setPlaceGooglePlaceId(null);
     setPlacePriceLevel(null);
+    setDepartureLat(null);
+    setDepartureLng(null);
+    setArrivalLat(null);
+    setArrivalLng(null);
   };
 
   // Transport gap auto-fill
@@ -446,12 +454,12 @@ const EntrySheet = ({
     if (flight.arrival_time) setEndTime(flight.arrival_time);
     if (flight.departure_airport) {
       const apt = AIRPORTS.find(a => a.iata === flight.departure_airport.toUpperCase());
-      if (apt) { setDepartureLocation(`${apt.iata} - ${apt.name}`); setDepartureTz(apt.timezone); }
+      if (apt) { setDepartureLocation(`${apt.iata} - ${apt.name}`); setDepartureTz(apt.timezone); setDepartureLat(apt.lat); setDepartureLng(apt.lng); }
       else setDepartureLocation(flight.departure_airport);
     }
     if (flight.arrival_airport) {
       const apt = AIRPORTS.find(a => a.iata === flight.arrival_airport.toUpperCase());
-      if (apt) { setArrivalLocation(`${apt.iata} - ${apt.name}`); setArrivalTz(apt.timezone); }
+      if (apt) { setArrivalLocation(`${apt.iata} - ${apt.name}`); setArrivalTz(apt.timezone); setArrivalLat(apt.lat); setArrivalLng(apt.lng); }
       else setArrivalLocation(flight.arrival_airport);
     }
     if (flight.date) setDate(flight.date);
@@ -510,11 +518,15 @@ const EntrySheet = ({
   const handleDepartureAirportChange = (airport: Airport) => {
     setDepartureLocation(`${airport.iata} - ${airport.name}`);
     setDepartureTz(airport.timezone);
+    setDepartureLat(airport.lat);
+    setDepartureLng(airport.lng);
   };
 
   const handleArrivalAirportChange = (airport: Airport) => {
     setArrivalLocation(`${airport.iata} - ${airport.name}`);
     setArrivalTz(airport.timezone);
+    setArrivalLat(airport.lat);
+    setArrivalLng(airport.lng);
   };
 
   const calcTransferDuration = async () => {
@@ -661,7 +673,7 @@ const EntrySheet = ({
         await supabase.from('entry_options').update({
           name: name.trim(), website: website.trim() || null,
           category: cat ? cat.id : null, category_color: cat?.color ?? null,
-          location_name: locationName.trim() || null, latitude, longitude,
+          location_name: locationName.trim() || null, latitude: isFlight ? arrivalLat : latitude, longitude: isFlight ? arrivalLng : longitude,
           departure_location: isFlight ? (departureLocation.trim() || null) : isTransfer ? (transferFrom.trim() || null) : null,
           arrival_location: isFlight ? (arrivalLocation.trim() || null) : isTransfer ? (transferTo.trim() || null) : null,
           departure_tz: isFlight ? departureTz : null, arrival_tz: isFlight ? arrivalTz : null,
@@ -676,7 +688,7 @@ const EntrySheet = ({
         const optionPayload: any = {
           entry_id: entryId, name: name.trim(), website: website.trim() || null,
           category: cat ? cat.id : null, category_color: cat?.color ?? null,
-          location_name: locationName.trim() || null, latitude, longitude,
+          location_name: locationName.trim() || null, latitude: isFlight ? arrivalLat : latitude, longitude: isFlight ? arrivalLng : longitude,
           departure_location: isFlight ? (departureLocation.trim() || null) : isTransfer ? (transferFrom.trim() || null) : null,
           arrival_location: isFlight ? (arrivalLocation.trim() || null) : isTransfer ? (transferTo.trim() || null) : null,
           departure_tz: isFlight ? departureTz : null, arrival_tz: isFlight ? arrivalTz : null,
@@ -724,13 +736,15 @@ const EntrySheet = ({
         } as any).select('id').single();
 
         if (linkedEntryCheckin.data) {
-          const depIata = departureLocation.split(' - ')[0]?.trim();
           await supabase.from('entry_options').insert({
             entry_id: linkedEntryCheckin.data.id,
-            name: `Check in · ${depIata || 'Airport'}`,
+            name: `Check in · ${departureLocation.split(' - ')[0]?.trim() || 'Airport'}`,
             category: 'airport_processing',
             category_color: 'hsl(210, 50%, 55%)',
             departure_location: departureLocation,
+            location_name: departureLocation,
+            latitude: departureLat,
+            longitude: departureLng,
           } as any);
         }
 
@@ -743,13 +757,15 @@ const EntrySheet = ({
         } as any).select('id').single();
 
         if (linkedEntryCheckout.data) {
-          const arrIata = arrivalLocation.split(' - ')[0]?.trim();
           await supabase.from('entry_options').insert({
             entry_id: linkedEntryCheckout.data.id,
-            name: `Check out · ${arrIata || 'Airport'}`,
+            name: `Check out · ${arrivalLocation.split(' - ')[0]?.trim() || 'Airport'}`,
             category: 'airport_processing',
             category_color: 'hsl(210, 50%, 55%)',
             arrival_location: arrivalLocation,
+            location_name: arrivalLocation,
+            latitude: arrivalLat,
+            longitude: arrivalLng,
           } as any);
         }
 
@@ -813,6 +829,15 @@ const EntrySheet = ({
     setArrivalTz(returnFlightData.arrivalTz);
     setDepartureTerminal('');
     setArrivalTerminal('');
+    // Swap coordinates for return flight by looking up from AIRPORTS
+    const depIata = returnFlightData.departureLocation.split(' - ')[0]?.trim();
+    const arrIata = returnFlightData.arrivalLocation.split(' - ')[0]?.trim();
+    const depApt = AIRPORTS.find(a => a.iata === depIata);
+    const arrApt = AIRPORTS.find(a => a.iata === arrIata);
+    setDepartureLat(depApt?.lat ?? null);
+    setDepartureLng(depApt?.lng ?? null);
+    setArrivalLat(arrApt?.lat ?? null);
+    setArrivalLng(arrApt?.lng ?? null);
     setWebsite(''); setLocationName(''); setTransferFrom(''); setTransferTo('');
     setDate(''); setSelectedDay('0');
     const cat = PREDEFINED_CATEGORIES.find(c => c.id === 'flight');
