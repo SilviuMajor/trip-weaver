@@ -1222,6 +1222,9 @@ const Timeline = () => {
         e.options[0]?.category === 'transfer'
       );
 
+      const transportDbPromises: Promise<any>[] = [];
+      const transportDeletions: Promise<any>[] = [];
+
       for (const transport of linkedTransports) {
         const fromId = transport.from_entry_id;
         const toId = transport.to_entry_id;
@@ -1243,17 +1246,23 @@ const Timeline = () => {
         if (gapMin > 90) {
           // Cards moved too far apart — delete transport locally then from DB
           setEntries(prev => prev.filter(e => e.id !== transport.id));
-          await supabase.from('entry_options').delete().eq('entry_id', transport.id);
-          await supabase.from('entries').delete().eq('id', transport.id);
+          transportDeletions.push(
+            supabase.from('entry_options').delete().eq('entry_id', transport.id)
+              .then(() => supabase.from('entries').delete().eq('id', transport.id) as any) as any
+          );
         } else {
           // Reposition transport: optimistic local + DB
           const transportDurationMs = new Date(transport.end_time).getTime() - new Date(transport.start_time).getTime();
           const newTransportStart = fromEndTime;
           const newTransportEnd = new Date(new Date(newTransportStart).getTime() + transportDurationMs).toISOString();
           updateEntryLocally(transport.id, { start_time: newTransportStart, end_time: newTransportEnd });
-          await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
+          transportDbPromises.push(
+            supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id) as any
+          );
         }
       }
+
+      await Promise.all([...transportDbPromises, ...transportDeletions]);
 
       // Check if we need to create NEW transport entries for newly-adjacent cards
       const updatedEntries = entries.map(e => e.id === entryId ? { ...e, start_time: newStartIso, end_time: newEndIso } : e);

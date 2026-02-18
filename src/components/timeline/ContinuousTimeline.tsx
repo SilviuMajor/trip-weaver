@@ -277,6 +277,19 @@ const ContinuousTimeline = ({
     );
   }, [scheduledEntries]);
 
+  // Memoized map: compute getEntryGlobalHours ONCE per entry per render
+  const entryGlobalHoursMap = useMemo(() => {
+    const map = new Map<string, { startGH: number; endGH: number; resolvedTz: string }>();
+    for (const entry of sortedEntries) {
+      map.set(entry.id, getEntryGlobalHours(entry));
+    }
+    return map;
+  }, [sortedEntries, getEntryGlobalHours]);
+
+  const getEntryGH = useCallback((entry: EntryWithOptions): { startGH: number; endGH: number; resolvedTz: string } => {
+    return entryGlobalHoursMap.get(entry.id) ?? getEntryGlobalHours(entry);
+  }, [entryGlobalHoursMap, getEntryGlobalHours]);
+
   // Drag commit handler: convert global hours back to day/local/UTC
   const handleDragCommit = useCallback((entryId: string, newStartGH: number, newEndGH: number, tz?: string, _targetDay?: Date, dragType?: DragType, clientX?: number, clientY?: number) => {
     // Group drop: shift all entries in the block by the same delta
@@ -503,21 +516,21 @@ const ContinuousTimeline = ({
     const targets: SnapTarget[] = [];
     for (const entry of sortedEntries) {
       if (!isTransportEntry(entry)) continue;
-      const gh = getEntryGlobalHours(entry);
+      const gh = getEntryGH(entry);
       targets.push({
         globalHour: gh.endGH,
         label: `After ${entry.options[0]?.name || 'transport'}`,
       });
     }
     return targets;
-  }, [sortedEntries, getEntryGlobalHours, isTransportEntry]);
+  }, [sortedEntries, getEntryGH, isTransportEntry]);
 
   // Locked boundaries: locked cards act as walls during drag
   const lockedBoundaries = useMemo((): LockedBoundary[] => {
     return sortedEntries
       .filter(e => e.is_locked && !e.linked_flight_id)
       .map(e => {
-        const gh = getEntryGlobalHours(e);
+        const gh = getEntryGH(e);
         let startGH = gh.startGH;
         let endGH = gh.endGH;
         const group = flightGroupMap.get(e.id);
@@ -533,7 +546,7 @@ const ContinuousTimeline = ({
         }
         return { startGH, endGH, entryId: e.id };
       });
-  }, [sortedEntries, getEntryGlobalHours, flightGroupMap]);
+  }, [sortedEntries, getEntryGH, flightGroupMap]);
 
   const { dragState, wasDraggedRef, clientXRef, clientYRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
     pixelsPerHour,
@@ -586,8 +599,8 @@ const ContinuousTimeline = ({
     for (let i = 0; i < visibleEntries.length - 1; i++) {
       const from = visibleEntries[i];
       const to = visibleEntries[i + 1];
-      const fromGH = getEntryGlobalHours(from);
-      const toGH = getEntryGlobalHours(to);
+      const fromGH = getEntryGH(from);
+      const toGH = getEntryGH(to);
 
       // Check if a transport entry exists between these two
       const transportEntry = sortedEntries.find(e => {
@@ -656,7 +669,7 @@ const ContinuousTimeline = ({
       }
     }
     return connectors;
-  }, [visibleEntries, sortedEntries, getEntryGlobalHours, flightGroupMap]);
+  }, [visibleEntries, sortedEntries, getEntryGH, flightGroupMap]);
 
   // First hint-eligible entry index
   const firstHintIndex = useMemo(() => {
@@ -675,8 +688,8 @@ const ContinuousTimeline = ({
       const b = sortedEntries[i + 1];
       if (linkedEntryIds.has(a.id) || linkedEntryIds.has(b.id)) continue;
       if (isTransportEntry(a) || isTransportEntry(b)) continue;
-      const aGH = getEntryGlobalHours(a);
-      const bGH = getEntryGlobalHours(b);
+      const aGH = getEntryGH(a);
+      const bGH = getEntryGH(b);
       if (aGH.endGH > bGH.startGH) {
         const overlapMin = Math.round((aGH.endGH - bGH.startGH) * 60);
         map.set(a.id, { minutes: overlapMin, position: 'bottom' });
@@ -684,14 +697,14 @@ const ContinuousTimeline = ({
       }
     }
     return map;
-  }, [sortedEntries, linkedEntryIds, getEntryGlobalHours]);
+  }, [sortedEntries, linkedEntryIds, getEntryGH]);
 
   // Overlap layout for horizontal offset (Google Calendar style)
   const overlapLayout = useMemo(() => {
     const layoutEntries = sortedEntries
       .filter(e => !linkedEntryIds.has(e.id) && !isTransportEntry(e))
       .map(e => {
-        const gh = getEntryGlobalHours(e);
+        const gh = getEntryGH(e);
         return { id: e.id, startMinutes: gh.startGH * 60, endMinutes: gh.endGH * 60 };
       });
     const results = computeOverlapLayout(layoutEntries);
@@ -702,7 +715,7 @@ const ContinuousTimeline = ({
       }
     }
     return map;
-  }, [sortedEntries, linkedEntryIds, getEntryGlobalHours]);
+  }, [sortedEntries, linkedEntryIds, getEntryGH]);
 
   // Snap detection during move drag
   const snapTarget = useMemo(() => {
@@ -721,8 +734,8 @@ const ContinuousTimeline = ({
         .map(id => sortedEntries.find(e => e.id === id))
         .filter(Boolean) as EntryWithOptions[];
       if (blockEntries.length === 0) return null;
-      const firstGH = getEntryGlobalHours(blockEntries[0]);
-      const lastGH = getEntryGlobalHours(blockEntries[blockEntries.length - 1]);
+      const firstGH = getEntryGH(blockEntries[0]);
+      const lastGH = getEntryGH(blockEntries[blockEntries.length - 1]);
       const delta = dragState.currentStartHour - dragState.originalStartHour;
       dragStart = firstGH.startGH + delta;
       dragEnd = lastGH.endGH + delta;
@@ -743,7 +756,7 @@ const ContinuousTimeline = ({
       if (isGroupDrag && blockEntryIds.includes(entry.id)) continue;
       if (entry.options[0]?.category === 'transfer') continue;
 
-      const gh = getEntryGlobalHours(entry);
+      const gh = getEntryGH(entry);
 
       // Snap BELOW this entry (dragged card/group goes after it)
       const distBelow = Math.abs(dragStart - gh.endGH);
@@ -769,7 +782,7 @@ const ContinuousTimeline = ({
     }
 
     return bestSnap;
-  }, [dragState, sortedEntries, getEntryGlobalHours]);
+  }, [dragState, sortedEntries, getEntryGH]);
 
   // Keep ref in sync for handleDragCommit
   snapTargetRef.current = snapTarget;
@@ -893,7 +906,7 @@ const ContinuousTimeline = ({
         const cardWidth = gridRect ? gridRect.width - 4 : 220;
         const origEntry = sortedEntries.find(e => e.id === dragState.entryId);
         if (origEntry) {
-          const gh = getEntryGlobalHours(origEntry);
+          const gh = getEntryGH(origEntry);
           const moveHeight = (gh.endGH - gh.startGH) * pixelsPerHour;
 
           const cx = clientXRef.current;
@@ -1077,7 +1090,7 @@ const ContinuousTimeline = ({
           if (dragState) {
             const dragEntry = sortedEntries.find(e => e.id === dragState.entryId);
             if (dragEntry) {
-              const origGH = getEntryGlobalHours(dragEntry);
+              const origGH = getEntryGH(dragEntry);
               const durationGH = origGH.endGH - origGH.startGH;
               if (dragState.type === 'move') {
                 const startPx = dragState.currentStartHour * pixelsPerHour;
@@ -1271,8 +1284,8 @@ const ContinuousTimeline = ({
           if (idx >= visibleEntries.length - 1) return null;
           const nextEntry = visibleEntries[idx + 1];
 
-          const aGH = getEntryGlobalHours(entry);
-          const bGH = getEntryGlobalHours(nextEntry);
+          const aGH = getEntryGH(entry);
+          const bGH = getEntryGH(nextEntry);
 
           // Use flight group bounds
           const aGroup = flightGroupMap.get(entry.id);
@@ -1434,9 +1447,9 @@ const ContinuousTimeline = ({
           if (isResizing && dragState) {
             entryStartGH = dragState.currentStartHour;
             entryEndGH = dragState.currentEndHour;
-            resolvedTz = getEntryGlobalHours(entry).resolvedTz;
+            resolvedTz = getEntryGH(entry).resolvedTz;
           } else {
-            entryGH = getEntryGlobalHours(entry);
+            entryGH = getEntryGH(entry);
             entryStartGH = entryGH.startGH;
             entryEndGH = entryGH.endGH;
             resolvedTz = entryGH.resolvedTz;
@@ -1479,19 +1492,19 @@ const ContinuousTimeline = ({
           // Adjacency checks for resize handle pill visibility
           const hasEntryDirectlyAbove = sortedEntries.some((other, j) => {
             if (j === index) return false;
-            const otherGH = getEntryGlobalHours(other);
+            const otherGH = getEntryGH(other);
             return Math.abs(otherGH.endGH - groupStartGH) * 60 < 2;
           });
           const hasEntryDirectlyBelow = sortedEntries.some((other, j) => {
             if (j === index) return false;
-            const otherGH = getEntryGlobalHours(other);
+            const otherGH = getEntryGH(other);
             return Math.abs(otherGH.startGH - groupEndGH) * 60 < 2;
           });
 
           const isBeingDragged = dragState?.entryId === entry.id && dragState?.type === 'move';
 
           // Drag hours for init (global coordinates)
-          const origGH = getEntryGlobalHours(entry);
+          const origGH = getEntryGH(entry);
           const origStartGH = origGH.startGH;
           const origEndGH = origGH.endGH;
           const dragTz = resolvedTz;
@@ -1861,13 +1874,13 @@ const ContinuousTimeline = ({
             const blockIds = (dragState as any).blockEntryIds as string[];
             const blockEntries = blockIds.map((id: string) => sortedEntries.find(e => e.id === id)).filter(Boolean) as EntryWithOptions[];
             if (blockEntries.length === 0) return null;
-            const firstGH = getEntryGlobalHours(blockEntries[0]);
-            const lastGH = getEntryGlobalHours(blockEntries[blockEntries.length - 1]);
+            const firstGH = getEntryGH(blockEntries[0]);
+            const lastGH = getEntryGH(blockEntries[blockEntries.length - 1]);
             const delta = (snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour) - dragState.originalStartHour;
             startGH = firstGH.startGH + delta;
             endGH = lastGH.endGH + delta;
           } else {
-            const origGH = getEntryGlobalHours(entry);
+            const origGH = getEntryGH(entry);
             const durationGH = origGH.endGH - origGH.startGH;
             startGH = snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour;
             endGH = startGH + durationGH;
@@ -1942,14 +1955,14 @@ const ContinuousTimeline = ({
               .map((id: string) => sortedEntries.find(e => e.id === id))
               .filter(Boolean) as EntryWithOptions[];
             if (blockEntries.length === 0) return null;
-            const firstGH = getEntryGlobalHours(blockEntries[0]);
-            const lastGH = getEntryGlobalHours(blockEntries[blockEntries.length - 1]);
+            const firstGH = getEntryGH(blockEntries[0]);
+            const lastGH = getEntryGH(blockEntries[blockEntries.length - 1]);
             const delta = (snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour) - dragState.originalStartHour;
             ghostStartGH = firstGH.startGH + delta;
             const groupDuration = lastGH.endGH - firstGH.startGH;
             ghostHeight = groupDuration * pixelsPerHour;
           } else {
-            const origGH = getEntryGlobalHours(entry);
+            const origGH = getEntryGH(entry);
             const durationGH = origGH.endGH - origGH.startGH;
             ghostStartGH = snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour;
             ghostHeight = durationGH * pixelsPerHour;
@@ -1963,7 +1976,7 @@ const ContinuousTimeline = ({
               {isSnapped && (() => {
                 const targetEntry = sortedEntries.find(e => e.id === snapTarget!.entryId);
                 if (!targetEntry) return null;
-                const targetGH = getEntryGlobalHours(targetEntry);
+                const targetGH = getEntryGH(targetEntry);
                 const connectorTop = snapTarget!.side === 'below'
                   ? targetGH.endGH * pixelsPerHour
                   : ghostTop + ghostHeight;
@@ -2027,7 +2040,7 @@ const ContinuousTimeline = ({
           if (!entry) return null;
           const opt = entry.options[0];
           if (!opt) return null;
-          const origGH = getEntryGlobalHours(entry);
+          const origGH = getEntryGH(entry);
           const durationGH = origGH.endGH - origGH.startGH;
           const moveStartGH = snapTarget ? snapTarget.snapStartHour : dragState.currentStartHour;
           const moveTop = moveStartGH * pixelsPerHour;
@@ -2081,15 +2094,15 @@ const ContinuousTimeline = ({
           const blockIds = (dragState as any).blockEntryIds as string[];
           const blockEntries = blockIds.map((id: string) => sortedEntries.find(e => e.id === id)).filter(Boolean) as EntryWithOptions[];
           if (blockEntries.length > 0) {
-            const firstGH = getEntryGlobalHours(blockEntries[0]);
-            const lastGH = getEntryGlobalHours(blockEntries[blockEntries.length - 1]);
+            const firstGH = getEntryGH(blockEntries[0]);
+            const lastGH = getEntryGH(blockEntries[blockEntries.length - 1]);
             moveHeight = (lastGH.endGH - firstGH.startGH) * pixelsPerHour;
           } else {
-            const origGH = getEntryGlobalHours(entry);
+            const origGH = getEntryGH(entry);
             moveHeight = (origGH.endGH - origGH.startGH) * pixelsPerHour;
           }
         } else {
-          const origGH = getEntryGlobalHours(entry);
+          const origGH = getEntryGH(entry);
           moveHeight = (origGH.endGH - origGH.startGH) * pixelsPerHour;
         }
 
