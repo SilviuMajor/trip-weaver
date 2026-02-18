@@ -246,33 +246,6 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
       }
     }
 
-    // Fallback: delta-based (if no scroll container)
-    const deltaPixels = clientY - state.startY;
-    const deltaHours = deltaPixels / pixelsPerHour;
-
-    let newStart = state.originalStartHour;
-    let newEnd = state.originalEndHour;
-
-    if (state.type === 'move') {
-      const duration = state.originalEndHour - state.originalStartHour;
-      newStart = snapToGrid(state.originalStartHour + deltaHours);
-      newEnd = newStart + duration;
-    } else if (state.type === 'resize-top') {
-      newStart = snapToGrid(state.originalStartHour + deltaHours);
-      newEnd = state.originalEndHour;
-      if (newStart >= newEnd - 0.25) newStart = newEnd - 0.25;
-    } else if (state.type === 'resize-bottom') {
-      newStart = state.originalStartHour;
-      newEnd = snapToGrid(state.originalEndHour + deltaHours);
-      if (newEnd <= newStart + 0.25) newEnd = newStart + 0.25;
-    }
-
-    if (newStart < 0) { newEnd -= newStart; newStart = 0; }
-    if (newEnd > totalHours) { newStart -= (newEnd - totalHours); newEnd = totalHours; }
-
-    const updated = { ...state, currentStartHour: newStart, currentEndHour: newEnd };
-    setDragState(updated);
-    dragStateRef.current = updated;
   }, [pixelsPerHour, startHour, totalHours, scrollContainerRef, gridTopPx]);
 
   const commitDrag = useCallback(() => {

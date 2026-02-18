@@ -1173,6 +1173,8 @@ const Timeline = () => {
   const handleEntryTimeChange = async (entryId: string, newStartIso: string, newEndIso: string) => {
     // Record undo action
     const entry = entries.find(e => e.id === entryId);
+    // Don't move locked entries (except flight sub-entries which move with their parent)
+    if (entry?.is_locked && !entry.linked_flight_id) return;
     if (entry) {
       const oldStart = entry.start_time;
       const oldEnd = entry.end_time;
@@ -1209,6 +1211,10 @@ const Timeline = () => {
           const fromId = transport.from_entry_id;
           const toId = transport.to_entry_id;
           if (!fromId || !toId) continue;
+
+          // Don't reposition transport if its destination is locked
+          const toEntry = entries.find(e => e.id === toId);
+          if (toEntry?.is_locked) continue;
 
           const fromEndTime = fromId === entryId ? newEndIso : (entries.find(e => e.id === fromId)?.end_time ?? null);
           const toStartTime = toId === entryId ? newStartIso : (entries.find(e => e.id === toId)?.start_time ?? null);
