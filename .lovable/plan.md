@@ -1,61 +1,51 @@
 
 
-# Rewrite TransportConnector + Update Rendering
+# Transport Connector Visual Redesign + Conflict Fix
 
-## Overview
-Replace the current minimal dot-line connector with a full-width colour-fill band that visually represents travel time vs buffer time. Add a "+" button for quick event insertion at the transport arrival time.
+## Part A: Fix False Conflicts
 
-## Changes
+### `ContinuousTimeline.tsx` -- overlapMap useMemo (line 603)
 
-### 1. Rewrite `src/components/timeline/TransportConnector.tsx`
+Add transport entry exclusion after the `linkedEntryIds` check:
 
-Complete rewrite with new props and visual design:
+```
+if (linkedEntryIds.has(a.id) || linkedEntryIds.has(b.id)) continue;
+if (isTransportEntry(a) || isTransportEntry(b)) continue;  // NEW
+```
 
-**Props**: Accept `entry`, `option` (EntryWithOptions/EntryOption types), `height`, `gapHeight`, `transportMinutes`, `gapMinutes`, `fromLabel`, `toLabel`, `onTap`, `onAddAtArrival`.
+### `ContinuousTimeline.tsx` -- overlapLayout useMemo (line 617-618)
 
-**Mode detection**: Parse mode from option name (walk/drive/bicycle/transit) using existing pattern from connectorData.
+Add transport exclusion to the filter:
 
-**Colour scheme**: Per-mode colours for stripe, fill, background, and text. Different opacities for light vs dark mode (detect via `window.matchMedia` or CSS variable approach -- will use inline rgba so it works in both).
+```
+.filter(e => !linkedEntryIds.has(e.id) && !isTransportEntry(e))
+```
 
-**Three rendering modes** based on `gapHeight`:
-- **Normal** (>=22px): Full text row (emoji + duration + destination + cog), fill band, "+" button at bottom-right
-- **Compact** (14-22px): Emoji + duration + cog only, smaller font, no "+" button
-- **Overflow** (<14px): 22px minimum height, centered on gap midpoint via negative top offset, backdrop-blur for readability, z-5
+This prevents transport entries from creating false horizontal offset columns.
 
-**Structure**:
-- Outer div: full width, `position: absolute` when overflow, `position: relative` otherwise
-- Left stripe: 3px wide, full height, solid mode colour, rounded-l-sm
-- Fill area: starts from top, height = `min(100, transportMinutes/gapMinutes * 100)%`, mode colour at 12% opacity
-- Background: mode colour at 3% opacity (unfilled area)
-- Text row: top of band, left-aligned after stripe
-- "+" button: 20x20 circle, bottom-right, dashed border, calls `onAddAtArrival`
+## Part B: Rewrite TransportConnector.tsx
 
-### 2. Update `src/components/timeline/ContinuousTimeline.tsx` -- Connector rendering (lines 1278-1309)
+Replace the full component with the updated design:
 
-**Enhance connectorData useMemo** (lines 529-586): Add `fromLabel`, `toLabel`, and `transportEntry` reference to each connector object so we can pass the full entry/option to TransportConnector.
+- **Thresholds**: Normal >= 28px (was 22), Compact 14-28px (was 14-22), Overflow < 14px (unchanged)
+- **Text row order**: Settings cog FIRST (mode-coloured, 14x14, 4px padding), then emoji, then duration, then destination
+- **Cog styling**: Mode colour at 70% opacity, full opacity on hover. Wrapped in a padded button for tap target
+- **Fill area**: Add `borderRadius: '0 0 8px 0'` on the fill div for rounded bottom-right corner (6px in compact mode)
+- **"+" button**: Show when `gapHeight >= 28` (was checking `isNormal` which used 22px threshold). Add hover styles: `hover:border-primary hover:bg-primary/10 hover:text-primary`
+- **Overflow mode**: `fill` opacity 0.20, `bg` opacity 0.10 (was 0.18/0.08)
+- **Background**: Add `bg-background` to "+" button for contrast
 
-**Update rendering block** (lines 1279-1309):
-- Compute `gapMinutes` and `transportMinutes` for each connector
-- For overflow mode (gapPx < 14): set container `overflow: visible` and z-index 5
-- Pass new props to TransportConnector: `entry`, `option`, `gapHeight`, `gapMinutes`, `transportMinutes`, `fromLabel`, `toLabel`, `onAddAtArrival`
-- `onAddAtArrival` calls `onAddBetween` with the transport entry's `end_time`
-- `onTap` still opens the transport overlay via `onTransportCogTap` or falls back to `onCardTap`
+## Part C: Update ContinuousTimeline.tsx Connector Rendering
 
-**Gap rendering update** (lines 1218-1276): 
-- The `hasTransferBetween` check at line 1220 already skips gap buttons when transport exists between entries
-- No changes needed to existing gap rendering -- the connector band replaces the dashed center line only in the connector rendering area, and gap buttons remain for non-transport gaps
+Minor update to the connector container at line 1304: the current code already computes `gapPx`, `gapMinutes`, `transportMinutes` and passes them correctly. No changes needed to the rendering block -- it already works with the new TransportConnector props.
 
-### 3. Files Modified
+The overflow threshold check at line 1308 (`gapPx < 14`) stays the same.
 
-- `src/components/timeline/TransportConnector.tsx` -- complete rewrite
-- `src/components/timeline/ContinuousTimeline.tsx` -- update connectorData memo and connector rendering block
+## Part D: Post-Transport Gap Cleanup
 
-### Technical Details
+No changes identified -- the current code at line 1292-1293 already skips rendering when there's no transport entry. The gap rendering between non-transport cards is unaffected.
 
-**Overflow positioning**: The parent container div already handles overflow centering (line 1283: `connTop = topPx - (20 - gapPx) / 2`). Will update this to use 22px minimum and pass the computed values to TransportConnector. The component itself will handle backdrop-blur and elevated z-index internally based on `gapHeight < 14`.
+## Files Modified
 
-**No drag/snap changes**: This is purely visual. All drag, snap, and transport creation/deletion logic remains untouched.
-
-**Import changes**: TransportConnector import stays the same. Need to add `Settings, Plus` to imports in TransportConnector (from lucide-react).
-
-**Dark/light mode**: Using inline rgba colours that work in both modes. The fill opacity differences (0.12 dark vs 0.15 light) can be handled with a simple `prefers-color-scheme` media query check or by using slightly higher base opacity that works well in both.
+- `src/components/timeline/TransportConnector.tsx` -- rewrite with updated thresholds, cog-first layout, fill border-radius, hover styles
+- `src/components/timeline/ContinuousTimeline.tsx` -- add transport exclusion to overlapMap and overlapLayout useMemos (2 lines changed)
