@@ -216,11 +216,14 @@ const ContinuousTimeline = ({
 
     if (isFlight) {
       const depTz = opt.departure_tz!;
+      const arrTz = opt.arrival_tz!;
       const dayIdx = findDayIndex(entry.start_time, depTz);
       const startLocal = getHourInTimezone(entry.start_time, depTz);
       const startGH = dayIdx * 24 + startLocal;
-      const utcDurH = (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 3600000;
-      return { startGH, endGH: startGH + utcDurH, resolvedTz: depTz };
+      const endLocal = getHourInTimezone(entry.end_time, arrTz);
+      const endDayIdx = findDayIndex(entry.end_time, arrTz);
+      const endGH = endDayIdx * 24 + endLocal;
+      return { startGH, endGH, resolvedTz: depTz };
     }
 
     // Non-flight: resolve TZ based on day's flight info
