@@ -2,6 +2,17 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 
 export type DragType = 'move' | 'resize-top' | 'resize-bottom';
 
+export interface SnapTarget {
+  globalHour: number;
+  label: string;
+}
+
+export interface LockedBoundary {
+  startGH: number;
+  endGH: number;
+  entryId: string;
+}
+
 interface DragState {
   entryId: string;
   type: DragType;
@@ -27,6 +38,8 @@ interface UseDragResizeOptions {
   gridTopPx: number;
   onCommit: (entryId: string, newStartHour: number, newEndHour: number, tz?: string, targetDay?: Date, dragType?: DragType, clientX?: number, clientY?: number) => void;
   scrollContainerRef?: React.RefObject<HTMLElement>;
+  snapTargets?: SnapTarget[];
+  lockedBoundaries?: LockedBoundary[];
 }
 
 const SNAP_MINUTES = 5;
@@ -44,7 +57,7 @@ function snapToGrid(hour: number): number {
   return snapped / 60;
 }
 
-export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx, onCommit, scrollContainerRef }: UseDragResizeOptions) {
+export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx, onCommit, scrollContainerRef, snapTargets, lockedBoundaries }: UseDragResizeOptions) {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -182,6 +195,39 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
         newStart = Math.max(0, newStart);
         newEnd = Math.min(totalHours, newEnd);
 
+        // Pass A: Magnetic snap to transport endpoints (15-min threshold)
+        let snappedToTarget = false;
+        const SNAP_THRESHOLD_HOURS = 0.25;
+        if (snapTargets?.length) {
+          for (const target of snapTargets) {
+            if (Math.abs(newStart - target.globalHour) < SNAP_THRESHOLD_HOURS) {
+              newStart = target.globalHour;
+              newEnd = newStart + duration;
+              snappedToTarget = true;
+              break;
+            }
+          }
+        }
+
+        // Pass B: Locked card wall clamping
+        let hitWall = false;
+        if (lockedBoundaries?.length) {
+          for (const boundary of lockedBoundaries) {
+            if (boundary.entryId === state.entryId) continue;
+            if (newStart < boundary.endGH && newEnd > boundary.startGH) {
+              hitWall = true;
+              const overlapFromAbove = state.originalStartHour <= boundary.startGH;
+              if (overlapFromAbove) {
+                newEnd = boundary.startGH;
+                newStart = newEnd - duration;
+              } else {
+                newStart = boundary.endGH;
+                newEnd = newStart + duration;
+              }
+            }
+          }
+        }
+
         // Always update pixel-position refs (read by RAF loop, no re-render)
         clientXRef.current = clientX;
         clientYRef.current = clientY;
@@ -196,9 +242,9 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
 
         // Only trigger React re-render when snapped position or phase changes
         if (newStart !== state.currentStartHour || newEnd !== state.currentEndHour || wasDetached !== isDetached) {
-          // Haptic tick on snap position change
+          // Haptic tick: differentiate snap vs wall vs normal
           if (newStart !== state.currentStartHour || newEnd !== state.currentEndHour) {
-            if (navigator.vibrate) navigator.vibrate(1);
+            if (navigator.vibrate) navigator.vibrate(hitWall ? 15 : snappedToTarget ? 8 : 1);
           }
           const updated: DragState = {
             ...state,
@@ -246,7 +292,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
       }
     }
 
-  }, [pixelsPerHour, startHour, totalHours, scrollContainerRef, gridTopPx]);
+  }, [pixelsPerHour, startHour, totalHours, scrollContainerRef, gridTopPx, snapTargets, lockedBoundaries]);
 
   const commitDrag = useCallback(() => {
     const state = dragStateRef.current;
