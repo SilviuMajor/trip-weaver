@@ -75,6 +75,12 @@ const Timeline = () => {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [entries, setEntries] = useState<EntryWithOptions[]>([]);
   const [userVotes, setUserVotes] = useState<string[]>([]);
+
+  const updateEntryLocally = useCallback((entryId: string, updates: Partial<Entry>) => {
+    setEntries(prev => prev.map(e =>
+      e.id === entryId ? { ...e, ...updates } : e
+    ));
+  }, []);
   
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1171,71 +1177,81 @@ const Timeline = () => {
   };
 
   const handleEntryTimeChange = async (entryId: string, newStartIso: string, newEndIso: string) => {
-    // Record undo action
     const entry = entries.find(e => e.id === entryId);
+    if (!entry) return;
     // Don't move locked entries (except flight sub-entries which move with their parent)
-    if (entry?.is_locked && !entry.linked_flight_id) return;
-    if (entry) {
-      const oldStart = entry.start_time;
-      const oldEnd = entry.end_time;
-      const desc = `Move ${entry.options[0]?.name || 'entry'}`;
-      pushAction({
-        description: desc,
-        undo: async () => {
-          await supabase.from('entries').update({ start_time: oldStart, end_time: oldEnd }).eq('id', entryId);
-        },
-        redo: async () => {
-          await supabase.from('entries').update({ start_time: newStartIso, end_time: newEndIso }).eq('id', entryId);
-        },
-      });
-    }
+    if (entry.is_locked && !entry.linked_flight_id) return;
 
+    const oldStart = entry.start_time;
+    const oldEnd = entry.end_time;
+
+    // 1. Optimistic local update — instant UI
+    updateEntryLocally(entryId, { start_time: newStartIso, end_time: newEndIso });
+
+    // 2. Record undo action (with local state updates)
+    const desc = `Move ${entry.options[0]?.name || 'entry'}`;
+    pushAction({
+      description: desc,
+      undo: async () => {
+        await supabase.from('entries').update({ start_time: oldStart, end_time: oldEnd }).eq('id', entryId);
+        updateEntryLocally(entryId, { start_time: oldStart, end_time: oldEnd });
+      },
+      redo: async () => {
+        await supabase.from('entries').update({ start_time: newStartIso, end_time: newEndIso }).eq('id', entryId);
+        updateEntryLocally(entryId, { start_time: newStartIso, end_time: newEndIso });
+      },
+    });
+
+    // 3. Background sync to DB
     const { error } = await supabase
       .from('entries')
       .update({ start_time: newStartIso, end_time: newEndIso })
       .eq('id', entryId);
+
     if (error) {
       console.error('Failed to update entry time:', error);
+      // Rollback on error
+      updateEntryLocally(entryId, { start_time: oldStart, end_time: oldEnd });
       return;
     }
 
-    // Auto-recalculate transport connectors adjacent to this card
+    // 4. Reposition linked transports optimistically
     try {
-      const { data: linkedTransports } = await supabase
-        .from('entries')
-        .select('id, from_entry_id, to_entry_id, start_time, end_time')
-        .or(`from_entry_id.eq.${entryId},to_entry_id.eq.${entryId}`);
+      const linkedTransports = entries.filter(e =>
+        (e.from_entry_id === entryId || e.to_entry_id === entryId) &&
+        e.options[0]?.category === 'transfer'
+      );
 
-      if (linkedTransports && linkedTransports.length > 0) {
-        for (const transport of linkedTransports) {
-          const fromId = transport.from_entry_id;
-          const toId = transport.to_entry_id;
-          if (!fromId || !toId) continue;
+      for (const transport of linkedTransports) {
+        const fromId = transport.from_entry_id;
+        const toId = transport.to_entry_id;
+        if (!fromId || !toId) continue;
 
-          // Don't reposition transport if its destination is locked
-          const toEntry = entries.find(e => e.id === toId);
-          if (toEntry?.is_locked) continue;
+        // Don't reposition transport if its destination is locked
+        const toEntry = entries.find(e => e.id === toId);
+        if (toEntry?.is_locked) continue;
 
-          const fromEndTime = fromId === entryId ? newEndIso : (entries.find(e => e.id === fromId)?.end_time ?? null);
-          const toStartTime = toId === entryId ? newStartIso : (entries.find(e => e.id === toId)?.start_time ?? null);
+        const fromEndTime = fromId === entryId ? newEndIso : (entries.find(e => e.id === fromId)?.end_time ?? null);
+        const toStartTime = toId === entryId ? newStartIso : (entries.find(e => e.id === toId)?.start_time ?? null);
 
-          if (!fromEndTime || !toStartTime) continue;
+        if (!fromEndTime || !toStartTime) continue;
 
-          const fromEndMs = new Date(fromEndTime).getTime();
-          const toStartMs = new Date(toStartTime).getTime();
-          const gapMin = (toStartMs - fromEndMs) / 60000;
+        const fromEndMs = new Date(fromEndTime).getTime();
+        const toStartMs = new Date(toStartTime).getTime();
+        const gapMin = (toStartMs - fromEndMs) / 60000;
 
-          if (gapMin > 90) {
-            // Cards moved too far apart — delete transport entry
-            await supabase.from('entry_options').delete().eq('entry_id', transport.id);
-            await supabase.from('entries').delete().eq('id', transport.id);
-          } else {
-            // Reposition transport to start at from.end, preserve duration
-            const transportDurationMs = new Date(transport.end_time).getTime() - new Date(transport.start_time).getTime();
-            const newTransportStart = fromEndTime;
-            const newTransportEnd = new Date(new Date(newTransportStart).getTime() + transportDurationMs).toISOString();
-            await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
-          }
+        if (gapMin > 90) {
+          // Cards moved too far apart — delete transport locally then from DB
+          setEntries(prev => prev.filter(e => e.id !== transport.id));
+          await supabase.from('entry_options').delete().eq('entry_id', transport.id);
+          await supabase.from('entries').delete().eq('id', transport.id);
+        } else {
+          // Reposition transport: optimistic local + DB
+          const transportDurationMs = new Date(transport.end_time).getTime() - new Date(transport.start_time).getTime();
+          const newTransportStart = fromEndTime;
+          const newTransportEnd = new Date(new Date(newTransportStart).getTime() + transportDurationMs).toISOString();
+          updateEntryLocally(transport.id, { start_time: newTransportStart, end_time: newTransportEnd });
+          await supabase.from('entries').update({ start_time: newTransportStart, end_time: newTransportEnd }).eq('id', transport.id);
         }
       }
 
@@ -1266,9 +1282,7 @@ const Timeline = () => {
       console.error('Failed to manage transport entries:', err);
     }
 
-    await fetchData();
-
-    // ─── Smart Drop: push overlapped card down ───
+    // 5. Smart Drop: push overlapped card down (optimistic)
     const newStartMs = new Date(newStartIso).getTime();
     const newEndMs = new Date(newEndIso).getTime();
 
@@ -1305,10 +1319,15 @@ const Timeline = () => {
       if (!wouldCollide && !wouldOverlapAnother) {
         const oldOverlapStart = overlapped.start_time;
         const oldOverlapEnd = overlapped.end_time;
+        const pushedStartIso = new Date(pushedStart).toISOString();
+        const pushedEndIso = new Date(pushedEnd).toISOString();
+
+        // Optimistic local update for pushed card
+        updateEntryLocally(overlapped.id, { start_time: pushedStartIso, end_time: pushedEndIso });
 
         await supabase.from('entries').update({
-          start_time: new Date(pushedStart).toISOString(),
-          end_time: new Date(pushedEnd).toISOString(),
+          start_time: pushedStartIso,
+          end_time: pushedEndIso,
         }).eq('id', overlapped.id);
 
         sonnerToast.success(`Pushed ${overlapped.options[0]?.name || 'entry'} to make room`);
@@ -1320,17 +1339,18 @@ const Timeline = () => {
               start_time: oldOverlapStart,
               end_time: oldOverlapEnd,
             }).eq('id', overlapped.id);
+            updateEntryLocally(overlapped.id, { start_time: oldOverlapStart, end_time: oldOverlapEnd });
           },
           redo: async () => {
             await supabase.from('entries').update({
-              start_time: new Date(pushedStart).toISOString(),
-              end_time: new Date(pushedEnd).toISOString(),
+              start_time: pushedStartIso,
+              end_time: pushedEndIso,
             }).eq('id', overlapped.id);
+            updateEntryLocally(overlapped.id, { start_time: pushedStartIso, end_time: pushedEndIso });
           },
         });
 
         handleSnapRelease(entryId, overlapped.id, 'below');
-        await fetchData();
       }
     } else if (overlapped && overlapped.is_locked) {
       sonnerToast(`Overlaps ${overlapped.options[0]?.name || 'a locked entry'}`, {
@@ -1340,7 +1360,6 @@ const Timeline = () => {
 
     // Auto-extend trip if entry goes past final day
     if (trip && tripId) await autoExtendTripIfNeeded(tripId, newEndIso, trip, fetchData);
-
   };
 
   // Handle mode switch confirm from TransportConnector
@@ -2189,15 +2208,19 @@ const Timeline = () => {
   }, [days, isUndated]);
 
   const handleToggleLock = async (entryId: string, currentLocked: boolean) => {
+    const newLocked = !currentLocked;
+    // Optimistic local update
+    updateEntryLocally(entryId, { is_locked: newLocked } as any);
+    // Background DB sync
     const { error } = await supabase
       .from('entries')
-      .update({ is_locked: !currentLocked })
+      .update({ is_locked: newLocked })
       .eq('id', entryId);
     if (error) {
+      // Rollback on error
+      updateEntryLocally(entryId, { is_locked: currentLocked } as any);
       toast({ title: 'Failed to toggle lock', description: error.message, variant: 'destructive' });
-      return;
     }
-    await fetchData();
   };
 
   // Auto-generate transport between events
