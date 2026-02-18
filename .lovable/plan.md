@@ -1,38 +1,49 @@
 
 
-# Fix Transport Position Bug (Bug 3)
-
-## Context
-Bugs 1 and 2 (timezone offset) are already fixed from the previous approved plan. Only Bug 3 remains: gap buttons between entries pass the flight's `end_time` instead of the checkout's `end_time` when creating transport or adding entries after a flight group.
+# Fix Transport Connector Position for Flight Groups
 
 ## Problem
-When clicking gap buttons below a flight group, `entry.end_time` (the flight landing time, e.g. 10:50) is used as the prefill/start time instead of the checkout's `end_time` (e.g. 11:20). This causes transport entries to overlap the checkout section.
+The transport connector renders starting at the flight's end time (10:50) instead of after the checkout end (11:20). The connector values (duration, times) are correct, but its visual position on the timeline is wrong because `connectorData` doesn't account for flight group checkout bounds.
 
-## Changes
+## Root Cause
+In `connectorData` useMemo (line 568), `fromEndGH` is set directly from `getEntryGlobalHours(from).endGH`. For a flight entry, this is the flight landing time. But visually, the flight group includes a checkout section that extends below the flight card. The connector should start after the checkout, not after the flight.
 
-### `src/components/timeline/ContinuousTimeline.tsx`
+The gap buttons section (line 1208-1213) already has this fix — it adjusts `aEndGH` by adding the checkout duration. The `connectorData` useMemo needs the same treatment.
 
-In the gap buttons section (lines 1232-1279), compute an `effectiveEndTime` using `flightGroupMap` and replace all `entry.end_time` references with it.
+## Fix
 
-**Add before the gap button JSX (after line 1229):**
+### `src/components/timeline/ContinuousTimeline.tsx` (lines 565-569 in connectorData useMemo)
+
+After computing `fromGH` and `toGH`, check if the `from` entry has a flight group with checkout in `flightGroupMap`. If so, extend `fromEndGH` by the checkout duration (same pattern as the gap buttons at line 1210-1213).
+
+Similarly, if the `to` entry has a checkin, pull `toStartGH` earlier (same as line 1217-1219).
+
 ```typescript
-const effectiveEndTime = aGroup?.checkout?.end_time ?? entry.end_time;
+// Before pushing to connectors:
+let fromEndGH = fromGH.endGH;
+let toStartGH = toGH.startGH;
+
+const fromGroup = flightGroupMap.get(from.id);
+if (fromGroup?.checkout) {
+  const coDur = (new Date(fromGroup.checkout.end_time).getTime() - new Date(fromGroup.checkout.start_time).getTime()) / 3600000;
+  fromEndGH = fromGH.endGH + coDur;
+}
+
+const toGroup = flightGroupMap.get(to.id);
+if (toGroup?.checkin) {
+  const ciDur = (new Date(toGroup.checkin.end_time).getTime() - new Date(toGroup.checkin.start_time).getTime()) / 3600000;
+  toStartGH = toGH.startGH - ciDur;
+}
 ```
 
-**Three replacements inside the gap button JSX:**
+Then use these adjusted values in the `connectors.push()` calls (both the transport branch and the else branch) instead of `fromGH.endGH` and `toGH.startGH`.
 
-1. **Line 1241** (large gap, top "Add something" button):
-   - Replace `entry.end_time` with `effectiveEndTime` in the `addMinutes(new Date(entry.end_time), 60)` call
-
-2. **Line 1269** (normal gap, single "Add something" button):
-   - Replace `entry.end_time` with `effectiveEndTime` in `onAddBetween(entry.end_time, ...)`
-
-Line 1254 (large gap, bottom button) uses `nextEntry.start_time` which is correct and needs no change.
+Also add `flightGroupMap` to the useMemo dependency array.
 
 ## Files Modified
-- `src/components/timeline/ContinuousTimeline.tsx` — 3 lines changed (add effectiveEndTime variable, update 2 gap button calls)
+- `src/components/timeline/ContinuousTimeline.tsx` — adjust `connectorData` useMemo to account for flight group checkout/checkin bounds (same pattern already used by gap buttons)
 
 ## What Is NOT Changed
-- Timeline.tsx handlers (`handleAddBetween`, `handleGenerateTransportDirect`) — these have their own checkout lookups as a safety net
-- Connector `onAddAtArrival` (line 1334) — this uses the transport entry's own end_time which is correct
-- Magnet snap handling — already uses effectiveEndTime pattern
+- Gap buttons section (already correct)
+- `getEntryGlobalHours` (flight endGH is correct for the flight itself; the group extension is a rendering concern)
+- Transport entry values/times (already correct as confirmed by user)
