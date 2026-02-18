@@ -116,7 +116,8 @@ const TransportConnector = ({
         className="relative flex items-center gap-1 pl-[7px] pr-1 truncate"
         style={{ height: Math.min(bandHeight, 20), fontSize }}
       >
-        {/* Cog — first in row, mode-coloured */}
+        <span style={{ fontSize: fontSize + 1 }}>{emoji}</span>
+        <span className="font-semibold" style={{ color: colors.text }}>{fmtDur(transportMinutes)}</span>
         <button
           onClick={(e) => { e.stopPropagation(); onTap(); }}
           className="flex-shrink-0 p-[2px] transition-opacity"
@@ -126,8 +127,6 @@ const TransportConnector = ({
         >
           <Settings className="h-3.5 w-3.5" />
         </button>
-        <span style={{ fontSize: fontSize + 1 }}>{emoji}</span>
-        <span className="font-semibold" style={{ color: colors.text }}>{fmtDur(transportMinutes)}</span>
         {isNormal && (
           <span className="truncate text-muted-foreground/60">to {shortDest}</span>
         )}

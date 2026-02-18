@@ -1307,7 +1307,7 @@ const ContinuousTimeline = ({
                 top: connTop,
                 height: connHeight,
                 overflow: gapPx < 14 ? 'visible' : undefined,
-                zIndex: gapPx < 14 ? 5 : 12,
+                zIndex: gapPx < 14 ? 25 : 12,
               }}
             >
               <TransportConnector
