@@ -36,6 +36,10 @@ interface ReturnFlightData {
   arrivalTz: string;
   departureTerminal: string;
   arrivalTerminal: string;
+  departureLat: number | null;
+  departureLng: number | null;
+  arrivalLat: number | null;
+  arrivalLng: number | null;
 }
 
 interface TransportResult {
@@ -809,6 +813,8 @@ const EntrySheet = ({
           departureLocation: arrivalLocation, arrivalLocation: departureLocation,
           departureTz: arrivalTz, arrivalTz: departureTz,
           departureTerminal: '', arrivalTerminal: '',
+          departureLat: arrivalLat, departureLng: arrivalLng,
+          arrivalLat: departureLat, arrivalLng: departureLng,
         });
         setShowReturnPrompt(true);
       }
@@ -829,15 +835,10 @@ const EntrySheet = ({
     setArrivalTz(returnFlightData.arrivalTz);
     setDepartureTerminal('');
     setArrivalTerminal('');
-    // Swap coordinates for return flight by looking up from AIRPORTS
-    const depIata = returnFlightData.departureLocation.split(' - ')[0]?.trim();
-    const arrIata = returnFlightData.arrivalLocation.split(' - ')[0]?.trim();
-    const depApt = AIRPORTS.find(a => a.iata === depIata);
-    const arrApt = AIRPORTS.find(a => a.iata === arrIata);
-    setDepartureLat(depApt?.lat ?? null);
-    setDepartureLng(depApt?.lng ?? null);
-    setArrivalLat(arrApt?.lat ?? null);
-    setArrivalLng(arrApt?.lng ?? null);
+    setDepartureLat(returnFlightData.departureLat);
+    setDepartureLng(returnFlightData.departureLng);
+    setArrivalLat(returnFlightData.arrivalLat);
+    setArrivalLng(returnFlightData.arrivalLng);
     setWebsite(''); setLocationName(''); setTransferFrom(''); setTransferTo('');
     setDate(''); setSelectedDay('0');
     const cat = PREDEFINED_CATEGORIES.find(c => c.id === 'flight');
