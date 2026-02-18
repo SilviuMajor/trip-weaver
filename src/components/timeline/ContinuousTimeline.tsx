@@ -601,6 +601,7 @@ const ContinuousTimeline = ({
       const a = sortedEntries[i];
       const b = sortedEntries[i + 1];
       if (linkedEntryIds.has(a.id) || linkedEntryIds.has(b.id)) continue;
+      if (isTransportEntry(a) || isTransportEntry(b)) continue;
       const aGH = getEntryGlobalHours(a);
       const bGH = getEntryGlobalHours(b);
       if (aGH.endGH > bGH.startGH) {
@@ -615,7 +616,7 @@ const ContinuousTimeline = ({
   // Overlap layout for horizontal offset (Google Calendar style)
   const overlapLayout = useMemo(() => {
     const layoutEntries = sortedEntries
-      .filter(e => !linkedEntryIds.has(e.id))
+      .filter(e => !linkedEntryIds.has(e.id) && !isTransportEntry(e))
       .map(e => {
         const gh = getEntryGlobalHours(e);
         return { id: e.id, startMinutes: gh.startGH * 60, endMinutes: gh.endGH * 60 };

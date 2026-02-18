@@ -26,10 +26,10 @@ const MODE_COLORS: Record<string, { stripe: string; fill: string; bg: string; te
 };
 
 const MODE_COLORS_OVERFLOW: Record<string, { fill: string; bg: string }> = {
-  walk:    { fill: 'rgba(74,222,128,0.18)',  bg: 'rgba(74,222,128,0.08)' },
-  transit: { fill: 'rgba(251,191,36,0.18)',  bg: 'rgba(251,191,36,0.08)' },
-  drive:   { fill: 'rgba(239,68,68,0.18)',   bg: 'rgba(239,68,68,0.08)' },
-  bicycle: { fill: 'rgba(96,165,250,0.18)',  bg: 'rgba(96,165,250,0.08)' },
+  walk:    { fill: 'rgba(74,222,128,0.20)',  bg: 'rgba(74,222,128,0.10)' },
+  transit: { fill: 'rgba(251,191,36,0.20)',  bg: 'rgba(251,191,36,0.10)' },
+  drive:   { fill: 'rgba(239,68,68,0.20)',   bg: 'rgba(239,68,68,0.10)' },
+  bicycle: { fill: 'rgba(96,165,250,0.20)',  bg: 'rgba(96,165,250,0.10)' },
 };
 
 const fmtDur = (min: number): string => {
@@ -60,7 +60,7 @@ const TransportConnector = ({
   const fillPct = gapMinutes > 0 ? Math.min(100, (transportMinutes / gapMinutes) * 100) : 100;
 
   const isOverflow = gapHeight < 14;
-  const isCompact = !isOverflow && gapHeight < 22;
+  const isCompact = !isOverflow && gapHeight < 28;
   const isNormal = !isOverflow && !isCompact;
 
   const bandHeight = isOverflow ? 22 : gapHeight;
@@ -70,6 +70,7 @@ const TransportConnector = ({
   const activeBg = isOverflow ? overflowColors.bg : colors.bg;
 
   const fontSize = isCompact ? 9 : 10;
+  const fillRadius = isCompact ? '0 0 6px 0' : '0 0 8px 0';
 
   return (
     <div
@@ -100,6 +101,7 @@ const TransportConnector = ({
         style={{
           height: `${fillPct}%`,
           backgroundColor: activeFill,
+          borderRadius: fillRadius,
         }}
       />
 
@@ -114,24 +116,28 @@ const TransportConnector = ({
         className="relative flex items-center gap-1 pl-[7px] pr-1 truncate"
         style={{ height: Math.min(bandHeight, 20), fontSize }}
       >
+        {/* Cog — first in row, mode-coloured */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onTap(); }}
+          className="flex-shrink-0 p-[2px] transition-opacity"
+          style={{ color: colors.text, opacity: 0.7 }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.7'; }}
+        >
+          <Settings className="h-3.5 w-3.5" />
+        </button>
         <span style={{ fontSize: fontSize + 1 }}>{emoji}</span>
         <span className="font-semibold" style={{ color: colors.text }}>{fmtDur(transportMinutes)}</span>
         {isNormal && (
           <span className="truncate text-muted-foreground/60">to {shortDest}</span>
         )}
-        <button
-          onClick={(e) => { e.stopPropagation(); onTap(); }}
-          className="ml-auto pl-1 flex-shrink-0 text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors"
-        >
-          <Settings className="h-3 w-3" />
-        </button>
       </div>
 
-      {/* "+" add button — normal mode only */}
+      {/* "+" add button — normal mode only (>= 28px) */}
       {isNormal && onAddAtArrival && (
         <button
           onClick={(e) => { e.stopPropagation(); onAddAtArrival(); }}
-          className="absolute bottom-0.5 right-1 flex items-center justify-center rounded-full border border-dashed border-muted-foreground/30 hover:border-muted-foreground/50 hover:bg-muted/50 transition-colors"
+          className="absolute bottom-0.5 right-1 flex items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background hover:border-primary hover:bg-primary/10 hover:text-primary transition-colors"
           style={{ width: 20, height: 20 }}
         >
           <Plus className="h-2.5 w-2.5 text-muted-foreground/40" />
