@@ -626,12 +626,12 @@ const Timeline = () => {
             return h + m / 60;
           };
           const depHour = getHour(f.start_time, opt.departure_tz!);
-          const utcDurH = (new Date(f.end_time).getTime() - new Date(f.start_time).getTime()) / 3600000;
+          const arrHour = getHour(f.end_time, opt.arrival_tz!);
           return {
             originTz: opt.departure_tz!,
             destinationTz: opt.arrival_tz!,
             flightStartHour: depHour,
-            flightEndHour: depHour + utcDurH,
+            flightEndHour: arrHour,
             flightEndUtc: f.end_time,
           };
         });
