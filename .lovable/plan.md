@@ -1,51 +1,49 @@
 
+# Transport Overlay — Dedicated Bottom Sheet
 
-# Transport Connector Visual Redesign + Conflict Fix
+## Overview
+Replace the current minimal TransportOverlay (simple mode grid only) with a full-featured bottom sheet that includes: mode selection with duration as hero text, reactive route map, deep link buttons for navigation apps, and refresh/delete footer actions.
 
-## Part A: Fix False Conflicts
+## Changes
 
-### `ContinuousTimeline.tsx` -- overlapMap useMemo (line 603)
+### 1. Rewrite `src/components/timeline/TransportOverlay.tsx`
 
-Add transport entry exclusion after the `linkedEntryIds` check:
+Complete rewrite. New props interface accepting `entry`, `option`, `formatTime`, `onSaved`, `onDelete` instead of the current flat data props.
 
-```
-if (linkedEntryIds.has(a.id) || linkedEntryIds.has(b.id)) continue;
-if (isTransportEntry(a) || isTransportEntry(b)) continue;  // NEW
-```
+**Layout (top to bottom):**
+- **Header**: `from → to` addresses (first part only, split on comma), close button
+- **Mode Grid (2x2)**: Duration as hero (17-18px, bold, mode colour, top-right), mode label (emoji + name, top-left), distance below. Active mode has 2px primary border + subtle mode-colour bg. Tapping switches mode and saves to DB.
+- **Route Map**: Uses existing `RouteMapPreview` with `size="full"`. Polyline updates reactively when mode changes. 160px height, rounded-xl border.
+- **Deep Links Row**: Google Maps, Apple Maps, Uber buttons. Platform-aware (hide Apple Maps on Android). Uses same URL patterns as RouteMapPreview.
+- **Footer**: "Refresh routes" button (calls `google-directions` edge function for all 4 modes, updates `transport_modes` on option) and "Remove transport" button (red, calls `onDelete`).
 
-### `ContinuousTimeline.tsx` -- overlapLayout useMemo (line 617-618)
+**Mode switch logic** (matches existing `handleModeSwitchConfirm` in Timeline.tsx):
+- Round duration to nearest 5min
+- Update `entry.end_time`, `option.name` (e.g. "Walk to British Museum"), `option.distance_km`, `option.route_polyline`
+- Call `onSaved()` to refresh
 
-Add transport exclusion to the filter:
+**Refresh routes**: Call `supabase.functions.invoke('google-directions')` with all 4 modes, update `transport_modes` on the option, refresh local state.
 
-```
-.filter(e => !linkedEntryIds.has(e.id) && !isTransportEntry(e))
-```
+**Data source**: `option.transport_modes` array. If empty/missing, show "Refresh routes" prominently in the mode grid area.
 
-This prevents transport entries from creating false horizontal offset columns.
+### 2. Update `src/pages/Timeline.tsx`
 
-## Part B: Rewrite TransportConnector.tsx
+**Replace transport overlay state** (lines 158-169): Change from flat `transportOverlayData` to `transportOverlayEntry` + `transportOverlayOption` state.
 
-Replace the full component with the updated design:
+**Update `handleCardTap`** (line 1109): Add transport detection. If the tapped entry is a transport (category = 'transfer', or has from_entry_id + to_entry_id, or name starts with walk/drive/transit/cycle to), open TransportOverlay instead of EntrySheet.
 
-- **Thresholds**: Normal >= 28px (was 22), Compact 14-28px (was 14-22), Overflow < 14px (unchanged)
-- **Text row order**: Settings cog FIRST (mode-coloured, 14x14, 4px padding), then emoji, then duration, then destination
-- **Cog styling**: Mode colour at 70% opacity, full opacity on hover. Wrapped in a padded button for tap target
-- **Fill area**: Add `borderRadius: '0 0 8px 0'` on the fill div for rounded bottom-right corner (6px in compact mode)
-- **"+" button**: Show when `gapHeight >= 28` (was checking `isNormal` which used 22px threshold). Add hover styles: `hover:border-primary hover:bg-primary/10 hover:text-primary`
-- **Overflow mode**: `fill` opacity 0.20, `bg` opacity 0.10 (was 0.18/0.08)
-- **Background**: Add `bg-background` to "+" button for contrast
+**Update `handleTransportCogTap`** (line 1455): Also open the new overlay with entry + option references.
 
-## Part C: Update ContinuousTimeline.tsx Connector Rendering
+**Update JSX** (line 2915-2929): Render new TransportOverlay with entry/option props, wire `onSaved={fetchData}` and `onDelete` to existing `handleDeleteTransport`.
 
-Minor update to the connector container at line 1304: the current code already computes `gapPx`, `gapMinutes`, `transportMinutes` and passes them correctly. No changes needed to the rendering block -- it already works with the new TransportConnector props.
+### 3. Files Modified
 
-The overflow threshold check at line 1308 (`gapPx < 14`) stays the same.
+- `src/components/timeline/TransportOverlay.tsx` — complete rewrite with rich layout
+- `src/pages/Timeline.tsx` — updated state, handleCardTap routing, overlay rendering
 
-## Part D: Post-Transport Gap Cleanup
+### Technical Notes
 
-No changes identified -- the current code at line 1292-1293 already skips rendering when there's no transport entry. The gap rendering between non-transport cards is unaffected.
-
-## Files Modified
-
-- `src/components/timeline/TransportConnector.tsx` -- rewrite with updated thresholds, cog-first layout, fill border-radius, hover styles
-- `src/components/timeline/ContinuousTimeline.tsx` -- add transport exclusion to overlapMap and overlapLayout useMemos (2 lines changed)
+- RouteMapPreview already handles Google/Apple/Uber deep links internally, but we render custom deep link buttons in the overlay for a cleaner layout with the mode grid above
+- The mode switch DB update reuses the same logic as `handleModeSwitchConfirm` — we call it directly from the overlay via a prop
+- Platform detection for Apple Maps: `const isAndroid = /android/i.test(navigator.userAgent)`
+- No changes to EntrySheet — transport create mode still uses it
