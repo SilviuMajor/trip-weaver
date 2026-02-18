@@ -1,81 +1,63 @@
 
 
-# Fix handleSnapRelease for Flight Groups
+# Lock Guard + Dead Code Cleanup
 
-## Problem
-When snapping a card after a flight group, `handleSnapRelease` has three issues:
-1. Uses flight's `end_time` (landing) as transport start instead of the checkout's `end_time`
-2. Sets `from_entry_id` to the flight ID instead of the checkout entry ID (connector renders at wrong position)
-3. Address resolution works for flights but not for checkout entries that become the `from_entry_id`
+## Summary
+Three changes: add lock guards to prevent locked cards from being indirectly moved, clean up unused state in `useTravelCalculation`, and remove the fallback drag block in `useDragResize`. Two items from the original prompt are already resolved or incorrect:
+- **Image filter (Bug Fix 2)**: Already fixed -- lines 278-285 of Timeline.tsx already filter `option_images` by `optionIds`.
+- **Delete overlapLayout.ts**: This file IS actively used -- imported at ContinuousTimeline.tsx line 11 and called at line 657. It must NOT be deleted.
 
-## Root Cause
-`handleSnapRelease` receives the flight entry as `fromEntry` (since `airport_processing` entries are filtered out of visible/sorted lists). It then uses the flight's `end_time` and `id` directly, without accounting for the checkout section that extends below the flight.
+---
 
-The edge function (`auto-generate-transport`) already handles this correctly (lines 269-324): it looks up checkout end times and uses them. The client-side `handleSnapRelease` needs the same treatment.
+## Bug Fix 1: Lock Guard in `handleEntryTimeChange`
 
-## Fix
+**File: `src/pages/Timeline.tsx`**
 
-### `src/pages/Timeline.tsx` — `handleSnapRelease` (lines 739-808)
-
-After finding `fromEntry` and `toEntry`, add a checkout lookup:
-
+### 1a. Early return for locked entries (line 1175)
+After `const entry = entries.find(...)`, add:
 ```typescript
-const fromEntry = entries.find(e => e.id === fromEntryId);
-const toEntry = entries.find(e => e.id === toEntryId);
-if (!fromEntry || !toEntry || !tripId) return;
-
-// For flights, find the checkout entry and use its end_time + ID
-let effectiveFromId = fromEntryId;
-let effectiveFromEndTime = fromEntry.end_time;
-const fromOpt = fromEntry.options[0];
-
-if (fromOpt?.category === 'flight') {
-  const checkout = entries.find(e =>
-    e.linked_flight_id === fromEntryId && e.linked_type === 'checkout'
-  );
-  if (checkout) {
-    effectiveFromId = checkout.id;
-    effectiveFromEndTime = checkout.end_time;
-  }
-}
-
-// Similarly for toEntry — if it's a flight, use its checkin entry
-let effectiveToId = toEntryId;
-const toOpt = toEntry.options[0];
-if (toOpt?.category === 'flight') {
-  const checkin = entries.find(e =>
-    e.linked_flight_id === toEntryId && e.linked_type === 'checkin'
-  );
-  if (checkin) {
-    effectiveToId = checkin.id;
-  }
-}
+if (entry?.is_locked && !entry.linked_flight_id) return;
 ```
+This prevents locked cards from being moved by any code path (e.g., smart-drop push-down logic).
 
-Then replace:
-- Line 759: `departureTime: fromEntry.end_time` with `effectiveFromEndTime`
-- Line 770: `new Date(fromEntry.end_time)` with `new Date(effectiveFromEndTime)`
-- Line 806: `from_entry_id: fromEntryId` with `effectiveFromId`
-- Line 807: `to_entry_id: toEntryId` with `effectiveToId`
-- Lines 777, 791: update old transport cleanup queries to use `effectiveFromId` and `effectiveToId`
+### 1b. Skip transport reposition when destination is locked (line 1208 loop)
+Inside the `for (const transport of linkedTransports)` loop, after the `if (!fromId || !toId) continue;` check, add:
+```typescript
+const toEntry = entries.find(e => e.id === toId);
+if (toEntry?.is_locked) continue;
+```
+This prevents transports linked to locked cards from being repositioned when an adjacent unlocked card is dragged.
 
-The address resolution via `resolveFromAddress(fromOpt)` (line 745) stays the same -- it correctly returns `arrival_location` ("AMS - Schiphol") for flight entries.
+---
 
-## Technical Details
+## Cleanup 1: Remove unused state from `useTravelCalculation`
 
-### Lines changed in `handleSnapRelease`:
-- Add ~15 lines of checkout/checkin lookup after line 741
-- Update 6 references from `fromEntryId`/`fromEntry.end_time` to `effectiveFromId`/`effectiveFromEndTime`
-- Update 2 references from `toEntryId` to `effectiveToId`
+**File: `src/hooks/useTravelCalculation.ts`**
 
-### What about existing broken transport entries?
-The two duplicate transport entries in the DB (`departure_location: "AMS"`, only drive mode, 15min/0km) will need to be deleted by the user. After the fix, re-snapping or using gap buttons will create correct transport with proper airport address and all 4 modes.
+- Remove `useState` import usage for `calculating` and `results` (lines 13-14)
+- Remove `setCalculating(true)` (line 21), `setResults(...)` (lines 76-78), `setCalculating(false)` (line 80)
+- Return only `{ calculateTravel }` instead of `{ calculating, results, calculateTravel }`
+- The caller at Timeline.tsx line 185 already destructures only `{ calculateTravel }`, so no caller changes needed
 
-## Files Modified
-- `src/pages/Timeline.tsx` -- fix `handleSnapRelease` to use checkout/checkin entry IDs and times for flight groups
+---
 
-## What Is NOT Changed
-- Gap button logic in ContinuousTimeline.tsx (already uses `effectiveEndTime` and `resolveFromAddress`)
-- `auto-generate-transport` edge function (already handles this correctly)
-- `resolveFromAddress` / `resolveToAddress` helpers (working correctly for flight category)
-- Connector rendering logic (will automatically render correctly once `from_entry_id` points to checkout)
+## Cleanup 2: Remove fallback delta-based drag in `useDragResize.ts`
+
+**File: `src/hooks/useDragResize.ts` (lines 249-275)**
+
+Remove the entire fallback block from `// Fallback: delta-based (if no scroll container)` through the end of the `handlePointerMove` logic (before the closing dependency array `], [...]`). The scroll container is always provided by ContinuousTimeline, making this code unreachable.
+
+---
+
+## What is NOT changed
+- `src/lib/overlapLayout.ts` -- actively used in ContinuousTimeline.tsx, NOT dead code
+- Image query in `fetchData()` -- already filtered by optionIds
+- `calculateTravel` function logic itself -- still needed for drop conflict analysis
+
+## Testing
+- Lock a card, drag an adjacent unlocked card onto its time slot -- locked card should not move
+- Drag an unlocked card with transport linked to a locked card -- transport should not reposition
+- Flight sub-entries (checkin/checkout) should still move when parent flight is dragged
+- Verify all cards still render images correctly
+- Build should compile cleanly
+
