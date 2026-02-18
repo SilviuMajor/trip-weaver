@@ -1,197 +1,114 @@
 
 
-# Snap-to-Transport-End + Locked Card Walls During Drag
+# Optimistic Local State for Card Drag
 
-## Overview
-Two real-time drag enhancements in `useDragResize.ts`, fed by computed snap targets and locked boundaries from `ContinuousTimeline.tsx`.
+## Summary
+Replace the full `fetchData()` call after card drags and lock toggles with instant local state updates, eliminating the 200-500ms stutter caused by re-fetching all data from the database.
 
 ---
 
 ## Changes
 
-### 1. Extend `useDragResize.ts` interfaces and options
+### 1. Add `updateEntryLocally` helper
 
-Add two new interfaces and optional parameters to `UseDragResizeOptions`:
+**File: `src/pages/Timeline.tsx`** (after entries state, ~line 76)
 
 ```typescript
-export interface SnapTarget {
-  globalHour: number;
-  label: string;
-}
-
-export interface LockedBoundary {
-  startGH: number;
-  endGH: number;
-  entryId: string;
-}
-
-interface UseDragResizeOptions {
-  // ... existing
-  snapTargets?: SnapTarget[];
-  lockedBoundaries?: LockedBoundary[];
-}
+const updateEntryLocally = useCallback((entryId: string, updates: Partial<Entry>) => {
+  setEntries(prev => prev.map(e =>
+    e.id === entryId ? { ...e, ...updates } : e
+  ));
+}, []);
 ```
 
-Destructure these in the hook function signature.
+### 2. Make `handleEntryTimeChange` optimistic (lines 1173-1344)
 
-### 2. Add snap + wall logic in `handlePointerMove` (move branch, after grid snap)
+Restructure the function to:
 
-After the existing grid snap (line 177) and boundary clamping (lines 180-183), insert two new passes in order:
-
-**Pass A -- Transport endpoint magnetic snap (15-min threshold):**
+**a) Apply optimistic local update immediately** (before any DB call):
 ```typescript
-const SNAP_THRESHOLD_HOURS = 0.25;
-if (snapTargets?.length) {
-  for (const target of snapTargets) {
-    if (Math.abs(newStart - target.globalHour) < SNAP_THRESHOLD_HOURS) {
-      newStart = target.globalHour;
-      newEnd = newStart + duration;
-      break;
-    }
-  }
-}
+updateEntryLocally(entryId, { start_time: newStartIso, end_time: newEndIso });
 ```
 
-**Pass B -- Locked card wall clamping:**
+**b) Make undo/redo also update local state** (not just DB):
 ```typescript
-if (lockedBoundaries?.length) {
-  for (const boundary of lockedBoundaries) {
-    if (boundary.entryId === state.entryId) continue;
-    if (newStart < boundary.endGH && newEnd > boundary.startGH) {
-      const overlapFromAbove = state.originalStartHour <= boundary.startGH;
-      if (overlapFromAbove) {
-        newEnd = boundary.startGH;
-        newStart = newEnd - duration;
-      } else {
-        newStart = boundary.endGH;
-        newEnd = newStart + duration;
-      }
-    }
-  }
-}
-```
-
-**Haptic differentiation:** Change the existing `navigator.vibrate(1)` to use `8` when snapped to a transport target and `15` when hitting a locked wall. Track whether we hit a wall or snap target using simple boolean flags set during the passes.
-
-Also add `snapTargets` and `lockedBoundaries` to the `useCallback` dependency array.
-
-### 3. Compute `snapTargets` in `ContinuousTimeline.tsx`
-
-Add a `useMemo` after the existing `isTransportEntry` helper (~line 499):
-
-```typescript
-const snapTargets = useMemo(() => {
-  const targets: SnapTarget[] = [];
-  for (const entry of sortedEntries) {
-    if (!isTransportEntry(entry)) continue;
-    const gh = getEntryGlobalHours(entry);
-    targets.push({
-      globalHour: gh.endGH,
-      label: `After ${entry.options[0]?.name || 'transport'}`,
-    });
-  }
-  return targets;
-}, [sortedEntries, getEntryGlobalHours, isTransportEntry]);
-```
-
-### 4. Compute `lockedBoundaries` in `ContinuousTimeline.tsx`
-
-Add another `useMemo` nearby:
-
-```typescript
-const lockedBoundaries = useMemo(() => {
-  return sortedEntries
-    .filter(e => e.is_locked && !e.linked_flight_id)
-    .map(e => {
-      const gh = getEntryGlobalHours(e);
-      let startGH = gh.startGH;
-      let endGH = gh.endGH;
-      const group = flightGroupMap.get(e.id);
-      if (group?.checkin) {
-        const ciDur = (new Date(group.checkin.end_time).getTime() -
-          new Date(group.checkin.start_time).getTime()) / 3600000;
-        startGH -= ciDur;
-      }
-      if (group?.checkout) {
-        const coDur = (new Date(group.checkout.end_time).getTime() -
-          new Date(group.checkout.start_time).getTime()) / 3600000;
-        endGH += coDur;
-      }
-      return { startGH, endGH, entryId: e.id };
-    });
-}, [sortedEntries, getEntryGlobalHours, flightGroupMap]);
-```
-
-### 5. Pass both into `useDragResize` call (~line 437)
-
-```typescript
-const { dragState, ... } = useDragResize({
-  pixelsPerHour,
-  startHour: 0,
-  totalHours,
-  gridTopPx,
-  onCommit: handleDragCommit,
-  scrollContainerRef,
-  snapTargets,
-  lockedBoundaries,
+pushAction({
+  description: desc,
+  undo: async () => {
+    await supabase.from('entries').update({ start_time: oldStart, end_time: oldEnd }).eq('id', entryId);
+    updateEntryLocally(entryId, { start_time: oldStart, end_time: oldEnd });
+  },
+  redo: async () => {
+    await supabase.from('entries').update({ start_time: newStartIso, end_time: newEndIso }).eq('id', entryId);
+    updateEntryLocally(entryId, { start_time: newStartIso, end_time: newEndIso });
+  },
 });
 ```
 
-### 6. Visual feedback in `ContinuousTimeline.tsx` drag render section
-
-**Green snap line** (when card is snapped to a transport endpoint):
-```tsx
-{dragState?.type === 'move' && snapTargets?.some(t =>
-  Math.abs(dragState.currentStartHour - t.globalHour) < 0.01
-) && (
-  <div
-    className="absolute left-0 right-0 h-0.5 bg-green-500/70 z-[51] pointer-events-none"
-    style={{ top: dragState.currentStartHour * pixelsPerHour }}
-  />
-)}
+**c) Rollback on DB error**:
+```typescript
+if (error) {
+  updateEntryLocally(entryId, { start_time: oldStart, end_time: oldEnd });
+  return;
+}
 ```
 
-**Red locked-wall indicator** (when card touches a locked card edge):
-```tsx
-{dragState && lockedBoundaries?.map(boundary => {
-  const dragEnd = dragState.currentEndHour;
-  const touchingTop = Math.abs(dragState.currentStartHour - boundary.endGH) < 0.02;
-  const touchingBottom = Math.abs(dragEnd - boundary.startGH) < 0.02;
-  if (!touchingTop && !touchingBottom) return null;
-  return (
-    <div
-      key={boundary.entryId}
-      className="absolute left-0 right-0 z-[49] pointer-events-none border-t-2 border-red-400/60"
-      style={{
-        top: (touchingTop ? boundary.endGH : boundary.startGH) * pixelsPerHour
-      }}
-    />
-  );
-})}
+**d) Reposition linked transports optimistically**:
+- Use local `entries` state to find linked transports (filter by `from_entry_id`/`to_entry_id` and `category === 'transfer'`) instead of querying DB
+- For each transport: call `updateEntryLocally` for instant visual update, then sync to DB
+- For transport deletion (gap > 90min): remove from local state via `setEntries(prev => prev.filter(...))`, then delete from DB
+
+**e) Smart-drop push**: Also apply `updateEntryLocally` for the pushed overlapped card, and update undo/redo to include local state changes.
+
+**f) Remove `fetchData()` calls**: Remove the two `fetchData()` calls at lines 1269 and 1333. Keep `fetchData` only in `autoExtendTripIfNeeded` (which only fires when the trip duration changes -- rare) and in `handleSnapRelease` (which creates NEW transport entries).
+
+### 3. Make `handleToggleLock` optimistic (lines 2191-2201)
+
+```typescript
+const handleToggleLock = async (entryId: string, currentLocked: boolean) => {
+  const newLocked = !currentLocked;
+  // Optimistic
+  updateEntryLocally(entryId, { is_locked: newLocked } as any);
+  // DB sync
+  const { error } = await supabase.from('entries')
+    .update({ is_locked: newLocked }).eq('id', entryId);
+  if (error) {
+    // Rollback
+    updateEntryLocally(entryId, { is_locked: currentLocked } as any);
+    toast({ title: 'Failed to toggle lock', description: error.message, variant: 'destructive' });
+  }
+  // No fetchData()
+};
 ```
 
-Both go in the drag overlay rendering section (~line 1745 area, "Stage 1" block).
+### 4. What still uses `fetchData()`
 
-### 7. Export new types from `useDragResize.ts`
-
-Export `SnapTarget` and `LockedBoundary` so ContinuousTimeline can import them for type safety.
+These operations create or delete entire entries/options, so they genuinely need a full refresh:
+- `handleSnapRelease` -- creates new transport entries
+- `handleDropOnTimeline` -- creates new entries from panel
+- `handleModeSwitchConfirm` -- updates option data
+- `handleDeleteTransport` -- removes entries
+- `handleAutoGenerateTransport` -- creates multiple transports
+- `EntrySheet` / `HotelWizard` `onSaved` callbacks
+- Realtime sync (other users' changes)
 
 ---
 
 ## Files Modified
-- `src/hooks/useDragResize.ts` -- new interfaces, snap + wall logic in handlePointerMove
-- `src/components/timeline/ContinuousTimeline.tsx` -- compute snapTargets and lockedBoundaries, pass to hook, render visual indicators
+- `src/pages/Timeline.tsx` -- add `updateEntryLocally`, refactor `handleEntryTimeChange` and `handleToggleLock`
 
 ## What Is NOT Changed
-- `handleSnapRelease` / `handleEntryTimeChange` in Timeline.tsx (these handle post-drop logic, not drag-time)
+- `fetchData()` function itself (still needed for other operations)
+- `useRealtimeSync` (still syncs other users' changes)
 - Edge functions
-- EntryCard rendering
+- `useDragResize` / `ContinuousTimeline` (drag mechanics unchanged)
 
 ## Testing
-- Drag a card near a transport connector's end -- should magnetically snap with green line and stronger haptic
-- Move away from snap zone -- should release back to normal 5-min grid
-- Lock a card and drag an adjacent card toward it -- should stop at the edge with red indicator and haptic
-- Lock a flight group -- drag should stop at checkin start or checkout end
-- Drag between two locked cards -- constrained to the gap
-- Test on mobile with long-press drag
-
+- Drag a card to a new time -- should update instantly with no flicker
+- Drag a card with a transport connector -- transport repositions instantly
+- Undo the drag -- reverts instantly
+- Drag on throttled 3G network -- should still feel instant
+- Lock/unlock a card -- toggles instantly with no flash
+- Create transport via magnet snap -- still works (uses fetchData)
+- Switch transport mode -- still works (uses fetchData)
+- Smart-drop push -- pushed card moves instantly
