@@ -9,7 +9,7 @@ import { getBlock, getEntriesAfterInBlock } from '@/lib/blockDetection';
 import { localToUTC, getHourInTimezone, resolveEntryTz, getDateInTimezone, getUtcOffsetHoursDiff } from '@/lib/timezoneUtils';
 import { Plus, Lock, LockOpen, Trash2 } from 'lucide-react';
 import { computeOverlapLayout } from '@/lib/overlapLayout';
-import { useDragResize, type DragType } from '@/hooks/useDragResize';
+import { useDragResize, type DragType, type SnapTarget, type LockedBoundary } from '@/hooks/useDragResize';
 import EntryCard from './EntryCard';
 import FlightGroupCard from './FlightGroupCard';
 
@@ -434,14 +434,6 @@ const ContinuousTimeline = ({
     }
   }, [onEntryTimeChange, sortedEntries, days, dayTimezoneMap, homeTimezone, allEntries, onDragCommitOverride, onSnapRelease, onChainShift]);
 
-  const { dragState, wasDraggedRef, clientXRef, clientYRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
-    pixelsPerHour,
-    startHour: 0,
-    totalHours,
-    gridTopPx,
-    onCommit: handleDragCommit,
-    scrollContainerRef,
-  });
 
   // Locked-entry drag feedback
   // One-time card hint tooltip
@@ -505,6 +497,54 @@ const ContinuousTimeline = ({
       (name.startsWith('drive to') || name.startsWith('walk to') ||
        name.startsWith('transit to') || name.startsWith('cycle to'));
   }, []);
+
+  // Snap targets: transport end positions for magnetic snap during drag
+  const transportSnapTargets = useMemo((): SnapTarget[] => {
+    const targets: SnapTarget[] = [];
+    for (const entry of sortedEntries) {
+      if (!isTransportEntry(entry)) continue;
+      const gh = getEntryGlobalHours(entry);
+      targets.push({
+        globalHour: gh.endGH,
+        label: `After ${entry.options[0]?.name || 'transport'}`,
+      });
+    }
+    return targets;
+  }, [sortedEntries, getEntryGlobalHours, isTransportEntry]);
+
+  // Locked boundaries: locked cards act as walls during drag
+  const lockedBoundaries = useMemo((): LockedBoundary[] => {
+    return sortedEntries
+      .filter(e => e.is_locked && !e.linked_flight_id)
+      .map(e => {
+        const gh = getEntryGlobalHours(e);
+        let startGH = gh.startGH;
+        let endGH = gh.endGH;
+        const group = flightGroupMap.get(e.id);
+        if (group?.checkin) {
+          const ciDur = (new Date(group.checkin.end_time).getTime() -
+            new Date(group.checkin.start_time).getTime()) / 3600000;
+          startGH -= ciDur;
+        }
+        if (group?.checkout) {
+          const coDur = (new Date(group.checkout.end_time).getTime() -
+            new Date(group.checkout.start_time).getTime()) / 3600000;
+          endGH += coDur;
+        }
+        return { startGH, endGH, entryId: e.id };
+      });
+  }, [sortedEntries, getEntryGlobalHours, flightGroupMap]);
+
+  const { dragState, wasDraggedRef, clientXRef, clientYRef, onMouseDown, onTouchStart, onTouchMove, onTouchEnd } = useDragResize({
+    pixelsPerHour,
+    startHour: 0,
+    totalHours,
+    gridTopPx,
+    onCommit: handleDragCommit,
+    scrollContainerRef,
+    snapTargets: transportSnapTargets,
+    lockedBoundaries,
+  });
 
   // Check if transfer exists between entries
   const hasTransferBetween = useCallback((entryA: EntryWithOptions, entryB: EntryWithOptions): boolean => {
@@ -1859,6 +1899,33 @@ const ContinuousTimeline = ({
             </div>
           );
         })()}
+
+        {/* Green snap line when card snaps to transport endpoint */}
+        {dragState?.type === 'move' && transportSnapTargets?.some(t =>
+          Math.abs(dragState.currentStartHour - t.globalHour) < 0.01
+        ) && (
+          <div
+            className="absolute left-0 right-0 h-0.5 bg-green-500/70 z-[51] pointer-events-none"
+            style={{ top: dragState.currentStartHour * pixelsPerHour }}
+          />
+        )}
+
+        {/* Red locked-wall indicator when dragged card touches a locked card edge */}
+        {dragState && lockedBoundaries?.map(boundary => {
+          const dragEnd = dragState.currentEndHour;
+          const touchingTop = Math.abs(dragState.currentStartHour - boundary.endGH) < 0.02;
+          const touchingBottom = Math.abs(dragEnd - boundary.startGH) < 0.02;
+          if (!touchingTop && !touchingBottom) return null;
+          return (
+            <div
+              key={`wall-${boundary.entryId}`}
+              className="absolute left-0 right-0 z-[49] pointer-events-none border-t-2 border-red-400/60"
+              style={{
+                top: (touchingTop ? boundary.endGH : boundary.startGH) * pixelsPerHour
+              }}
+            />
+          );
+        })}
 
         {/* Ghost outline during Stage 2 (detached) move drag */}
         {dragState && dragState.type === 'move' && dragPhase === 'detached' && (() => {
