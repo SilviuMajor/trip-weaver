@@ -1051,7 +1051,7 @@ const Timeline = () => {
     if (!tripId || !trip) return;
     setGlobalRefreshing(true);
     try {
-      // Build weather segments from dayLocationMap
+      // Build trip day list for weather
       const refreshDays = (() => {
         if (!trip.start_date) return [];
         const start = parseISO(trip.start_date);
@@ -1062,21 +1062,99 @@ const Timeline = () => {
         return result;
       })();
 
-      // Group consecutive days with same location into segments
-      const segments: { lat: number; lng: number; startDate: string; endDate: string }[] = [];
-      let currentSeg: { lat: number; lng: number; startDate: string; endDate: string } | null = null;
-      for (const day of refreshDays) {
-        const dayStr = format(day, 'yyyy-MM-dd');
-        const loc = dayLocationMap.get(dayStr);
-        if (!loc) continue;
-        if (currentSeg && currentSeg.lat === loc.lat && currentSeg.lng === loc.lng) {
-          currentSeg.endDate = dayStr;
-        } else {
-          if (currentSeg) segments.push(currentSeg);
-          currentSeg = { lat: loc.lat, lng: loc.lng, startDate: dayStr, endDate: dayStr };
+      // ── Build entry-aware weather segments ──
+      const segments: { lat: number; lng: number; startDate: string; endDate: string; startHour?: number; endHour?: number }[] = [];
+
+      // Step 1: Collect location waypoints from ALL scheduled entries with coordinates
+      const waypoints: { timeMs: number; lat: number; lng: number }[] = [];
+      const scheduled = scheduledEntries
+        .filter(e => e.is_scheduled)
+        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+
+      for (const entry of scheduled) {
+        const opt = entry.options[0];
+        if (!opt || opt.latitude == null || opt.longitude == null) continue;
+
+        if (opt.category === 'flight') {
+          // Flight: arrival location applies at landing time
+          waypoints.push({
+            timeMs: new Date(entry.end_time).getTime(),
+            lat: opt.latitude,
+            lng: opt.longitude,
+          });
+          // Departure airport from linked checkin
+          const checkin = scheduled.find(
+            e => e.linked_flight_id === entry.id && e.linked_type === 'checkin'
+          );
+          if (checkin?.options[0]?.latitude != null) {
+            waypoints.push({
+              timeMs: new Date(checkin.start_time).getTime(),
+              lat: checkin.options[0].latitude!,
+              lng: checkin.options[0].longitude!,
+            });
+          }
+        } else if (!entry.linked_flight_id) {
+          // Regular entry: location at start time
+          waypoints.push({
+            timeMs: new Date(entry.start_time).getTime(),
+            lat: opt.latitude,
+            lng: opt.longitude,
+          });
         }
       }
-      if (currentSeg) segments.push(currentSeg);
+
+      waypoints.sort((a, b) => a.timeMs - b.timeMs);
+
+      if (waypoints.length > 0) {
+        const roundLoc = (lat: number, lng: number) => ({
+          lat: Math.round(lat * 10) / 10,
+          lng: Math.round(lng * 10) / 10,
+        });
+
+        const findNearest = (timeMs: number) => {
+          let best = waypoints[0];
+          let bestDist = Math.abs(timeMs - best.timeMs);
+          for (const wp of waypoints) {
+            const dist = Math.abs(timeMs - wp.timeMs);
+            if (dist < bestDist) { bestDist = dist; best = wp; }
+          }
+          return best;
+        };
+
+        // Walk every hour of the trip
+        type HourLoc = { date: string; hour: number; lat: number; lng: number };
+        const hourLocations: HourLoc[] = [];
+        for (const day of refreshDays) {
+          const dayStr = format(day, 'yyyy-MM-dd');
+          for (let h = 0; h < 24; h++) {
+            const hourMs = new Date(`${dayStr}T${String(h).padStart(2, '0')}:00:00Z`).getTime();
+            const nearest = findNearest(hourMs);
+            const rounded = roundLoc(nearest.lat, nearest.lng);
+            hourLocations.push({ date: dayStr, hour: h, lat: rounded.lat, lng: rounded.lng });
+          }
+        }
+
+        // Group consecutive hours with same rounded location
+        let currentSeg: { lat: number; lng: number; startDate: string; endDate: string; startHour: number; endHour: number } | null = null;
+        for (const hl of hourLocations) {
+          if (currentSeg && currentSeg.lat === hl.lat && currentSeg.lng === hl.lng) {
+            currentSeg.endDate = hl.date;
+            currentSeg.endHour = hl.hour;
+          } else {
+            if (currentSeg) segments.push(currentSeg);
+            currentSeg = { lat: hl.lat, lng: hl.lng, startDate: hl.date, endDate: hl.date, startHour: hl.hour, endHour: hl.hour };
+          }
+        }
+        if (currentSeg) segments.push(currentSeg);
+
+        // Remove hour bounds for full-day segments
+        for (const seg of segments) {
+          if (seg.startHour === 0 && seg.endHour === 23) {
+            delete (seg as any).startHour;
+            delete (seg as any).endHour;
+          }
+        }
+      }
 
       await Promise.all([
         supabase.functions.invoke('auto-generate-transport', { body: { tripId } }),
@@ -1092,7 +1170,7 @@ const Timeline = () => {
     } finally {
       setGlobalRefreshing(false);
     }
-  }, [tripId, trip, dayLocationMap]);
+  }, [tripId, trip, scheduledEntries, days, homeTimezone]);
 
   const getEntriesForDay = (day: Date): EntryWithOptions[] => {
     const dayStr = format(day, 'yyyy-MM-dd');

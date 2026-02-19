@@ -24,6 +24,8 @@ interface Segment {
   lng: number;
   startDate: string;
   endDate: string;
+  startHour?: number;
+  endHour?: number;
 }
 
 Deno.serve(async (req) => {
@@ -97,6 +99,11 @@ Deno.serve(async (req) => {
         const dateTime = new Date(time[i]);
         const dateStr = time[i].substring(0, 10);
         const hour = dateTime.getHours();
+
+        // Filter by hour bounds on boundary dates
+        if (seg.startHour != null && dateStr === seg.startDate && hour < seg.startHour) continue;
+        if (seg.endHour != null && dateStr === seg.endDate && hour > seg.endHour) continue;
+
         const { condition, iconCode } = mapWeatherCode(weather_code[i]);
 
         records.push({
