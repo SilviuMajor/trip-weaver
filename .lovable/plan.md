@@ -1,89 +1,92 @@
 
-# Fix 1-Hour Gap Between Flight Group and Next Card
 
-## Problem
-After fixing flight card heights to use UTC duration, non-flight cards on flight days are still positioned using the destination timezone, while flight cards are positioned using the departure (origin) timezone. This creates phantom gaps or overlaps equal to the timezone offset between origin and destination.
+# Entry-Aware Weather — Follow the User's Location
 
-## Root Cause
-`getEntryGlobalHours` uses `resolvedTz` for both grid positioning AND time display on cards. On a flight day, a post-flight card resolves to the destination timezone (correct for display), but this puts it in a different coordinate space than the flight card (which uses the origin timezone).
+## Overview
+Replace the current one-location-per-day weather system with an entry-aware approach that tracks where the user actually is throughout the day based on their scheduled entries.
 
-## Solution
-Split `resolvedTz` into two fields:
-- `resolvedTz` -- display timezone (destination after flight, origin before) -- used for time labels on cards
-- `gridTz` -- positioning timezone (always origin on flight days) -- used for startGH/endGH and drag operations
+## Current Behavior
+- `dayLocationMap` computes one `{lat, lng}` per day based on flights only
+- `handleGlobalRefresh` groups consecutive days with the same location into segments
+- Edge function fetches all 24 hours per segment from Open-Meteo
+- No hour-level granularity -- a flight day gets one city's weather for the entire day
 
-### Changes in `src/components/timeline/ContinuousTimeline.tsx`
+## Changes
 
-**1. Update return type of `getEntryGlobalHours` (line 214)**
+### File 1: `supabase/functions/fetch-weather/index.ts`
 
-Add `gridTz: string` to the return type. Update the flight branch to include `gridTz: depTz` (line 224).
+**Add hour filtering to the Segment interface and record insertion loop.**
 
-**2. Non-flight branch: compute separate gridTz and resolvedTz (lines 227-267)**
+- Add optional `startHour` and `endHour` fields to the `Segment` interface
+- In the record-building loop, skip hours outside the bounds on boundary dates:
+  - If `startHour` is set and the record is on `startDate` with hour less than `startHour`, skip
+  - If `endHour` is set and the record is on `endDate` with hour greater than `endHour`, skip
+- Segments without hour bounds work exactly as before (backward compatible)
 
-- Add a `gridTz` variable initialized to `homeTimezone`
-- In the day-matching loop, set `gridTz = info.activeTz` initially
-- When a flight exists on that day, set `gridTz = info.flights[0].originTz` (always, regardless of before/after flight)
-- Keep `resolvedTz` logic unchanged (switches to destination after flight)
-- Use `gridTz` (not `resolvedTz`) for `findDayIndex`, `getHourInTimezone` calls that compute `startGH`/`endGH`
-- Return `{ startGH, endGH, resolvedTz, gridTz }`
+### File 2: `src/pages/Timeline.tsx` -- `handleGlobalRefresh` (lines 1054-1079)
 
-**3. Update memoized map type (lines 278-288)**
+**Replace the segment-building logic with entry-aware waypoints.**
 
-Update `entryGlobalHoursMap` and `getEntryGH` types to include `gridTz`.
+The new approach:
 
-**4. Update card rendering callers (lines 1437-1452)**
+1. **Collect waypoints** from ALL scheduled entries with coordinates:
+   - Regular entries: waypoint at `start_time` with the entry's lat/lng
+   - Flight entries: waypoint at `end_time` (landing) with arrival coords; also waypoint at checkin `start_time` with departure coords
+   - Skip transport/checkin/checkout entries (they inherit from their linked flight)
 
-Extract `gridTz` alongside `resolvedTz` from `getEntryGH`.
+2. **For each hour of the trip**, find the nearest waypoint by absolute time distance and assign its location. This naturally handles:
+   - Flight days: location switches at landing
+   - Day trips: entries in a different city get that city's weather
+   - Gaps: hours with no entries inherit the nearest entry's location
 
-**5. Update `dragTz` (line 1507)**
+3. **Round locations to ~10km grid** (`Math.round(lat * 10) / 10`) so nearby locations group together (weather is city-level)
 
-Change `const dragTz = resolvedTz;` to `const dragTz = gridTz;` so drag commit converts global hours back to UTC using the grid's coordinate timezone.
+4. **Group consecutive hours** with the same rounded location into segments with `startHour`/`endHour` bounds
 
-**6. Keep `entryFormatTime` using `resolvedTz` (lines 1510-1518)**
+5. **Clean up**: remove hour bounds from segments that cover full days (startHour=0, endHour=23)
 
-This already uses `resolvedTz` for display -- no change needed.
+6. **Update dependency array** to include `scheduledEntries` instead of `dayLocationMap`
 
-## What Does NOT Change
-- Flight branch of `getEntryGlobalHours` -- already correct, just adds `gridTz` field
-- `formatGlobalHourToDisplay` -- gutter labels already correct
-- Flight group bounds (checkin/checkout expansion) -- uses UTC durations
-- FlightGroupCard fractions -- uses UTC durations
-- `handleDragCommit` -- receives the correct tz via `dragTz`
-- Gap detection, overlap detection -- use startGH/endGH which will now be correct
-- Transport generation, snap logic -- use UTC timestamps
+### What Does NOT Change
+- `dayLocationMap` -- still used by sun gradient (per-day resolution is fine for sunrise/sunset)
+- Weather rendering in `ContinuousTimeline.tsx` -- `weatherData.find()` still works because each date+hour has exactly one record
+- `WeatherBadge` component -- no changes
+- Weather cache deletion -- edge function already deletes all trip weather before inserting
 
 ## Technical Details
 
-The non-flight branch changes from:
+### Edge function changes (fetch-weather/index.ts)
 
-```text
-resolvedTz = destinationTz (after flight)
-position using resolvedTz  -->  WRONG coordinate space
+```typescript
+interface Segment {
+  lat: number;
+  lng: number;
+  startDate: string;
+  endDate: string;
+  startHour?: number;
+  endHour?: number;
+}
 ```
 
-To:
-
-```text
-resolvedTz = destinationTz (for display)
-gridTz = originTz (for positioning)
-position using gridTz  -->  CORRECT coordinate space
+Record filtering added inside the existing loop:
+```typescript
+if (seg.startHour != null && dateStr === seg.startDate && hour < seg.startHour) continue;
+if (seg.endHour != null && dateStr === seg.endDate && hour > seg.endHour) continue;
 ```
 
-For days without flights, `gridTz === resolvedTz` -- zero behavior change.
+### handleGlobalRefresh changes (Timeline.tsx)
 
-## Verification
+Replace lines 1054-1079 (the segment-building section between `refreshDays` and the `await Promise.all`) with the waypoint-based approach described above. The `refreshDays` computation stays. The `await Promise.all` call stays. Only the segment construction changes.
 
-Return flight AMS 19:35 CET to LHR 19:50 GMT (1h15m), with checkout:
-- Flight group ends at GH 21.333
-- Next card at 20:30 GMT: positioned using CET (originTz) gives GH 21.5
-- Gap = 21.5 - 21.333 = 10 min (real gap, correct)
-- Card displays "20:30" using GMT (resolvedTz, correct)
+The dependency array changes from `[tripId, trip, dayLocationMap]` to `[tripId, trip, scheduledEntries, days, homeTimezone]` since we now read entries directly.
 
-Outbound flight LHR 08:15 GMT to AMS 10:45 CET (1h30m), with checkout:
-- Flight group ends at GH 10.25
-- Next card at 11:15 CET (10:15 UTC): positioned using GMT (originTz) gives GH 10.25
-- Gap = 0 (cards touch exactly, correct)
-- Card displays "11:15" using CET (resolvedTz, correct)
+### Example: Flight day (AMS 19:35 CET to LHR 19:50 GMT)
+
+- Waypoints: hotel checkin at 06:00 (lat 52.4), museum at 10:00 (lat 52.4), flight lands 19:50 UTC (lat 51.5)
+- Hours 0-19: nearest waypoint is Amsterdam entries -> Amsterdam weather
+- Hours 20-23: nearest waypoint is London landing -> London weather
+- Result: weather follows the user across the flight boundary
 
 ## Files Modified
-- `src/components/timeline/ContinuousTimeline.tsx` -- update `getEntryGlobalHours`, memoized map types, card rendering, and `dragTz`
+- `supabase/functions/fetch-weather/index.ts` -- add hour filtering to Segment interface and record loop
+- `src/pages/Timeline.tsx` -- replace segment-building in `handleGlobalRefresh` with entry-aware waypoints
