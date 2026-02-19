@@ -1,54 +1,42 @@
 
+# Fix flightEndHour in dayTimezoneMap
 
-# Fix ReturnFlightData Missing Coordinates
+## The Bug
+In `src/pages/Timeline.tsx` line 640, `flightEndHour` is set to `arrHour` which is `getHour(f.end_time, opt.arrival_tz!)`. For timezone-crossing flights, this gives the wrong visual boundary.
 
-## Summary
-The `ReturnFlightData` interface lacks coordinate fields. While `handleReturnFlightConfirm` currently works around this by re-parsing IATA codes from the location strings and looking up airports, this is fragile (depends on string format) and redundant. Storing the coordinates directly in the return flight data is cleaner and more reliable.
+Example: AMS 19:30 CET to LHR 19:50 GMT (1h20m flight). Current code computes `flightEndHour = 19.833` (19:50 in GMT). Correct value is `depHour + utcDurH = 19.5 + 1.333 = 20.833`, which tells the gutter to switch timezone labels at the visual end of the flight card.
 
-## Changes
+## Fix
+**File:** `src/pages/Timeline.tsx`, lines 634-640
 
-### File: `src/components/timeline/EntrySheet.tsx`
-
-**1. Add coordinate fields to `ReturnFlightData` interface** (lines 32-39):
+Replace:
 ```typescript
-interface ReturnFlightData {
-  departureLocation: string;
-  arrivalLocation: string;
-  departureTz: string;
-  arrivalTz: string;
-  departureTerminal: string;
-  arrivalTerminal: string;
-  departureLat: number | null;
-  departureLng: number | null;
-  arrivalLat: number | null;
-  arrivalLng: number | null;
-}
+const depHour = getHour(f.start_time, opt.departure_tz!);
+const arrHour = getHour(f.end_time, opt.arrival_tz!);
+return {
+  originTz: opt.departure_tz!,
+  destinationTz: opt.arrival_tz!,
+  flightStartHour: depHour,
+  flightEndHour: arrHour,
 ```
 
-**2. Store swapped coordinates when building return flight data** (lines 808-812):
+With:
 ```typescript
-setReturnFlightData({
-  departureLocation: arrivalLocation, arrivalLocation: departureLocation,
-  departureTz: arrivalTz, arrivalTz: departureTz,
-  departureTerminal: '', arrivalTerminal: '',
-  departureLat: arrivalLat, departureLng: arrivalLng,
-  arrivalLat: departureLat, arrivalLng: departureLng,
-});
+const depHour = getHour(f.start_time, opt.departure_tz!);
+const utcDurH = (new Date(f.end_time).getTime() - new Date(f.start_time).getTime()) / 3600000;
+return {
+  originTz: opt.departure_tz!,
+  destinationTz: opt.arrival_tz!,
+  flightStartHour: depHour,
+  flightEndHour: depHour + utcDurH,
 ```
 
-**3. Simplify `handleReturnFlightConfirm`** (lines 832-840) -- replace the IATA lookup with direct state sets:
-```typescript
-setDepartureLat(returnFlightData.departureLat);
-setDepartureLng(returnFlightData.departureLng);
-setArrivalLat(returnFlightData.arrivalLat);
-setArrivalLng(returnFlightData.arrivalLng);
-```
-Remove the `depIata`, `arrIata`, `depApt`, `arrApt` lookup lines (832-840) since they become unnecessary.
+The `arrHour` variable (now unused) is removed. One line added (`utcDurH`), one line changed (`flightEndHour`).
 
 ## Files Modified
-- `src/components/timeline/EntrySheet.tsx` -- 3 small edits
+- `src/pages/Timeline.tsx` -- single computation fix in `dayTimezoneMap` useMemo
 
 ## Testing
-- Create outbound LHR to AMS, accept return prompt, save return flight
-- Verify return flight entry_option has Heathrow coordinates (lat: 51.4700, lng: -0.4543)
-- Transport from return flight should use coordinates (check Network tab for coordinate strings in directions call)
+- Create a return flight AMS 19:30 CET to LHR 19:50 GMT
+- Gutter labels should show CET through 19:30, then switch to GMT at 19:50 (aligned with the flight card's bottom edge)
+- Outbound flights (same direction) should also align correctly
