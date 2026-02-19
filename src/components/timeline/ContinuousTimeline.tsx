@@ -211,7 +211,7 @@ const ContinuousTimeline = ({
   }, [days]);
 
   // Compute global hour for an entry
-  const getEntryGlobalHours = useCallback((entry: EntryWithOptions): { startGH: number; endGH: number; resolvedTz: string } => {
+  const getEntryGlobalHours = useCallback((entry: EntryWithOptions): { startGH: number; endGH: number; resolvedTz: string; gridTz: string } => {
     const opt = entry.options[0];
     const isFlight = opt?.category === 'flight' && opt.departure_tz && opt.arrival_tz;
 
@@ -221,16 +221,20 @@ const ContinuousTimeline = ({
       const startLocal = getHourInTimezone(entry.start_time, depTz);
       const startGH = dayIdx * 24 + startLocal;
       const utcDurH = (new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime()) / 3600000;
-      return { startGH, endGH: startGH + utcDurH, resolvedTz: depTz };
+      return { startGH, endGH: startGH + utcDurH, resolvedTz: depTz, gridTz: depTz };
     }
 
     // Non-flight: resolve TZ based on day's flight info
-    // First find which day this entry belongs to by checking TZ
+    // resolvedTz = display timezone (destination after flight, origin before)
+    // gridTz = positioning timezone (always origin on flight days)
     let resolvedTz = homeTimezone;
+    let gridTz = homeTimezone;
     for (const [dayStr, info] of dayTimezoneMap) {
       const entryDate = getDateInTimezone(entry.start_time, info.activeTz);
       if (entryDate === dayStr) {
         resolvedTz = info.activeTz;
+        gridTz = info.activeTz;
+
         if (info.flights.length > 0 && info.flights[0].flightEndUtc) {
           const entryMs = new Date(entry.start_time).getTime();
           const flightEndMs = new Date(info.flights[0].flightEndUtc).getTime();
@@ -246,14 +250,19 @@ const ContinuousTimeline = ({
           } else {
             resolvedTz = entryMs >= flightEndMs ? info.flights[0].destinationTz : info.flights[0].originTz;
           }
+
+          // Grid TZ is ALWAYS originTz on flight days — keeps all positions
+          // in the same coordinate space as the flight card
+          gridTz = info.flights[0].originTz;
         }
         break;
       }
     }
 
-    const dayIdx = findDayIndex(entry.start_time, resolvedTz);
-    const startLocal = getHourInTimezone(entry.start_time, resolvedTz);
-    const endLocal = getHourInTimezone(entry.end_time, resolvedTz);
+    // Use gridTz for positioning (aligns with flight card coordinates)
+    const dayIdx = findDayIndex(entry.start_time, gridTz);
+    const startLocal = getHourInTimezone(entry.start_time, gridTz);
+    const endLocal = getHourInTimezone(entry.end_time, gridTz);
     const startGH = dayIdx * 24 + startLocal;
 
     // Handle cross-midnight: if end is before start in local time, it's the next day
@@ -264,7 +273,9 @@ const ContinuousTimeline = ({
       endGH = dayIdx * 24 + endLocal;
     }
 
-    return { startGH, endGH, resolvedTz };
+    // resolvedTz = display timezone (destination after flight, origin before)
+    // gridTz = positioning timezone (always origin on flight days)
+    return { startGH, endGH, resolvedTz, gridTz };
   }, [dayTimezoneMap, homeTimezone, findDayIndex, scheduledEntries]);
 
   // Sort all scheduled entries by global start hour
@@ -276,14 +287,14 @@ const ContinuousTimeline = ({
 
   // Memoized map: compute getEntryGlobalHours ONCE per entry per render
   const entryGlobalHoursMap = useMemo(() => {
-    const map = new Map<string, { startGH: number; endGH: number; resolvedTz: string }>();
+    const map = new Map<string, { startGH: number; endGH: number; resolvedTz: string; gridTz: string }>();
     for (const entry of sortedEntries) {
       map.set(entry.id, getEntryGlobalHours(entry));
     }
     return map;
   }, [sortedEntries, getEntryGlobalHours]);
 
-  const getEntryGH = useCallback((entry: EntryWithOptions): { startGH: number; endGH: number; resolvedTz: string } => {
+  const getEntryGH = useCallback((entry: EntryWithOptions): { startGH: number; endGH: number; resolvedTz: string; gridTz: string } => {
     return entryGlobalHoursMap.get(entry.id) ?? getEntryGlobalHours(entry);
   }, [entryGlobalHoursMap, getEntryGlobalHours]);
 
@@ -1434,22 +1445,26 @@ const ContinuousTimeline = ({
           const isLocked = entry.is_locked;
           const entryPast = isPast(new Date(entry.end_time));
 
-          let entryGH: { startGH: number; endGH: number; resolvedTz: string };
+          let entryGH: { startGH: number; endGH: number; resolvedTz: string; gridTz: string };
           let entryStartGH: number;
           let entryEndGH: number;
           let resolvedTz: string;
+          let gridTz: string;
 
           const isResizing = isDragged && dragState && (dragState.type === 'resize-top' || dragState.type === 'resize-bottom');
 
           if (isResizing && dragState) {
             entryStartGH = dragState.currentStartHour;
             entryEndGH = dragState.currentEndHour;
-            resolvedTz = getEntryGH(entry).resolvedTz;
+            const ghResult = getEntryGH(entry);
+            resolvedTz = ghResult.resolvedTz;
+            gridTz = ghResult.gridTz;
           } else {
             entryGH = getEntryGH(entry);
             entryStartGH = entryGH.startGH;
             entryEndGH = entryGH.endGH;
             resolvedTz = entryGH.resolvedTz;
+            gridTz = entryGH.gridTz;
           }
 
           // Flight groups: expand bounds
@@ -1504,7 +1519,7 @@ const ContinuousTimeline = ({
           const origGH = getEntryGH(entry);
           const origStartGH = origGH.startGH;
           const origEndGH = origGH.endGH;
-          const dragTz = resolvedTz;
+          const dragTz = gridTz;
 
           // Per-entry formatTime using resolved TZ
           const entryFormatTime = (iso: string) => {
