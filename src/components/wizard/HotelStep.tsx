@@ -153,7 +153,6 @@ const HotelStep = ({ hotels, onChange, defaultCheckInDate, defaultCheckoutDate }
   const finaliseDraft = () => {
     onChange([...hotels, buildDraft()]);
     resetFields();
-    setSubStep(0);
   };
 
   const autoEnrichFromParsedName = async (parsedHotelName: string) => {
@@ -410,17 +409,17 @@ const HotelStep = ({ hotels, onChange, defaultCheckInDate, defaultCheckoutDate }
         <p className="text-sm text-muted-foreground mt-1">Add your hotel — or skip this for now</p>
       </div>
 
-      {/* Sub-step progress dots (visible after sub-step 0) */}
-      {subStep > 0 && (
+      {/* Sub-step progress dots (visible for sub-steps 1-3) */}
+      {subStep > 0 && subStep <= 3 && (
         <div className="flex items-center gap-1.5">
-          {[0, 1, 2, 3, 4].map(s => (
+          {[0, 1, 2, 3].map(s => (
             <div key={s} className={cn('h-1.5 flex-1 rounded-full transition-colors', s <= subStep ? 'bg-primary' : 'bg-muted')} />
           ))}
         </div>
       )}
 
       {/* Previously added hotels */}
-      {hotels.length > 0 && subStep < 4 && (
+      {hotels.length > 0 && subStep <= 4 && (
         <div className="space-y-1.5">
           {hotels.map((h, i) => (
             <div key={i} className="flex items-center gap-2 rounded-lg border border-border p-2">
@@ -543,36 +542,21 @@ const HotelStep = ({ hotels, onChange, defaultCheckInDate, defaultCheckoutDate }
         </div>
       )}
 
-      {/* Sub-step 4: Review */}
+      {/* Sub-step 4: Another hotel? */}
       {subStep === 4 && (
-        <div className="space-y-3">
-          <div className="rounded-lg border border-border overflow-hidden">
-            {photos.length > 0 && (
-              <img src={photos[0]} alt={hotelName} className="w-full h-28 object-cover" />
-            )}
-            <div className="p-3">
-              <p className="text-sm font-medium">🏨 {hotelName}</p>
-              {address && <p className="text-xs text-muted-foreground mt-0.5">📍 {address}</p>}
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {checkInDate && checkoutDate ? (
-                  <>
-                    {format(parseISO(checkInDate), 'd MMM')} ({checkInTime}) → {format(parseISO(checkoutDate), 'd MMM')} ({checkoutTime})
-                    {' · '}{numNights} night{numNights !== 1 ? 's' : ''}
-                  </>
-                ) : `${numNights} night(s)`}
-              </p>
-              <p className="text-xs text-muted-foreground">Return {eveningReturn} → Leave {morningLeave}</p>
-            </div>
+        <div className="space-y-4">
+          <div className="text-center py-2">
+            <p className="text-sm font-medium text-foreground">Hotel added ✓</p>
+            <p className="text-sm text-muted-foreground">Do you have another hotel to add?</p>
           </div>
-
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <Button variant="outline" className="h-16 flex-col gap-1" onClick={() => { finaliseDraft(); }}>
+          <div className="grid grid-cols-2 gap-3">
+            <Button variant="outline" className="h-16 flex-col gap-1" onClick={() => { resetFields(); setSubStep(0); }}>
               <Plus className="h-5 w-5" />
-              <span className="text-xs">Add Another</span>
+              <span className="text-xs">Add Another Hotel</span>
             </Button>
-            <Button className="h-16 flex-col gap-1" onClick={finaliseDraft}>
+            <Button className="h-16 flex-col gap-1" onClick={() => { /* Stay — main wizard Next advances */ }}>
               <Check className="h-5 w-5" />
-              <span className="text-xs">Done</span>
+              <span className="text-xs">No, continue</span>
             </Button>
           </div>
         </div>
@@ -585,11 +569,18 @@ const HotelStep = ({ hotels, onChange, defaultCheckInDate, defaultCheckoutDate }
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
           <Button
-            onClick={() => setSubStep(s => s + 1)}
+            onClick={() => {
+              if (subStep === 3) {
+                finaliseDraft();
+                setSubStep(4);
+              } else {
+                setSubStep(s => s + 1);
+              }
+            }}
             disabled={(subStep === 1 && !canProceedStep1) || (subStep === 2 && !canProceedStep2)}
             className="gap-1"
           >
-            Next <ArrowRight className="h-4 w-4" />
+            {subStep === 3 ? 'Confirm' : 'Next'} <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
       )}
