@@ -14,20 +14,13 @@ export function useAdminAuth() {
         setLoading(false);
 
         // On first sign-in, ensure user_roles entry exists
+        // Ensure profile exists on sign-in (trigger handles signup, this covers edge cases)
         if (event === 'SIGNED_IN' && session) {
           setTimeout(async () => {
-            const { data } = await supabase
-              .from('user_roles')
-              .select('id')
-              .eq('user_id', session.user.id)
-              .maybeSingle();
-
-            if (!data) {
-              await supabase.from('user_roles').insert({
-                user_id: session.user.id,
-                role: 'admin',
-              });
-            }
+            await supabase.from('profiles').upsert({
+              id: session.user.id,
+              display_name: session.user.user_metadata?.display_name || null,
+            }, { onConflict: 'id' });
           }, 0);
         }
       }
@@ -46,12 +39,15 @@ export function useAdminAuth() {
     return supabase.auth.signInWithPassword({ email, password });
   };
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = async (email: string, password: string, displayName?: string) => {
     return supabase.auth.signUp({
       email,
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/`,
+        data: {
+          display_name: displayName || email.split('@')[0],
+        },
       },
     });
   };

@@ -17,6 +17,7 @@ export type Database = {
       entries: {
         Row: {
           created_at: string
+          created_by: string | null
           end_time: string
           from_entry_id: string | null
           id: string
@@ -34,6 +35,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          created_by?: string | null
           end_time: string
           from_entry_id?: string | null
           id?: string
@@ -51,6 +53,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          created_by?: string | null
           end_time?: string
           from_entry_id?: string | null
           id?: string
@@ -538,6 +541,7 @@ export type Database = {
           pin_hash: string | null
           role: string
           trip_id: string | null
+          user_id: string | null
         }
         Insert: {
           created_at?: string
@@ -546,6 +550,7 @@ export type Database = {
           pin_hash?: string | null
           role?: string
           trip_id?: string | null
+          user_id?: string | null
         }
         Update: {
           created_at?: string
@@ -554,6 +559,7 @@ export type Database = {
           pin_hash?: string | null
           role?: string
           trip_id?: string | null
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -579,6 +585,7 @@ export type Database = {
           home_timezone: string
           id: string
           image_url: string | null
+          invite_code: string | null
           name: string
           owner_id: string | null
           start_date: string | null
@@ -599,6 +606,7 @@ export type Database = {
           home_timezone?: string
           id?: string
           image_url?: string | null
+          invite_code?: string | null
           name: string
           owner_id?: string | null
           start_date?: string | null
@@ -619,6 +627,7 @@ export type Database = {
           home_timezone?: string
           id?: string
           image_url?: string | null
+          invite_code?: string | null
           name?: string
           owner_id?: string | null
           start_date?: string | null
@@ -750,6 +759,9 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_trip_editor: { Args: { trip_id: string }; Returns: boolean }
+      is_trip_member: { Args: { trip_id: string }; Returns: boolean }
+      is_trip_organiser: { Args: { trip_id: string }; Returns: boolean }
     }
     Enums: {
       app_role: "admin"

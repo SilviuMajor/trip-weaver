@@ -393,11 +393,13 @@ const TripWizard = () => {
 
       const { error: membersError } = await supabase
         .from('trip_users')
-        .insert(allMembers.map(m => ({
+        .insert(allMembers.map((m, i) => ({
           name: m.name,
           role: m.role,
           trip_id: trip.id,
-        })));
+          // Only the first member (creator/organizer) gets user_id
+          ...(i === 0 ? { user_id: adminUser?.id ?? null } : {}),
+        } as any)));
 
       if (membersError) throw membersError;
 
