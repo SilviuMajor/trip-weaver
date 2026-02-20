@@ -1,43 +1,23 @@
 
 
-# Fix Mobile Scroll-on-Card (Remaining Issues)
+# Toast Notifications — Compact, Below Nav, Shorter Duration
 
-Two of the four fixes are already in place (EntryCard `pan-y` and useDragResize two-phase lifecycle). Two issues remain:
-
----
-
-## Fix 1: Remove `touchAction: 'none'` from Card Wrapper
-
-**File:** `src/components/timeline/ContinuousTimeline.tsx` (line 1587)
-
-Delete `touchAction: 'none'` from the wrapper div's style object. The child EntryCard already handles touch action via `pan-y`.
+A single file update to make toast notifications more compact, positioned below the nav bar, and auto-dismiss faster.
 
 ---
 
-## Fix 2: Remove Double-Fire (wrapper onTouchStart)
+## Changes
 
-**File:** `src/components/timeline/ContinuousTimeline.tsx` (lines 1566-1569)
+**File:** `src/components/ui/sonner.tsx`
 
-Remove the `onTouchStart` prop from the wrapper div entirely. Both the wrapper and EntryCard currently call `onTouchStart`, creating duplicate timers and listeners.
+Update the `Sonner` component props and toast class names:
 
-Move the `dismissCardHint()` call into the EntryCard's `onTouchDragStart` handler (line 1736-1737), so the hint is still dismissed on touch.
+- Add `position="top-center"` — toasts appear centered at top
+- Add `offset={56}` — pushes toasts below the nav bar (56px)
+- Add `duration={2000}` — auto-dismiss after 2 seconds (was default ~4s)
+- Add `gap={4}` — tighter spacing between stacked toasts
+- Update toast classNames to include `py-2 px-3 text-sm` for compact padding
+- Update description classNames to include `text-xs` for smaller secondary text
 
----
-
-## Fix 3: Add Double-Fire Guard to useDragResize
-
-**File:** `src/hooks/useDragResize.ts` (line 344, after the function signature)
-
-Add `if (touchTimerRef.current) return;` guard at the top of `onTouchStart` to prevent duplicate sequences if somehow called twice.
-
----
-
-## Technical Details
-
-| File | Line(s) | Change |
-|------|---------|--------|
-| `ContinuousTimeline.tsx` | 1587 | Delete `touchAction: 'none'` from wrapper style |
-| `ContinuousTimeline.tsx` | 1566-1569 | Delete `onTouchStart` prop from wrapper div |
-| `ContinuousTimeline.tsx` | 1736-1737 | Add `dismissCardHint();` before `onTouchStart` call |
-| `useDragResize.ts` | 344 | Add `if (touchTimerRef.current) return;` guard |
+No other files are affected.
 
