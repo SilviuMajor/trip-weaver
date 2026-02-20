@@ -22,9 +22,7 @@ import VoteButton from './VoteButton';
 import { decodePolylineEndpoint, formatPriceLevel, getEntryDayHours, checkOpeningHoursConflict, formatTimeInTz, getTzAbbr } from '@/lib/entryHelpers';
 import type { Trip, EntryWithOptions, EntryOption } from '@/types/trip';
 
-// ─── Module-level review cache (persists across mounts within the session) ───
-type CachedReview = { text: string; rating: number | null; author: string; relativeTime: string };
-const reviewCache = new Map<string, CachedReview[]>();
+import { getCachedReviews, prefetchReviews, seedReviewCache, type CachedReview } from '@/lib/reviewCache';
 
 // ─── Place Details Section ───
 const PlaceDetailsSection = ({ option, entryStartTime }: { option: EntryOption; entryStartTime?: string }) => {
@@ -194,38 +192,33 @@ const PlaceOverview = ({
     }
   }, [deleting, option?.hotel_id]);
 
-  // Fetch reviews — check cache first, then preloaded, then API
+  // Fetch reviews — cache-first, then preloaded, then API (via shared cache module)
   useEffect(() => {
     const placeId = option.google_place_id;
+    if (!placeId || option.category === 'flight' || option.category === 'transfer') return;
 
-    // 1. Check module-level cache
-    if (placeId && reviewCache.has(placeId)) {
-      setReviews(reviewCache.get(placeId)!);
+    // 1. Check module-level cache (instant — populated by prefetch or previous open)
+    const cached = getCachedReviews(placeId);
+    if (cached) {
+      setReviews(cached);
       setReviewLoading(false);
       return;
     }
 
-    // 2. Use preloaded reviews
+    // 2. Seed from preloaded reviews (ExploreView / ActivitiesStep)
     if (preloadedReviews && preloadedReviews.length > 0) {
       const sorted = [...preloadedReviews].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 5);
+      seedReviewCache(placeId, sorted);
       setReviews(sorted);
-      if (placeId) reviewCache.set(placeId, sorted);
       setReviewLoading(false);
       return;
     }
 
-    // 3. Fetch from API
-    if (!placeId || option.category === 'flight' || option.category === 'transfer') return;
+    // 3. Await in-flight or start new fetch (prefetch may already be running from handleCardTap)
     setReviewLoading(true);
-    supabase.functions.invoke('google-places', {
-      body: { action: 'details', placeId }
-    }).then(({ data }) => {
-      if (data?.reviews?.length > 0) {
-        const sorted = [...data.reviews].sort((a: any, b: any) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 5);
-        setReviews(sorted);
-        reviewCache.set(placeId, sorted);
-      }
-    }).catch(() => {}).finally(() => setReviewLoading(false));
+    prefetchReviews(placeId).then((result) => {
+      setReviews(result);
+    }).finally(() => setReviewLoading(false));
   }, [option.google_place_id, option.category, preloadedReviews]);
 
   useEffect(() => {
