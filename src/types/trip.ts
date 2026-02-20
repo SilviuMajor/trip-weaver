@@ -182,6 +182,7 @@ export interface GlobalPlace {
   status: 'visited' | 'want_to_go';
   source: 'trip_auto' | 'trip_planner' | 'explore_save' | 'manual' | 'favourite';
   source_trip_id: string | null;
+  source_trip_name?: string | null;
   rating: number | null;
   price_level: string | null;
   opening_hours: string[] | null;
