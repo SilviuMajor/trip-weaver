@@ -99,7 +99,7 @@ const PlacesAutocomplete = ({ value, onChange, onPlaceSelect, placeholder, tripL
           placeId: prediction.place_id,
           priceLevel: data.priceLevel ?? null,
           placeTypes: data.placeTypes ?? null,
-          photos: data.photos ?? [],
+          photos: (data.photos ?? []).map((p: any) => typeof p === 'string' ? p : p?.url).filter(Boolean),
           reviews: data.reviews ?? [],
         });
       }
