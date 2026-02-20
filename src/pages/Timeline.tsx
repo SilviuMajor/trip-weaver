@@ -114,6 +114,7 @@ const Timeline = () => {
 
   // Category sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const openedFromPlannerRef = useRef(false);
 
   // Live panel state
   const [liveOpen, setLiveOpen] = useState(false);
@@ -3120,7 +3121,11 @@ const Timeline = () => {
               onDragStart={handleSidebarDragStart}
               onCardTap={(entry) => {
                 const opt = entry.options[0];
-                if (opt) handleCardTap(entry, opt);
+                if (opt) {
+                  openedFromPlannerRef.current = true;
+                  setSidebarOpen(false);
+                  setTimeout(() => handleCardTap(entry, opt), 150);
+                }
               }}
               onAddEntry={(catId) => {
                 if (catId === 'hotel') {
@@ -3149,6 +3154,10 @@ const Timeline = () => {
             onOpenChange={(open) => {
               setSheetOpen(open);
               if (!open) {
+                if (openedFromPlannerRef.current) {
+                  openedFromPlannerRef.current = false;
+                  setTimeout(() => setSidebarOpen(true), 200);
+                }
                 setTimeout(() => {
                   setSheetMode(null);
                   setSheetEntry(null);
