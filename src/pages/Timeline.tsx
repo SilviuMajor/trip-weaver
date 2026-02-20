@@ -1549,107 +1549,8 @@ const Timeline = () => {
 
       await Promise.all([...transportDbPromises, ...transportDeletions]);
 
-      // Check if we need to create NEW transport entries for newly-adjacent cards
-      const updatedEntries = entries.map(e => e.id === entryId ? { ...e, start_time: newStartIso, end_time: newEndIso } : e);
-      const sorted = updatedEntries
-        .filter(e => e.is_scheduled && e.options[0]?.category !== 'transfer' && e.options[0]?.category !== 'airport_processing' && !e.linked_flight_id)
-        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
-      const idx = sorted.findIndex(e => e.id === entryId);
-
-      if (idx > 0) {
-        const prev = sorted[idx - 1];
-        const gapMin = (new Date(newStartIso).getTime() - new Date(prev.end_time).getTime()) / 60000;
-        const hasTransport = entries.some(e => e.options[0]?.category === 'transfer' && e.from_entry_id === prev.id && e.to_entry_id === entryId);
-        if (gapMin >= 0 && gapMin <= 30 && !hasTransport) {
-          handleSnapRelease(entryId, prev.id, 'below');
-        }
-      }
-      if (idx >= 0 && idx < sorted.length - 1) {
-        const next = sorted[idx + 1];
-        const gapMin = (new Date(next.start_time).getTime() - new Date(newEndIso).getTime()) / 60000;
-        const hasTransport = entries.some(e => e.options[0]?.category === 'transfer' && e.from_entry_id === entryId && e.to_entry_id === next.id);
-        if (gapMin >= 0 && gapMin <= 30 && !hasTransport) {
-          handleSnapRelease(next.id, entryId, 'below');
-        }
-      }
     } catch (err) {
       console.error('Failed to manage transport entries:', err);
-    }
-
-    // 5. Smart Drop: push overlapped card down (optimistic)
-    const newStartMs = new Date(newStartIso).getTime();
-    const newEndMs = new Date(newEndIso).getTime();
-
-    const overlapped = scheduledEntries.find(e => {
-      if (e.id === entryId) return false;
-      if (e.options[0]?.category === 'transfer') return false;
-      const eStart = new Date(e.start_time).getTime();
-      const eEnd = new Date(e.end_time).getTime();
-      return newStartMs < eEnd && newEndMs > eStart;
-    });
-
-    if (overlapped && !overlapped.is_locked) {
-      const pushedStart = newEndMs;
-      const pushedDuration = new Date(overlapped.end_time).getTime() - new Date(overlapped.start_time).getTime();
-      const pushedEnd = pushedStart + pushedDuration;
-
-      // Check: would push collide with a locked card?
-      const wouldCollide = scheduledEntries.find(e => {
-        if (e.id === entryId || e.id === overlapped.id) return false;
-        if (!e.is_locked) return false;
-        const eStart = new Date(e.start_time).getTime();
-        return pushedEnd > eStart && pushedStart < new Date(e.end_time).getTime();
-      });
-
-      // Check: would push overlap ANY other card? (no cascading)
-      const wouldOverlapAnother = scheduledEntries.find(e => {
-        if (e.id === entryId || e.id === overlapped.id) return false;
-        if (e.options[0]?.category === 'transfer') return false;
-        const eStart = new Date(e.start_time).getTime();
-        const eEnd = new Date(e.end_time).getTime();
-        return pushedStart < eEnd && pushedEnd > eStart;
-      });
-
-      if (!wouldCollide && !wouldOverlapAnother) {
-        const oldOverlapStart = overlapped.start_time;
-        const oldOverlapEnd = overlapped.end_time;
-        const pushedStartIso = new Date(pushedStart).toISOString();
-        const pushedEndIso = new Date(pushedEnd).toISOString();
-
-        // Optimistic local update for pushed card
-        updateEntryLocally(overlapped.id, { start_time: pushedStartIso, end_time: pushedEndIso });
-
-        await supabase.from('entries').update({
-          start_time: pushedStartIso,
-          end_time: pushedEndIso,
-        }).eq('id', overlapped.id);
-
-        sonnerToast.success(`Pushed ${overlapped.options[0]?.name || 'entry'} to make room`);
-
-        pushAction({
-          description: 'Smart drop + push',
-          undo: async () => {
-            await supabase.from('entries').update({
-              start_time: oldOverlapStart,
-              end_time: oldOverlapEnd,
-            }).eq('id', overlapped.id);
-            updateEntryLocally(overlapped.id, { start_time: oldOverlapStart, end_time: oldOverlapEnd });
-          },
-          redo: async () => {
-            await supabase.from('entries').update({
-              start_time: pushedStartIso,
-              end_time: pushedEndIso,
-            }).eq('id', overlapped.id);
-            updateEntryLocally(overlapped.id, { start_time: pushedStartIso, end_time: pushedEndIso });
-          },
-        });
-
-        handleSnapRelease(entryId, overlapped.id, 'below');
-      }
-    } else if (overlapped && overlapped.is_locked) {
-      sonnerToast(`Overlaps ${overlapped.options[0]?.name || 'a locked entry'}`, {
-        description: 'Unlock it to rearrange',
-      });
     }
 
     // Auto-extend trip if entry goes past final day
@@ -1959,34 +1860,6 @@ const Timeline = () => {
       }
     }
 
-    // Auto-create transport for nearby adjacent cards (0-30 min gap)
-    const updatedEntry = { ...entry, start_time: startIso, end_time: endIso, is_scheduled: true };
-    const nonTransportScheduled = scheduledEntries.filter(e => {
-      const cat = e.options[0]?.category;
-      return cat !== 'transfer' && cat !== 'airport_processing' && !e.linked_flight_id && e.id !== placedEntryId;
-    });
-    const sorted = [...nonTransportScheduled, updatedEntry].sort(
-      (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
-    );
-    const placedIdx = sorted.findIndex(e => e.id === placedEntryId);
-
-    // Check card before
-    if (placedIdx > 0) {
-      const prev = sorted[placedIdx - 1];
-      const gapMin = (new Date(startIso).getTime() - new Date(prev.end_time).getTime()) / 60000;
-      if (gapMin >= 0 && gapMin <= 30) {
-        handleSnapRelease(placedEntryId, prev.id, 'below');
-      }
-    }
-    // Check card after
-    if (placedIdx < sorted.length - 1) {
-      const next = sorted[placedIdx + 1];
-      const gapMin = (new Date(next.start_time).getTime() - new Date(endIso).getTime()) / 60000;
-      if (gapMin >= 0 && gapMin <= 30) {
-        handleSnapRelease(next.id, placedEntryId, 'below');
-      }
-    }
-
     toast({ title: 'Placed on timeline ✨' });
   };
 
@@ -2018,34 +1891,7 @@ const Timeline = () => {
 
     const newEntryId = await handleAddAtTime(place, startIso, endIso);
 
-    // Auto-create transport for nearby adjacent cards (0-30 min gap)
-    if (newEntryId) {
-      const nonTransportScheduled = scheduledEntries.filter(e => {
-        const cat = e.options[0]?.category;
-        return cat !== 'transfer' && cat !== 'airport_processing' && !e.linked_flight_id && e.id !== newEntryId;
-      });
-      const placedEntry = { id: newEntryId, start_time: startIso, end_time: endIso };
-      const sorted = [...nonTransportScheduled, placedEntry].sort(
-        (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
-      );
-      const placedIdx = sorted.findIndex(e => e.id === newEntryId);
-
-      if (placedIdx > 0) {
-        const prev = sorted[placedIdx - 1];
-        const gapMin = (new Date(startIso).getTime() - new Date(prev.end_time).getTime()) / 60000;
-        if (gapMin >= 0 && gapMin <= 30) {
-          handleSnapRelease(newEntryId, prev.id, 'below');
-        }
-      }
-      if (placedIdx < sorted.length - 1) {
-        const next = sorted[placedIdx + 1];
-        const gapMin = (new Date(next.start_time).getTime() - new Date(endIso).getTime()) / 60000;
-        if (gapMin >= 0 && gapMin <= 30) {
-          handleSnapRelease(next.id, newEntryId, 'below');
-        }
-      }
-    }
-  }, [trip, tripId, dayTimezoneMap, homeTimezone, handleAddAtTime, scheduledEntries, handleSnapRelease]);
+  }, [trip, tripId, dayTimezoneMap, homeTimezone, handleAddAtTime, scheduledEntries]);
 
   // Handle "Add to Timeline" from PlaceOverview
   const handleAddToTimeline = useCallback((place: ExploreResult) => {

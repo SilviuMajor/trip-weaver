@@ -780,7 +780,7 @@ const ContinuousTimeline = ({
       dragDuration = dragEnd - dragStart;
     }
 
-    const SNAP_THRESHOLD_HOURS = 20 / 60; // 20 minutes
+    const SNAP_THRESHOLD_HOURS = 15 / 60; // 15 minutes
 
     let bestSnap: { entryId: string; side: 'above' | 'below'; snapStartHour: number } | null = null;
     let bestDist = SNAP_THRESHOLD_HOURS;
