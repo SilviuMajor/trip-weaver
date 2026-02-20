@@ -914,10 +914,12 @@ const Timeline = () => {
       const toOldStart = toEntry.start_time;
       const toOldEnd = toEntry.end_time;
       const toDuration = new Date(toOldEnd).getTime() - new Date(toOldStart).getTime();
-      await supabase.from('entries').update({
-        start_time: new Date(transportEndMs).toISOString(),
-        end_time: new Date(transportEndMs + toDuration).toISOString(),
-      }).eq('id', toEntryId);
+      if (!toEntry.is_locked) {
+        await supabase.from('entries').update({
+          start_time: new Date(transportEndMs).toISOString(),
+          end_time: new Date(transportEndMs + toDuration).toISOString(),
+        }).eq('id', toEntryId);
+      }
 
       sonnerToast.dismiss(toastId);
       sonnerToast.success('Snapped with transport');
@@ -929,10 +931,12 @@ const Timeline = () => {
             await supabase.from('entry_options').delete().eq('entry_id', newTransport.id);
             await supabase.from('entries').delete().eq('id', newTransport.id);
           }
-          await supabase.from('entries').update({
-            start_time: toOldStart,
-            end_time: toOldEnd,
-          }).eq('id', toEntryId);
+          if (!toEntry.is_locked) {
+            await supabase.from('entries').update({
+              start_time: toOldStart,
+              end_time: toOldEnd,
+            }).eq('id', toEntryId);
+          }
         },
         redo: async () => { await fetchData(); },
       });
@@ -1032,6 +1036,7 @@ const Timeline = () => {
             const afterInBlock = getEntriesAfterInBlock(tid, block);
 
             for (const ae of afterInBlock) {
+              if (ae.is_locked) break; // Stop cascade at locked entry
               const aeStart = new Date(ae.start_time).getTime();
               if (aeStart < newEndMs) {
                 const shift = newEndMs - aeStart;
@@ -1060,7 +1065,7 @@ const Timeline = () => {
 
     const updates = entryIds.map(id => {
       const entry = entries.find(e => e.id === id);
-      if (!entry) return null;
+      if (!entry || entry.is_locked) return null;
       return {
         id,
         oldStart: entry.start_time,
