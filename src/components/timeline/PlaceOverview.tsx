@@ -9,7 +9,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { utcToLocal, localToUTC } from '@/lib/timezoneUtils';
-import { haversineKm } from '@/lib/distance';
+
 import { cn } from '@/lib/utils';
 import { Loader2, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, RefreshCw, Phone, ChevronDown, Navigation, Car, AlertTriangle, X } from 'lucide-react';
 import InlineField from './InlineField';
@@ -21,6 +21,10 @@ import RouteMapPreview from './RouteMapPreview';
 import VoteButton from './VoteButton';
 import { decodePolylineEndpoint, formatPriceLevel, getEntryDayHours, checkOpeningHoursConflict, formatTimeInTz, getTzAbbr } from '@/lib/entryHelpers';
 import type { Trip, EntryWithOptions, EntryOption } from '@/types/trip';
+
+// ─── Module-level review cache (persists across mounts within the session) ───
+type CachedReview = { text: string; rating: number | null; author: string; relativeTime: string };
+const reviewCache = new Map<string, CachedReview[]>();
 
 // ─── Place Details Section ───
 const PlaceDetailsSection = ({ option, entryStartTime }: { option: EntryOption; entryStartTime?: string }) => {
@@ -190,20 +194,36 @@ const PlaceOverview = ({
     }
   }, [deleting, option?.hotel_id]);
 
-  // Fetch reviews on-demand (skip if preloaded)
+  // Fetch reviews — check cache first, then preloaded, then API
   useEffect(() => {
-    if (preloadedReviews && preloadedReviews.length > 0) {
-      setReviews([...preloadedReviews].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 5));
+    const placeId = option.google_place_id;
+
+    // 1. Check module-level cache
+    if (placeId && reviewCache.has(placeId)) {
+      setReviews(reviewCache.get(placeId)!);
       setReviewLoading(false);
       return;
     }
-    if (!option.google_place_id || option.category === 'flight' || option.category === 'transfer') return;
+
+    // 2. Use preloaded reviews
+    if (preloadedReviews && preloadedReviews.length > 0) {
+      const sorted = [...preloadedReviews].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 5);
+      setReviews(sorted);
+      if (placeId) reviewCache.set(placeId, sorted);
+      setReviewLoading(false);
+      return;
+    }
+
+    // 3. Fetch from API
+    if (!placeId || option.category === 'flight' || option.category === 'transfer') return;
     setReviewLoading(true);
     supabase.functions.invoke('google-places', {
-      body: { action: 'details', placeId: option.google_place_id }
+      body: { action: 'details', placeId }
     }).then(({ data }) => {
       if (data?.reviews?.length > 0) {
-        setReviews([...data.reviews].sort((a: any, b: any) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 5));
+        const sorted = [...data.reviews].sort((a: any, b: any) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 5);
+        setReviews(sorted);
+        reviewCache.set(placeId, sorted);
       }
     }).catch(() => {}).finally(() => setReviewLoading(false));
   }, [option.google_place_id, option.category, preloadedReviews]);
@@ -407,8 +427,6 @@ const PlaceOverview = ({
   };
 
   // ─── Computed values ───
-  const distance = userLat != null && userLng != null && option.latitude != null && option.longitude != null
-    ? haversineKm(userLat, userLng, option.latitude, option.longitude) : null;
   const hasVoted = userVotes.includes(option.id);
   const images = option.images ?? [];
   const isLocked = entry.is_locked;
@@ -447,6 +465,26 @@ const PlaceOverview = ({
                 <ImageUploader optionId={option.id} currentCount={images.length} onUploaded={onSaved} />
               </div>
             )}
+            {!isFlightView && entry.start_time && !entry.start_time.startsWith('2099') && (() => {
+              const diffMs = new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime();
+              const totalMin = Math.round(diffMs / 60000);
+              const h = Math.floor(totalMin / 60);
+              const m = totalMin % 60;
+              const durLabel = totalMin <= 0 ? '' : h > 0 ? `${h}h${m ? ` ${m}m` : ''}` : `${m}m`;
+              const startDisplay = formatTimeProp?.(entry.start_time) ?? '';
+              const endDisplay = formatTimeProp?.(entry.end_time) ?? '';
+              return (startDisplay && endDisplay) ? (
+                <div className="absolute bottom-3 left-3 z-30 flex items-center gap-1.5 rounded-full bg-black/40 backdrop-blur-sm px-3 py-1.5">
+                  <span className="text-xs text-white/80">🕐</span>
+                  <span className="text-xs font-medium text-white">{startDisplay}</span>
+                  <span className="text-xs text-white/60">—</span>
+                  <span className="text-xs font-medium text-white">{endDisplay}</span>
+                  {durLabel && (
+                    <span className="text-[10px] text-white/60 ml-0.5">{durLabel}</span>
+                  )}
+                </div>
+              ) : null;
+            })()}
           </div>
         ) : isFlightView ? (
           <div className="relative w-full overflow-hidden" style={{ height: 180, minHeight: 180 }}>
@@ -459,8 +497,28 @@ const PlaceOverview = ({
             />
           </div>
         ) : isEditor && option.category !== 'transfer' ? (
-          <div className="w-full bg-muted/30 flex items-center justify-center" style={{ height: 160 }}>
+          <div className="relative w-full bg-muted/30 flex items-center justify-center" style={{ height: 160 }}>
             <ImageUploader optionId={option.id} currentCount={0} onUploaded={onSaved} />
+            {!isFlightView && entry.start_time && !entry.start_time.startsWith('2099') && (() => {
+              const diffMs = new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime();
+              const totalMin = Math.round(diffMs / 60000);
+              const h = Math.floor(totalMin / 60);
+              const m = totalMin % 60;
+              const durLabel = totalMin <= 0 ? '' : h > 0 ? `${h}h${m ? ` ${m}m` : ''}` : `${m}m`;
+              const startDisplay = formatTimeProp?.(entry.start_time) ?? '';
+              const endDisplay = formatTimeProp?.(entry.end_time) ?? '';
+              return (startDisplay && endDisplay) ? (
+                <div className="absolute bottom-3 left-3 z-30 flex items-center gap-1.5 rounded-full bg-black/40 backdrop-blur-sm px-3 py-1.5">
+                  <span className="text-xs text-white/80">🕐</span>
+                  <span className="text-xs font-medium text-white">{startDisplay}</span>
+                  <span className="text-xs text-white/60">—</span>
+                  <span className="text-xs font-medium text-white">{endDisplay}</span>
+                  {durLabel && (
+                    <span className="text-[10px] text-white/60 ml-0.5">{durLabel}</span>
+                  )}
+                </div>
+              ) : null;
+            })()}
           </div>
         ) : null}
 
@@ -528,21 +586,36 @@ const PlaceOverview = ({
               )}
             </div>
 
-            {/* Title */}
-            <h2 className="text-xl font-bold">
-              <InlineField
-                value={option.name}
-                canEdit={isEditor}
-                onSave={async (v) => {
-                  await handleInlineSaveOption('name', v);
-                  if (v !== option.name && v.trim().length > 2) {
-                    setPlaceSearchQuery(v);
-                    setShowPlaceSearch(true);
-                  }
-                }}
-                placeholder="Entry name"
-              />
-            </h2>
+            {/* Title + rating */}
+            <div className="flex items-start justify-between gap-2">
+              <h2 className="text-xl font-bold flex-1 min-w-0">
+                <InlineField
+                  value={option.name}
+                  canEdit={isEditor}
+                  onSave={async (v) => {
+                    await handleInlineSaveOption('name', v);
+                    if (v !== option.name && v.trim().length > 2) {
+                      setPlaceSearchQuery(v);
+                      setShowPlaceSearch(true);
+                    }
+                  }}
+                  placeholder="Entry name"
+                />
+              </h2>
+              {(() => {
+                const rating = (option as any).rating as number | null;
+                const userRatingCount = (option as any).user_rating_count as number | null;
+                return rating != null ? (
+                  <span className="flex items-center gap-1 shrink-0 text-sm font-medium text-foreground pt-1">
+                    <span>⭐</span>
+                    <span>{rating}</span>
+                    {userRatingCount != null && (
+                      <span className="text-muted-foreground font-normal">({userRatingCount.toLocaleString()})</span>
+                    )}
+                  </span>
+                ) : null;
+              })()}
+            </div>
             {showPlaceSearch && (
               <div className="pt-1">
                 <PlacesAutocomplete
@@ -851,46 +924,63 @@ const PlaceOverview = ({
             </>
           ) : (
             <>
-              {/* Editable Start / End / Duration */}
-              {/* Time + Map side-by-side grid */}
+              {/* Info card + Map side-by-side grid */}
               <div className="grid grid-cols-2 gap-2.5">
-                {/* Left: Time card */}
-                <div className="rounded-xl border border-border bg-muted/30 p-3">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Time</p>
-                  <div className="flex items-center gap-1.5">
-                    <InlineField
-                      value={formatTimeProp?.(entry.start_time) ?? ''}
-                      canEdit={isEditor}
-                      onSave={async (v) => handleGenericTimeSave('start', v)}
-                      inputType="time"
-                      renderDisplay={(val) => <span className="text-sm font-medium">{val}</span>}
-                    />
-                    <span className="text-sm text-muted-foreground">—</span>
-                    <InlineField
-                      value={formatTimeProp?.(entry.end_time) ?? ''}
-                      canEdit={isEditor}
-                      onSave={async (v) => handleGenericTimeSave('end', v)}
-                      inputType="time"
-                      renderDisplay={(val) => <span className="text-sm font-medium">{val}</span>}
-                    />
-                  </div>
-                  <span className="inline-block rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-bold text-primary mt-1">
-                    {(() => {
-                      const diffMs = new Date(entry.end_time).getTime() - new Date(entry.start_time).getTime();
-                      const totalMin = Math.round(diffMs / 60000);
-                      if (totalMin <= 0) return '';
-                      const h = Math.floor(totalMin / 60);
-                      const m = totalMin % 60;
-                      return h > 0 ? `${h}h${m ? ` ${m}m` : ''}` : `${m}m`;
-                    })()}
-                  </span>
+                {/* Left: Info card — hours, phone, website */}
+                <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
+                  {(() => {
+                    const openingHours = (option as any).opening_hours as string[] | null;
+                    if (!openingHours || openingHours.length === 0) return null;
+                    const { text: entryDayHoursText, googleIndex } = getEntryDayHours(openingHours, entry.start_time);
+                    return (
+                      <Collapsible>
+                        <CollapsibleTrigger className="flex items-center gap-1.5 text-sm text-foreground hover:text-primary transition-colors w-full text-left">
+                          <span className="shrink-0">🕐</span>
+                          <span className="flex-1 truncate text-muted-foreground text-xs font-semibold">
+                            {entryDayHoursText || 'Opening hours'}
+                          </span>
+                          <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform [&[data-state=open]]:rotate-180')} />
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="pt-1.5 pl-5 space-y-0.5">
+                          {openingHours.map((day, i) => (
+                            <p key={i} className={cn(
+                              'text-xs',
+                              i === googleIndex ? 'text-primary font-semibold' : 'text-muted-foreground'
+                            )}>
+                              {day}
+                            </p>
+                          ))}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    );
+                  })()}
+
+                  {(option as any).opening_hours?.length > 0 && ((option as any).phone || option.website) && (
+                    <div className="border-t border-border/50" />
+                  )}
+
+                  {(option as any).phone && (
+                    <a href={`tel:${(option as any).phone}`} className="flex items-center gap-1.5 text-xs text-primary hover:underline">
+                      <Phone className="h-3 w-3" /> {(option as any).phone}
+                    </a>
+                  )}
+
+                  {option.website && (
+                    <a href={option.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-primary hover:underline truncate">
+                      <ExternalLink className="h-3 w-3" /> {(() => { try { return new URL(option.website).hostname.replace('www.', ''); } catch { return option.website; } })()}
+                    </a>
+                  )}
+
+                  {!(option as any).opening_hours?.length && !(option as any).phone && !option.website && isEditor && (
+                    <p className="text-xs text-muted-foreground/40 italic">No details yet</p>
+                  )}
                 </div>
 
                 {/* Right: Map preview with navigation popover */}
                 {option.latitude != null && option.longitude != null ? (
                   <Popover>
                     <PopoverTrigger asChild>
-                    <div className="rounded-xl border border-border overflow-hidden relative cursor-pointer">
+                      <div className="rounded-xl border border-border overflow-hidden relative cursor-pointer">
                         <img
                           src={`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/static-map?lat=${option.latitude}&lng=${option.longitude}&size=300x120`}
                           alt="Map preview"
@@ -931,17 +1021,20 @@ const PlaceOverview = ({
             </>
           )}
 
-          {/* Distance */}
-          {distance !== null && (
-            <p className="text-sm text-muted-foreground">
-              📍 {distance < 1 ? `${Math.round(distance * 1000)}m` : `${distance.toFixed(1)}km`} away
-            </p>
-          )}
 
-          {/* Enriched Place Details (non-flight, non-transport) */}
-          {option.category !== 'flight' && option.category !== 'transfer' && (
-            <PlaceDetailsSection option={option} entryStartTime={entry.start_time} />
-          )}
+          {/* Closed-day warning */}
+          {option.category !== 'flight' && option.category !== 'transfer' && (() => {
+            const openingHours = (option as any).opening_hours as string[] | null;
+            if (!entry.start_time || entry.start_time.startsWith('2099')) return null;
+            const { isConflict, message } = checkOpeningHoursConflict(openingHours, entry.start_time);
+            if (!isConflict) return null;
+            return (
+              <div className="flex items-center gap-2 rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive font-medium">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span>{message}</span>
+              </div>
+            );
+          })()}
 
           {/* Editorial Summary */}
           {option.category !== 'flight' && option.category !== 'transfer' && preloadedEditorialSummary && (
@@ -967,20 +1060,9 @@ const PlaceOverview = ({
             })()
           )}
 
-          {/* Reviews — horizontal scroll */}
+          {/* Reviews — no header, cards then link */}
           {option.category !== 'flight' && option.category !== 'transfer' && reviews.length > 0 && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm">💬</span>
-                  <span className="text-xs font-semibold text-muted-foreground">Reviews ({reviews.length})</span>
-                </div>
-                {option.google_maps_uri && (
-                  <a href={option.google_maps_uri} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:underline">
-                    See all on Google →
-                  </a>
-                )}
-              </div>
               <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none" style={{ scrollSnapType: 'x mandatory' }}>
                 {reviews.map((review, i) => (
                   <div key={i} className="shrink-0 w-[260px] rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1.5" style={{ scrollSnapAlign: 'start' }}>
@@ -997,51 +1079,14 @@ const PlaceOverview = ({
                   </div>
                 ))}
               </div>
+              {option.google_maps_uri && (
+                <a href={option.google_maps_uri} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:underline">
+                  See all reviews on Google →
+                </a>
+              )}
             </div>
           )}
 
-          {/* Phone + Website — plain inline text with editable empty states */}
-          {option.category !== 'transfer' && option.category !== 'flight' && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              {(option as any).phone ? (
-                <a href={`tel:${(option as any).phone}`} className="text-sm text-primary hover:underline" onClick={e => e.stopPropagation()}>
-                  📞 {(option as any).phone}
-                </a>
-              ) : isEditor ? (
-                <InlineField
-                  value=""
-                  canEdit={true}
-                  onSave={async (v) => {
-                    await supabase.from('entry_options').update({ phone: v } as any).eq('id', option.id);
-                    onSaved();
-                  }}
-                  placeholder="Add phone"
-                  renderDisplay={() => (
-                    <span className="text-sm text-muted-foreground/40 hover:text-primary transition-colors cursor-pointer">
-                      📞 Add phone
-                    </span>
-                  )}
-                />
-              ) : null}
-              {option.website ? (
-                <a href={option.website} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline truncate max-w-[200px]" onClick={e => e.stopPropagation()}>
-                  🔗 {(() => { try { return new URL(option.website).hostname; } catch { return option.website; } })()}
-                </a>
-              ) : isEditor ? (
-                <InlineField
-                  value=""
-                  canEdit={true}
-                  onSave={async (v) => handleInlineSaveOption('website', v)}
-                  placeholder="https://..."
-                  renderDisplay={() => (
-                    <span className="text-sm text-muted-foreground/40 hover:text-primary transition-colors cursor-pointer">
-                      🔗 Add website
-                    </span>
-                  )}
-                />
-              ) : null}
-            </div>
-          )}
 
           {/* Notes — always visible for editors */}
           {isEditor ? (
