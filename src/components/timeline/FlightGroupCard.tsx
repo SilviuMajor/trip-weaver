@@ -147,14 +147,10 @@ const FlightGroupCard = ({
           </>
         ) : (
           <>
-            {/* Glossy no-image background */}
+            <img src="/default-flight.jpg" alt="Flight" className="absolute inset-0 h-full w-full object-cover" />
             <div
-              className="absolute inset-0"
-              style={{ background: 'linear-gradient(145deg, hsl(210, 22%, 14%), hsl(210, 10%, 7%))' }}
-            />
-            <div
-              className="absolute inset-0"
-              style={{ background: 'linear-gradient(152deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.02) 40%, transparent 55%)' }}
+              className="absolute inset-0 z-[5]"
+              style={{ background: 'linear-gradient(155deg, transparent 22%, rgba(10,8,6,0.25) 32%, rgba(10,8,6,0.68) 42%, rgba(10,8,6,0.92) 52%)' }}
             />
           </>
         )}
