@@ -10,7 +10,8 @@ import { findCategory } from '@/lib/categories';
 import AIRPORTS from '@/lib/airports';
 import WizardStep from '@/components/wizard/WizardStep';
 import NameStep from '@/components/wizard/NameStep';
-import DateStep, { type FlightDraft } from '@/components/wizard/DateStep';
+import DateStep from '@/components/wizard/DateStep';
+import FlightStep, { type FlightDraft } from '@/components/wizard/FlightStep';
 import HotelStep from '@/components/wizard/HotelStep';
 import ActivitiesStep, { type ActivityDraft } from '@/components/wizard/ActivitiesStep';
 import MembersStep from '@/components/wizard/MembersStep';
@@ -21,7 +22,7 @@ interface MemberDraft {
   role: 'organizer' | 'editor' | 'viewer';
 }
 
-const STEPS = ['Name', 'Dates', 'Hotels', 'Activities', 'Members'];
+const STEPS = ['Name', 'Dates', 'Flights', 'Hotels', 'Activities', 'Members'];
 
 const TripWizard = () => {
   const { adminUser, isAdmin, loading: authLoading } = useAdminAuth();
@@ -39,13 +40,10 @@ const TripWizard = () => {
   const [datesUnknown, setDatesUnknown] = useState(false);
   const [durationDays, setDurationDays] = useState(3);
   const [timezone, setTimezone] = useState('Europe/London');
+  const [flightDrafts, setFlightDrafts] = useState<FlightDraft[]>([]);
   const [hotelDrafts, setHotelDrafts] = useState<HotelDraft[]>([]);
   const [activityDrafts, setActivityDrafts] = useState<ActivityDraft[]>([]);
   const [members, setMembers] = useState<MemberDraft[]>([]);
-
-  // Flight state
-  const [outboundFlight, setOutboundFlight] = useState<FlightDraft | null>(null);
-  const [returnFlight, setReturnFlight] = useState<FlightDraft | null>(null);
 
   // Set creator name from profile when available
   useEffect(() => {
@@ -58,26 +56,26 @@ const TripWizard = () => {
     }
   }, [authLoading, isAdmin, navigate]);
 
-  // Auto-set timezone from outbound flight departure (home timezone)
+  // Auto-set home timezone from first flight's departure
   useEffect(() => {
-    if (outboundFlight?.departureTz) {
-      setTimezone(outboundFlight.departureTz);
+    if (flightDrafts.length > 0 && flightDrafts[0].departureTz) {
+      setTimezone(flightDrafts[0].departureTz);
     }
-  }, [outboundFlight?.departureTz]);
+  }, [flightDrafts]);
 
   // Derive origin coordinates for Activities step
   const activityOrigin = useMemo(() => {
     const hotelWithCoords = hotelDrafts.find(h => h.lat != null && h.lng != null);
     if (hotelWithCoords) return { lat: hotelWithCoords.lat!, lng: hotelWithCoords.lng! };
 
-    if (outboundFlight?.arrivalLocation) {
-      const iata = outboundFlight.arrivalLocation.split(' - ')[0]?.trim();
+    if (flightDrafts.length > 0 && flightDrafts[0].arrivalLocation) {
+      const iata = flightDrafts[0].arrivalLocation.split(' - ')[0]?.trim();
       const airport = AIRPORTS.find(a => a.iata === iata);
       if (airport) return { lat: airport.lat, lng: airport.lng };
     }
 
     return null;
-  }, [hotelDrafts, outboundFlight]);
+  }, [hotelDrafts, flightDrafts]);
 
   const handleNext = () => setStep(s => Math.min(s + 1, STEPS.length - 1));
   const handleBack = () => setStep(s => Math.max(s - 1, 0));
@@ -386,26 +384,23 @@ const TripWizard = () => {
 
       if (membersError) throw membersError;
 
-      // Create flight entries if provided
-      if (outboundFlight && startDate) {
-        await createFlightEntry(trip.id, outboundFlight, startDate, 'Outbound Flight');
-      }
-      if (returnFlight && endDate) {
-        await createFlightEntry(trip.id, returnFlight, endDate, 'Return Flight');
+      // Create flight entries
+      for (const flight of flightDrafts) {
+        const flightDate = flight.date || startDate || '2099-01-01';
+        const flightName = flight.flightNumber || `${flight.departureLocation.split(' - ')[0]} → ${flight.arrivalLocation.split(' - ')[0]}`;
+        await createFlightEntry(trip.id, flight, flightDate, flightName);
       }
 
-      // Create hotel entries if provided
       if (hotelDrafts.length > 0) {
         await createHotelEntries(trip.id, hotelDrafts, timezone, datesUnknown ? null : startDate);
       }
 
-      // Create planner entries for activities
       if (activityDrafts.length > 0) {
         await createPlannerEntries(trip.id, activityDrafts, timezone);
       }
 
       const parts: string[] = [];
-      if (outboundFlight || returnFlight) parts.push('flights');
+      if (flightDrafts.length > 0) parts.push(`${flightDrafts.length} flight${flightDrafts.length > 1 ? 's' : ''}`);
       if (hotelDrafts.length > 0) parts.push(`${hotelDrafts.length} hotel${hotelDrafts.length > 1 ? 's' : ''}`);
       if (activityDrafts.length > 0) parts.push(`${activityDrafts.length} activit${activityDrafts.length > 1 ? 'ies' : 'y'} in planner`);
       const desc = parts.length > 0 ? `Added ${parts.join(' + ')} to your timeline` : undefined;
@@ -439,7 +434,12 @@ const TripWizard = () => {
           onNext={isLastStep ? handleCreate : handleNext}
           nextLabel={isLastStep ? (saving ? 'Creating…' : 'Create Trip') : 'Next'}
           nextDisabled={saving || (step === 0 && !name) || (step === 1 && !datesUnknown && (!startDate || !endDate))}
-          canSkip={step >= 2 && !isLastStep}
+          canSkip={
+            step >= 2 && !isLastStep &&
+            !(step === 2 && flightDrafts.length > 0) &&
+            !(step === 3 && hotelDrafts.length > 0) &&
+            !(step === 4 && activityDrafts.length > 0)
+          }
           onSkip={handleNext}
         >
           {step === 0 && <NameStep value={name} onChange={setName} destination={destination} onDestinationChange={setDestination} />}
@@ -453,13 +453,17 @@ const TripWizard = () => {
               onDatesUnknownChange={setDatesUnknown}
               durationDays={durationDays}
               onDurationDaysChange={setDurationDays}
-              outboundFlight={outboundFlight}
-              onOutboundFlightChange={setOutboundFlight}
-              returnFlight={returnFlight}
-              onReturnFlightChange={setReturnFlight}
             />
           )}
           {step === 2 && (
+            <FlightStep
+              flights={flightDrafts}
+              onChange={setFlightDrafts}
+              startDate={startDate}
+              endDate={endDate}
+            />
+          )}
+          {step === 3 && (
             <HotelStep
               hotels={hotelDrafts}
               onChange={setHotelDrafts}
@@ -467,7 +471,7 @@ const TripWizard = () => {
               defaultCheckoutDate={endDate}
             />
           )}
-          {step === 3 && (
+          {step === 4 && (
             <ActivitiesStep
               activities={activityDrafts}
               onChange={setActivityDrafts}
@@ -476,7 +480,7 @@ const TripWizard = () => {
               originLng={activityOrigin?.lng}
             />
           )}
-          {step === 4 && (
+          {step === 5 && (
             <MembersStep
               members={members}
               onChange={setMembers}
