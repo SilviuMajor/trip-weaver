@@ -19,6 +19,7 @@ import { analyzeConflict, generateRecommendations } from '@/lib/conflictEngine';
 import { getBlock, getEntriesAfterInBlock } from '@/lib/blockDetection';
 import { toast } from '@/hooks/use-toast';
 import { toast as sonnerToast } from 'sonner';
+import { prefetchReviews } from '@/lib/reviewCache';
 import { Trash2, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
@@ -1413,6 +1414,11 @@ const Timeline = () => {
       setTransportOverlayOption(option);
       setTransportOverlayOpen(true);
       return;
+    }
+
+    // Fire-and-forget: start fetching reviews NOW so they're cached by the time PlaceOverview mounts
+    if (option.google_place_id && option.category !== 'flight') {
+      prefetchReviews(option.google_place_id);
     }
 
     setSheetResolvedTz(resolveTimezoneForTime(entry.start_time));
