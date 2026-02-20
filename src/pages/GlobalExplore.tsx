@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, MapPin, Navigation, Search } from 'lucide-react';
+import UserAvatar from '@/components/UserAvatar';
+import { useProfile } from '@/hooks/useProfile';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
@@ -25,6 +27,7 @@ interface RecentCity {
 const GlobalExplore = () => {
   const navigate = useNavigate();
   const { adminUser, isAdmin, loading: authLoading } = useAdminAuth();
+  const { displayName } = useProfile(adminUser?.id);
   const geo = useGeolocation();
 
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
@@ -159,11 +162,16 @@ const GlobalExplore = () => {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-background/80 backdrop-blur-lg">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-4">
-          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => navigate(-1)}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <h1 className="text-lg font-bold">Explore</h1>
+        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => navigate(-1)}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <h1 className="text-lg font-bold">Explore</h1>
+          </div>
+          <button onClick={() => navigate('/settings')} className="shrink-0">
+            <UserAvatar name={displayName} size="sm" />
+          </button>
         </div>
       </header>
 

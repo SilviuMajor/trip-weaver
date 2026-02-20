@@ -1,7 +1,14 @@
 import { useTripMember } from '@/hooks/useTripMember';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { Button } from '@/components/ui/button';
-import { LogOut, Settings, RefreshCw, User, Moon, Sun } from 'lucide-react';
+import { Home, MoreVertical, Settings, RefreshCw, User, Moon, Sun, LogOut } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTheme } from 'next-themes';
 import type { Trip } from '@/types/trip';
@@ -29,20 +36,16 @@ const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderP
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-lg will-change-transform">
       <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
-        {/* Left: Trip info */}
+        {/* Left: Home + Trip info */}
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => navigate('/dashboard')}
-            className="h-8 w-8 shrink-0 overflow-hidden"
-            title="My Trips"
+            onClick={() => navigate('/')}
+            className="h-8 w-8 shrink-0"
+            title="Dashboard"
           >
-            {trip?.image_url ? (
-              <img src={trip.image_url} alt="" className="h-6 w-6 rounded-full object-cover" />
-            ) : (
-              <span className="text-base">{trip?.emoji || '✈️'}</span>
-            )}
+            <Home className="h-4 w-4" />
           </Button>
           <div className="min-w-0">
             <h1 className="truncate text-lg font-bold leading-tight">{trip?.name || 'tr1p'}</h1>
@@ -52,7 +55,7 @@ const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderP
           </div>
         </div>
 
-        {/* Right: Refresh + Theme + Settings + Exit */}
+        {/* Right: Refresh + Overflow menu */}
         <div className="flex items-center gap-1">
           {onRefresh && (
             <Button
@@ -66,26 +69,39 @@ const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderP
               <RefreshCw className={`h-4 w-4 text-muted-foreground ${refreshing ? 'animate-spin' : ''}`} />
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="h-8 w-8"
-            title="Toggle theme"
-          >
-            {theme === 'dark' ? <Sun className="h-4 w-4 text-muted-foreground" /> : <Moon className="h-4 w-4 text-muted-foreground" />}
-          </Button>
-          {isOrganizer && (
-            <Button variant="ghost" size="icon" onClick={() => navigate(`/trip/${tripId}/settings`)} className="h-8 w-8" title="Trip settings">
-              <Settings className="h-4 w-4 text-muted-foreground" />
-            </Button>
-          )}
-          <Button variant="ghost" size="icon" onClick={() => navigate('/settings')} className="h-8 w-8" title="Account settings">
-            <User className="h-4 w-4 text-muted-foreground" />
-          </Button>
-          <Button variant="ghost" size="icon" onClick={handleLogout} className="h-8 w-8">
-            <LogOut className="h-4 w-4" />
-          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8">
+                <MoreVertical className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {isOrganizer && (
+                <DropdownMenuItem onClick={() => navigate(`/trip/${tripId}/settings`)}>
+                  <Settings className="mr-2 h-4 w-4" />
+                  Trip Settings
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => navigate('/settings')}>
+                <User className="mr-2 h-4 w-4" />
+                Account
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+                {theme === 'dark' ? (
+                  <Sun className="mr-2 h-4 w-4" />
+                ) : (
+                  <Moon className="mr-2 h-4 w-4" />
+                )}
+                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleLogout}>
+                <LogOut className="mr-2 h-4 w-4" />
+                Sign Out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </header>
