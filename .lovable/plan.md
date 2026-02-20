@@ -1,43 +1,15 @@
 
-# Fix: Default Flight Image on Timeline Card
+# Hotfix: Reviews Overflow Breaking Layout
 
-## Problem
-The `FlightGroupCard.tsx` component (the card shown on the timeline) checks for `flightOption.images?.[0]?.image_url`. When no image exists, it renders a plain dark glossy gradient background instead of the default flight photo.
+Two small CSS fixes in `src/components/timeline/PlaceOverview.tsx`:
 
-The previous fix only added the `/default-flight.jpg` fallback to `PlaceOverview.tsx` (the detail/overview sheet), not to the timeline card itself.
+### Fix 1 — Remove negative margins from reviews scroll
+**Line 975**: Remove `-mx-4 px-4` from the reviews horizontal scroll container. These negative margins extend beyond the Dialog/Drawer boundary, causing layout overflow.
 
-## Solution
-In `src/components/timeline/FlightGroupCard.tsx`, when `firstImage` is null/undefined, use `/default-flight.jpg` as the background image instead of the plain glossy gradient.
+### Fix 2 — Add overflow-x-hidden safety net
+**Line 458**: Add `overflow-x-hidden` to the main content wrapper `div` so any future overflowing content is clipped.
 
-### Technical Details
-
-**File:** `src/components/timeline/FlightGroupCard.tsx`
-
-Replace the no-image fallback branch (lines 148-159) which currently renders a glossy gradient:
-
-```tsx
-// BEFORE (glossy dark background)
-) : (
-  <>
-    <div className="absolute inset-0"
-      style={{ background: 'linear-gradient(145deg, hsl(210, 22%, 14%), hsl(210, 10%, 7%))' }} />
-    <div className="absolute inset-0"
-      style={{ background: 'linear-gradient(152deg, ...)' }} />
-  </>
-)}
-```
-
-With the default flight image + diagonal fade (same treatment as when a real image exists):
-
-```tsx
-// AFTER (default flight photo)
-) : (
-  <>
-    <img src="/default-flight.jpg" alt="Flight" className="absolute inset-0 h-full w-full object-cover" />
-    <div className="absolute inset-0 z-[5]"
-      style={{ background: 'linear-gradient(155deg, transparent 22%, ...)' }} />
-  </>
-)}
-```
-
-This is a single-file, 4-line change. No other files affected.
+### Technical details
+- **File:** `src/components/timeline/PlaceOverview.tsx`
+- **Line 975:** Change `className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none -mx-4 px-4"` to `className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none"`
+- **Line 458:** Change `className="px-4 pb-4 pt-2 space-y-4"` to `className="px-4 pb-4 pt-2 space-y-4 overflow-x-hidden"`
