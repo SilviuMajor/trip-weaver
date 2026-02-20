@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useMemo, useState, useEffect, useRef, Fragment } from 'react';
 import { format, isToday, isPast, addMinutes } from 'date-fns';
 import { calculateSunTimes } from '@/lib/sunCalc';
 import type { EntryWithOptions, EntryOption, WeatherData, TransportMode } from '@/types/trip';
@@ -1145,7 +1145,7 @@ const ContinuousTimeline = ({
               style={{ top: labelTop }}
             >
               <span
-                className="absolute -top-2.5 z-[15] select-none text-[10px] font-medium text-muted-foreground/50 text-center"
+                className="absolute -top-2.5 z-[15] select-none text-[10px] font-semibold text-muted-foreground/70 text-center"
                 style={{ left: -46, width: 30, opacity: hideForPill ? 0 : 1, transition: 'opacity 0.15s' }}
               >
                 {displayHour}
@@ -1790,42 +1790,6 @@ const ContinuousTimeline = ({
                     </div>
                   )}
 
-                  {/* + buttons — not for transport, not adjacent to transport */}
-                  {onAddBetween && (() => {
-                    const prevIdx = sortedEntries.findIndex(e => e.id === entry.id) - 1;
-                    const prevE = prevIdx >= 0 ? sortedEntries[prevIdx] : null;
-                    if (prevE?.options[0]?.category === 'transfer') return null;
-                    return (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const prefillDate = addMinutes(new Date(entry.start_time), -60);
-                          onAddBetween(prefillDate.toISOString());
-                        }}
-                        className="absolute z-20 flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 opacity-0 transition-all group-hover:opacity-100 hover:border-primary hover:bg-primary/10 hover:text-primary"
-                        style={{ top: -10, left: -10 }}
-                      >
-                        <Plus className="h-3 w-3" />
-                      </button>
-                    );
-                  })()}
-                  {onAddBetween && (() => {
-                    const nextIdx = sortedEntries.findIndex(e => e.id === entry.id) + 1;
-                    const nextE = nextIdx < sortedEntries.length ? sortedEntries[nextIdx] : null;
-                    if (nextE?.options[0]?.category === 'transfer') return null;
-                    return (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onAddBetween(entry.end_time);
-                        }}
-                        className="absolute z-20 flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-muted-foreground/30 bg-background text-muted-foreground/50 opacity-0 transition-all group-hover:opacity-100 hover:border-primary hover:bg-primary/10 hover:text-primary"
-                        style={{ bottom: -10, left: -10 }}
-                      >
-                        <Plus className="h-3 w-3" />
-                      </button>
-                    );
-                  })()}
 
                 </div>
               </div>
@@ -1833,21 +1797,28 @@ const ContinuousTimeline = ({
           );
         })}
 
-        {/* Sunrise/sunset gradient — per-day segments */}
+        {/* Sunrise/sunset — edge bar + full-width daylight tint */}
         {days.map((day, dayIndex) => {
           const dayStr = format(day, 'yyyy-MM-dd');
           const loc = dayLocationMap.get(dayStr);
           const lat = loc?.lat ?? userLat ?? 51.5;
           const lng = loc?.lng ?? userLng ?? -0.1;
           const sunTimes = calculateSunTimes(day, lat, lng);
-          const sunriseHour = sunTimes.sunrise ? sunTimes.sunrise.getUTCHours() + sunTimes.sunrise.getUTCMinutes() / 60 : 6;
-          const sunsetHour = sunTimes.sunset ? sunTimes.sunset.getUTCHours() + sunTimes.sunset.getUTCMinutes() / 60 : 20;
+
+          // Convert UTC sun times to local hours in the day's timezone
+          const dayTz = getDayTzInfo(day)?.activeTz || homeTimezone;
+          const sunriseHour = sunTimes.sunrise ? getHourInTimezone(sunTimes.sunrise.toISOString(), dayTz) : 6;
+          const sunsetHour = sunTimes.sunset ? getHourInTimezone(sunTimes.sunset.toISOString(), dayTz) : 20;
+
           const toPercent = (h: number) => Math.max(0, Math.min(100, (h / 24) * 100));
           const sunrisePct = toPercent(sunriseHour);
           const sunsetPct = toPercent(sunsetHour);
           const midPct = (sunrisePct + sunsetPct) / 2;
+          const dayTop = dayIndex * 24 * pixelsPerHour;
+          const dayHeight = 24 * pixelsPerHour;
 
-          const gradient = `linear-gradient(to bottom, 
+          // Edge bar gradient (existing — keeps the coloured bar at left edge)
+          const edgeGradient = `linear-gradient(to bottom, 
             hsl(220, 50%, 20%) 0%, 
             hsl(30, 80%, 55%) ${sunrisePct}%, 
             hsl(200, 60%, 70%) ${sunrisePct + (midPct - sunrisePct) * 0.3}%, 
@@ -1856,18 +1827,49 @@ const ContinuousTimeline = ({
             hsl(25, 80%, 50%) ${sunsetPct}%, 
             hsl(220, 50%, 20%) 100%)`;
 
+          // Full-width daylight tint: deep night + golden-hour bands + clear daytime
+          const tintGradient = `linear-gradient(to bottom,
+            rgba(10, 15, 35, 0.45) 0%,
+            rgba(10, 15, 35, 0.40) ${toPercent(sunriseHour - 1)}%,
+            rgba(251, 146, 60, 0.08) ${toPercent(sunriseHour - 0.3)}%,
+            rgba(251, 191, 36, 0.14) ${sunrisePct}%,
+            rgba(251, 191, 36, 0.10) ${toPercent(sunriseHour + 0.3)}%,
+            rgba(251, 146, 60, 0.04) ${toPercent(sunriseHour + 0.6)}%,
+            transparent ${toPercent(sunriseHour + 1.2)}%,
+            transparent ${toPercent(sunsetHour - 1.2)}%,
+            rgba(249, 146, 60, 0.04) ${toPercent(sunsetHour - 0.6)}%,
+            rgba(249, 115, 22, 0.12) ${toPercent(sunsetHour - 0.3)}%,
+            rgba(249, 115, 22, 0.16) ${sunsetPct}%,
+            rgba(249, 115, 22, 0.10) ${toPercent(sunsetHour + 0.3)}%,
+            rgba(10, 15, 35, 0.40) ${toPercent(sunsetHour + 1)}%,
+            rgba(10, 15, 35, 0.45) 100%
+          )`;
+
           return (
-            <div
-              key={`sun-${dayIndex}`}
-              className="absolute rounded-full z-[4]"
-              style={{
-                left: -6,
-                width: 5,
-                top: dayIndex * 24 * pixelsPerHour,
-                height: 24 * pixelsPerHour,
-                background: gradient,
-              }}
-            />
+            <Fragment key={`sun-${dayIndex}`}>
+              {/* Edge bar */}
+              <div
+                className="absolute rounded-full z-[4]"
+                style={{
+                  left: -6,
+                  width: 5,
+                  top: dayTop,
+                  height: dayHeight,
+                  background: edgeGradient,
+                }}
+              />
+              {/* Full-width daylight tint — behind cards (z-1) */}
+              <div
+                className="absolute z-[1] pointer-events-none"
+                style={{
+                  left: 0,
+                  right: 0,
+                  top: dayTop,
+                  height: dayHeight,
+                  background: tintGradient,
+                }}
+              />
+            </Fragment>
           );
         })}
 
@@ -1883,7 +1885,7 @@ const ContinuousTimeline = ({
           const badgeTop = globalFlightMidHour * pixelsPerHour - 8;
           return (
             <div key={`tz-${dayIndex}`} className="absolute z-[16]" style={{ top: badgeTop, left: -78, width: 58 }}>
-              <span className="rounded-full bg-primary/20 border border-primary/30 px-2 py-0.5 text-[10px] font-bold text-primary whitespace-nowrap">
+              <span className="rounded-full bg-primary/20 border border-primary/30 px-2.5 py-1 text-xs font-bold text-primary whitespace-nowrap">
                 TZ {offset > 0 ? '+' : ''}{offset}h
               </span>
             </div>
@@ -1900,7 +1902,7 @@ const ContinuousTimeline = ({
               const globalHour = dayIndex * 24 + hour;
               const top = globalHour * pixelsPerHour;
               return (
-                <div key={`weather-${dayIndex}-${hour}`} className="absolute left-0" style={{ top: top + (pixelsPerHour / 2) - 6 }}>
+                <div key={`weather-${dayIndex}-${hour}`} className="absolute left-0" style={{ top: top + (pixelsPerHour / 2) - 10 }}>
                   <WeatherBadge temp={w.temp_c} condition={w.condition} hour={hour} date={day} />
                 </div>
               );
@@ -1937,10 +1939,10 @@ const ContinuousTimeline = ({
           const endTop = endGH * pixelsPerHour;
           return (
             <>
-              <div className="absolute z-[60] pointer-events-none" style={{ top: startTop - 10, left: -72 }}>
+              <div className="absolute z-[60] pointer-events-none" style={{ top: startTop - 10, left: -48 }}>
                 <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">{formatGlobalHourToDisplay(startGH)}</span>
               </div>
-              <div className="absolute z-[60] pointer-events-none" style={{ top: endTop - 10, left: -72 }}>
+              <div className="absolute z-[60] pointer-events-none" style={{ top: endTop - 10, left: -48 }}>
                 <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">{formatGlobalHourToDisplay(endGH)}</span>
               </div>
             </>
@@ -1954,7 +1956,7 @@ const ContinuousTimeline = ({
           const activeTop = activeGH * pixelsPerHour;
           const timeStr = formatGlobalHourToDisplay(activeGH);
           return (
-            <div className="absolute z-[60] pointer-events-none" style={{ top: activeTop - 10, left: -72 }}>
+            <div className="absolute z-[60] pointer-events-none" style={{ top: activeTop - 10, left: -48 }}>
               <span className="inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-border shadow-sm px-2 py-0.5 text-[10px] font-bold text-foreground whitespace-nowrap">{timeStr}</span>
             </div>
           );

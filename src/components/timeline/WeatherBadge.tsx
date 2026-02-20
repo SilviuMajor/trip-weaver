@@ -28,8 +28,8 @@ const WeatherBadge = ({ temp, condition, hour }: WeatherBadgeProps) => {
   const emoji = getWeatherEmoji(condition, isNight);
 
   return (
-    <span className="inline-flex items-center gap-0.5 text-xs font-semibold whitespace-nowrap">
-      <span className="text-sm leading-none">{emoji}</span>
+    <span className="inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap">
+      <span className="text-base leading-none">{emoji}</span>
       <span className="text-muted-foreground">{Math.round(temp)}°</span>
     </span>
   );
