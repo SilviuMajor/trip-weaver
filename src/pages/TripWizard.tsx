@@ -4,22 +4,21 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { useProfile } from '@/hooks/useProfile';
 import { toast } from '@/hooks/use-toast';
-import { addDays, format, parseISO } from 'date-fns';
+import { addDays, format, parseISO, differenceInCalendarDays } from 'date-fns';
 import { localToUTC } from '@/lib/timezoneUtils';
 import WizardStep from '@/components/wizard/WizardStep';
 import NameStep from '@/components/wizard/NameStep';
 import DateStep, { type FlightDraft } from '@/components/wizard/DateStep';
-import TimezoneStep from '@/components/wizard/TimezoneStep';
-import CategoryStep from '@/components/wizard/CategoryStep';
+import HotelStep from '@/components/wizard/HotelStep';
 import MembersStep from '@/components/wizard/MembersStep';
-import type { CategoryPreset } from '@/types/trip';
+import type { HotelDraft } from '@/components/timeline/HotelWizard';
 
 interface MemberDraft {
   name: string;
   role: 'organizer' | 'editor' | 'viewer';
 }
 
-const STEPS = ['Name', 'Dates', 'Timezone', 'Categories', 'Members'];
+const STEPS = ['Name', 'Dates', 'Hotels', 'Members'];
 
 const TripWizard = () => {
   const { adminUser, isAdmin, loading: authLoading } = useAdminAuth();
@@ -37,7 +36,7 @@ const TripWizard = () => {
   const [datesUnknown, setDatesUnknown] = useState(false);
   const [durationDays, setDurationDays] = useState(3);
   const [timezone, setTimezone] = useState('Europe/London');
-  const [categories, setCategories] = useState<CategoryPreset[]>([]);
+  const [hotelDrafts, setHotelDrafts] = useState<HotelDraft[]>([]);
   const [members, setMembers] = useState<MemberDraft[]>([]);
 
   // Flight state
@@ -144,6 +143,125 @@ const TripWizard = () => {
     }
   };
 
+  const createHotelEntries = async (tripId: string, hotels: HotelDraft[], fallbackTz: string, tripStartDate: string | null) => {
+    for (const hotel of hotels) {
+      const { data: hotelRow, error: hotelErr } = await supabase
+        .from('hotels')
+        .insert({
+          trip_id: tripId,
+          name: hotel.name,
+          address: hotel.address,
+          latitude: hotel.lat,
+          longitude: hotel.lng,
+          website: hotel.website,
+          phone: hotel.phone,
+          rating: hotel.rating,
+          user_rating_count: hotel.userRatingCount,
+          google_place_id: hotel.googlePlaceId,
+          google_maps_uri: hotel.googleMapsUri,
+          check_in_date: hotel.checkInDate || null,
+          check_in_time: hotel.checkInTime || '15:00',
+          checkout_date: hotel.checkoutDate || null,
+          checkout_time: hotel.checkoutTime || '11:00',
+          evening_return: hotel.eveningReturn || '22:00',
+          morning_leave: hotel.morningLeave || '08:00',
+        } as any)
+        .select('id')
+        .single();
+
+      if (hotelErr || !hotelRow) throw hotelErr;
+      const hotelId = hotelRow.id;
+
+      const ciDate = hotel.checkInDate;
+      const coDate = hotel.checkoutDate;
+      if (!ciDate || !coDate) continue;
+
+      const nights = differenceInCalendarDays(parseISO(coDate), parseISO(ciDate));
+      if (nights <= 0) continue;
+
+      const createBlock = async (
+        startIso: string,
+        endIso: string,
+        optionName: string,
+        scheduledDay: number | null,
+        linkedType?: string | null,
+      ) => {
+        const { data: entry, error: eErr } = await supabase
+          .from('entries')
+          .insert({
+            trip_id: tripId,
+            start_time: startIso,
+            end_time: endIso,
+            is_scheduled: true,
+            scheduled_day: scheduledDay,
+            linked_type: linkedType || null,
+          } as any)
+          .select('id')
+          .single();
+        if (eErr || !entry) throw eErr;
+
+        const { data: opt, error: oErr } = await supabase
+          .from('entry_options')
+          .insert({
+            entry_id: entry.id,
+            name: optionName,
+            category: 'hotel',
+            category_color: 'hsl(260, 50%, 55%)',
+            location_name: hotel.address,
+            latitude: hotel.lat,
+            longitude: hotel.lng,
+            website: hotel.website,
+            phone: hotel.phone,
+            rating: hotel.rating,
+            user_rating_count: hotel.userRatingCount,
+            google_place_id: hotel.googlePlaceId,
+            google_maps_uri: hotel.googleMapsUri,
+            hotel_id: hotelId,
+          } as any)
+          .select('id')
+          .single();
+        if (oErr || !opt) throw oErr;
+
+        if (hotel.photos.length > 0) {
+          await supabase.from('option_images').insert(
+            hotel.photos.map((url, i) => ({
+              option_id: opt.id,
+              image_url: url,
+              sort_order: i,
+            }))
+          );
+        }
+      };
+
+      const dayIndex = (dateStr: string) => {
+        if (!tripStartDate) return null;
+        return differenceInCalendarDays(parseISO(dateStr), parseISO(tripStartDate));
+      };
+
+      // Check-in block (1hr)
+      const ciStart = localToUTC(ciDate, hotel.checkInTime || '15:00', fallbackTz);
+      const ciEndTime = `${String(Math.min(23, parseInt(hotel.checkInTime || '15') + 1)).padStart(2, '0')}:${(hotel.checkInTime || '15:00').split(':')[1]}`;
+      const ciEnd = localToUTC(ciDate, ciEndTime, fallbackTz);
+      await createBlock(ciStart, ciEnd, `Check in · ${hotel.name}`, dayIndex(ciDate));
+
+      // Overnight blocks
+      for (let n = 0; n < nights; n++) {
+        const nightDate = format(addDays(parseISO(ciDate), n), 'yyyy-MM-dd');
+        const nextDate = format(addDays(parseISO(ciDate), n + 1), 'yyyy-MM-dd');
+        const oStart = localToUTC(nightDate, hotel.eveningReturn || '22:00', fallbackTz);
+
+        const isLastNight = n === nights - 1;
+        const endTime = isLastNight ? (hotel.checkoutTime || '11:00') : (hotel.morningLeave || '08:00');
+        const oEnd = localToUTC(nextDate, endTime, fallbackTz);
+
+        const optionName = isLastNight ? `Check out · ${hotel.name}` : hotel.name;
+        const linkedType = isLastNight ? 'checkout' : null;
+
+        await createBlock(oStart, oEnd, optionName, dayIndex(nightDate), linkedType);
+      }
+    }
+  };
+
   const handleCreate = async () => {
     if (!name) {
       toast({ title: 'Please fill in a name', variant: 'destructive' });
@@ -163,7 +281,7 @@ const TripWizard = () => {
         end_date: datesUnknown ? null : endDate,
         duration_days: datesUnknown ? durationDays : null,
         home_timezone: timezone,
-        category_presets: categories.length > 0 ? categories : null,
+        category_presets: null,
         owner_id: adminUser?.id ?? null,
       };
 
@@ -200,7 +318,16 @@ const TripWizard = () => {
         await createFlightEntry(trip.id, returnFlight, endDate, 'Return Flight');
       }
 
-      toast({ title: "Trip created — let's plan! ✈️" });
+      // Create hotel entries if provided
+      if (hotelDrafts.length > 0) {
+        await createHotelEntries(trip.id, hotelDrafts, timezone, datesUnknown ? null : startDate);
+      }
+
+      const parts: string[] = [];
+      if (outboundFlight || returnFlight) parts.push('flights');
+      if (hotelDrafts.length > 0) parts.push(`${hotelDrafts.length} hotel${hotelDrafts.length > 1 ? 's' : ''}`);
+      const desc = parts.length > 0 ? `Added ${parts.join(' + ')} to your timeline` : undefined;
+      toast({ title: "Trip created — let's plan! ✈️", description: desc });
       navigate(`/trip/${trip.id}`);
     } catch (err: any) {
       toast({ title: 'Failed to create trip', description: err.message, variant: 'destructive' });
@@ -230,7 +357,7 @@ const TripWizard = () => {
           onNext={isLastStep ? handleCreate : handleNext}
           nextLabel={isLastStep ? (saving ? 'Creating…' : 'Create Trip') : 'Next'}
           nextDisabled={saving || (step === 0 && !name) || (step === 1 && !datesUnknown && (!startDate || !endDate))}
-          canSkip={step > 1 && !isLastStep}
+          canSkip={step >= 2 && !isLastStep}
           onSkip={handleNext}
         >
           {step === 0 && <NameStep value={name} onChange={setName} destination={destination} onDestinationChange={setDestination} />}
@@ -250,9 +377,15 @@ const TripWizard = () => {
               onReturnFlightChange={setReturnFlight}
             />
           )}
-          {step === 2 && <TimezoneStep value={timezone} onChange={setTimezone} />}
-          {step === 3 && <CategoryStep categories={categories} onChange={setCategories} />}
-          {step === 4 && (
+          {step === 2 && (
+            <HotelStep
+              hotels={hotelDrafts}
+              onChange={setHotelDrafts}
+              defaultCheckInDate={startDate}
+              defaultCheckoutDate={endDate}
+            />
+          )}
+          {step === 3 && (
             <MembersStep
               members={members}
               onChange={setMembers}
