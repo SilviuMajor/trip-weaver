@@ -209,7 +209,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
         placeId: topPrediction.place_id,
         priceLevel: detailsData.priceLevel ?? null,
         placeTypes: detailsData.placeTypes ?? null,
-        photos: detailsData.photos ?? [],
+        photos: (detailsData.photos ?? []).map((p: any) => typeof p === 'string' ? p : p?.url).filter(Boolean),
       };
 
       // 3. Confidence check
@@ -259,7 +259,7 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
         placeId: candidate.placeId,
         priceLevel: data.priceLevel ?? null,
         placeTypes: data.placeTypes ?? null,
-        photos: data.photos ?? [],
+        photos: (data.photos ?? []).map((p: any) => typeof p === 'string' ? p : p?.url).filter(Boolean),
       };
       applyPlaceDetails(details);
       setEnrichmentStep('idle');

@@ -27,7 +27,7 @@ export function localToUTC(dateStr: string, timeStr: string, tz: string): string
     `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}Z`
   );
   const offsetMs = localInTz.getTime() - utcDate.getTime();
-  const fakeDate = new Date(`${dateStr}T${timeStr}:00`);
+  const fakeDate = new Date(`${dateStr}T${timeStr}:00Z`);
   const adjustedUtc = new Date(fakeDate.getTime() - offsetMs);
   return adjustedUtc.toISOString();
 }

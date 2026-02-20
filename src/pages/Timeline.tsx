@@ -383,10 +383,11 @@ const Timeline = () => {
               .eq('entry_id', entryId)
               .single();
             if (optionRes.data) {
-              for (let i = 0; i < details.photos.length; i++) {
+              const photoUrls = (details.photos ?? []).map((p: any) => typeof p === 'string' ? p : p?.url).filter(Boolean);
+              for (let i = 0; i < photoUrls.length; i++) {
                 await supabase.from('option_images').insert({
                   option_id: optionRes.data.id,
-                  image_url: details.photos[i],
+                  image_url: photoUrls[i],
                   sort_order: i,
                 });
               }
@@ -466,10 +467,11 @@ const Timeline = () => {
                 .eq('entry_id', entryId)
                 .single();
               if (optionRes.data) {
-                for (let i = 0; i < details.photos.length; i++) {
+                const photoUrls = (details.photos ?? []).map((p: any) => typeof p === 'string' ? p : p?.url).filter(Boolean);
+                for (let i = 0; i < photoUrls.length; i++) {
                   await supabase.from('option_images').insert({
                     option_id: optionRes.data.id,
-                    image_url: details.photos[i],
+                    image_url: photoUrls[i],
                     sort_order: i,
                   });
                 }
@@ -2477,6 +2479,132 @@ const Timeline = () => {
       setAutoTransportLoading(false);
     }
   };
+
+  // ─── One-time migration: fix photo URLs stored as JSON objects ───
+  const photoMigrationRan = useRef(false);
+  useEffect(() => {
+    if (photoMigrationRan.current || !tripId || loading) return;
+    photoMigrationRan.current = true;
+
+    (async () => {
+      try {
+        const { data: tripEntries } = await supabase
+          .from('entries')
+          .select('id')
+          .eq('trip_id', tripId);
+        if (!tripEntries || tripEntries.length === 0) return;
+
+        const { data: opts } = await supabase
+          .from('entry_options')
+          .select('id')
+          .in('entry_id', tripEntries.map(e => e.id));
+        if (!opts || opts.length === 0) return;
+
+        const { data: images } = await supabase
+          .from('option_images')
+          .select('id, image_url')
+          .in('option_id', opts.map(o => o.id));
+        if (!images) return;
+
+        const broken = images.filter(img => {
+          const val = img.image_url;
+          if (!val || typeof val !== 'string') return false;
+          return val.startsWith('{') || val.startsWith('[object');
+        });
+
+        if (broken.length === 0) return;
+        console.log(`[Photo migration] Fixing ${broken.length} broken image URLs...`);
+
+        for (const img of broken) {
+          try {
+            let fixedUrl: string | null = null;
+            if (img.image_url.startsWith('{')) {
+              const parsed = JSON.parse(img.image_url);
+              fixedUrl = parsed.url || parsed.publicUrl || null;
+            }
+            if (fixedUrl) {
+              await supabase
+                .from('option_images')
+                .update({ image_url: fixedUrl })
+                .eq('id', img.id);
+            } else {
+              await supabase.from('option_images').delete().eq('id', img.id);
+            }
+          } catch {
+            await supabase.from('option_images').delete().eq('id', img.id);
+          }
+        }
+
+        console.log(`[Photo migration] Done. Fixed ${broken.length} images.`);
+        fetchData();
+      } catch (err) {
+        console.error('[Photo migration] Error:', err);
+      }
+    })();
+  }, [tripId, loading]);
+
+  // ─── One-time migration: fix UTC timestamps from browser-dependent localToUTC ───
+  const tzMigrationRan = useRef(false);
+  useEffect(() => {
+    if (tzMigrationRan.current || !trip || !tripId || loading) return;
+    tzMigrationRan.current = true;
+
+    const migrationKey = `tz_migrated_${tripId}`;
+    if (localStorage.getItem(migrationKey) === 'true') return;
+
+    (async () => {
+      try {
+        const homeTz = trip.home_timezone;
+        if (!homeTz) {
+          localStorage.setItem(migrationKey, 'true');
+          return;
+        }
+
+        const { data: allEntries } = await supabase
+          .from('entries')
+          .select('id, start_time, end_time')
+          .eq('trip_id', tripId);
+        if (!allEntries || allEntries.length === 0) {
+          localStorage.setItem(migrationKey, 'true');
+          return;
+        }
+
+        const getOffsetMs = (date: Date, tz: string): number => {
+          const utcStr = date.toLocaleString('en-US', { timeZone: 'UTC' });
+          const tzStr = date.toLocaleString('en-US', { timeZone: tz });
+          return new Date(tzStr).getTime() - new Date(utcStr).getTime();
+        };
+
+        console.log(`[TZ migration] Correcting entries for trip ${tripId} (home_tz: ${homeTz})...`);
+
+        let correctedCount = 0;
+        for (const entry of allEntries) {
+          const startDate = new Date(entry.start_time);
+          const endDate = new Date(entry.end_time);
+
+          const startOffsetMs = getOffsetMs(startDate, homeTz);
+          const endOffsetMs = getOffsetMs(endDate, homeTz);
+
+          if (startOffsetMs === 0 && endOffsetMs === 0) continue;
+
+          const correctedStart = new Date(startDate.getTime() + startOffsetMs).toISOString();
+          const correctedEnd = new Date(endDate.getTime() + endOffsetMs).toISOString();
+
+          await supabase
+            .from('entries')
+            .update({ start_time: correctedStart, end_time: correctedEnd })
+            .eq('id', entry.id);
+          correctedCount++;
+        }
+
+        localStorage.setItem(migrationKey, 'true');
+        console.log(`[TZ migration] Done. Corrected ${correctedCount} entries.`);
+        if (correctedCount > 0) fetchData();
+      } catch (err) {
+        console.error('[TZ migration] Error:', err);
+      }
+    })();
+  }, [trip, tripId, loading]);
 
   // days is already memoized above
 
