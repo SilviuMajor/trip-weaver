@@ -1,74 +1,82 @@
 
-# Fix: Overview Close Button + Mobile Full-Screen
 
-## 1. Add Close Button to PlaceOverview
+# Overview Card — Condensed Layout + Review Cache
 
-**File:** `src/components/timeline/PlaceOverview.tsx`
+All changes in a single file: `src/components/timeline/PlaceOverview.tsx`
 
-- Add `X` to the lucide-react import (line 14)
-- Insert a close button before the hero image section (line 430-432), positioned `absolute top-3 right-3 z-50` with a dark translucent circle (`bg-black/40 backdrop-blur-sm`), calling `onClose`
+---
 
-## 2. Hide Default Dialog X on Desktop View Mode
+## 1. Add module-level review cache
 
-**File:** `src/components/timeline/EntrySheet.tsx`
+Above the component definitions (around line 25), add:
 
-- Add `[&>button:last-child]:hidden` to the view-mode `DialogContent` class (line 908) to suppress the duplicate shadcn close button
-
-## 3. Mobile Full-Screen Overlay
-
-**File:** `src/components/timeline/EntrySheet.tsx`
-
-- Replace the mobile Drawer wrapper (lines 896-904) with a plain `div` full-screen overlay:
-  - `fixed inset-0 z-50 bg-background overflow-y-auto overscroll-none`
-  - Returns `null` when `!open`
-  - No drag handle, no slide-up animation, no pull-to-dismiss
-  - Close via the X button added in PlaceOverview
-- The `Drawer`/`DrawerContent` import on line 3 can be removed if not used by create mode (need to verify -- if create mode uses it on mobile, keep the import)
-
-### Technical Details
-
-**PlaceOverview.tsx line 14** -- add `X` to imports:
 ```tsx
-import { ..., AlertTriangle, X } from 'lucide-react';
+type CachedReview = { text: string; rating: number | null; author: string; relativeTime: string };
+const reviewCache = new Map<string, CachedReview[]>();
 ```
 
-**PlaceOverview.tsx lines 430-432** -- insert close button before hero:
-```tsx
-return (
-  <>
-    {/* Close button */}
-    <button
-      className="absolute top-3 right-3 z-50 flex items-center justify-center h-8 w-8 rounded-full bg-black/40 backdrop-blur-sm hover:bg-black/60 transition-colors"
-      onClick={onClose}
-      aria-label="Close"
-    >
-      <X className="h-4 w-4 text-white" />
-    </button>
+## 2. Update review fetch effect (lines 193-209)
 
-    {/* Hero image gallery at top ... */}
+Replace with cache-first logic: check `reviewCache` by `google_place_id`, populate cache from preloaded or API results.
+
+## 3. Time pill on hero images
+
+After each hero image variant (lines 442-465), insert a time pill inside the `relative` container. The pill shows `"🕐 HH:MM — HH:MM [duration]"` with a frosted backdrop, positioned bottom-left. Only for non-flight entries with real scheduled times (not `2099`).
+
+Three insertion points:
+- Inside the images gallery div (line 443-450) -- add before closing `</div>`
+- Inside the no-image editor fallback (line 462-464) -- add before closing `</div>`
+- NOT on the flight fallback (flights have their own time layout)
+
+The pill uses: `absolute bottom-3 left-3 z-30 flex items-center gap-1.5 rounded-full bg-black/40 backdrop-blur-sm px-3 py-1.5`
+
+## 4. Title row: name left, rating right (lines 531-545)
+
+Wrap the current `<h2>` and add a rating display on the right side using flexbox. Rating pulled from `(option as any).rating` and `user_rating_count`.
+
+```
+Before: <h2>Title</h2>
+After:  <div flex between>
+          <h2>Title</h2>
+          <span>⭐ 4.2 (3,139)</span>
+        </div>
 ```
 
-**EntrySheet.tsx line 908** -- hide default X:
-```tsx
-<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md p-0 [&>button:last-child]:hidden">
-```
+## 5. Replace time+map grid with info card+map grid (lines 852-931)
 
-**EntrySheet.tsx lines 896-904** -- full-screen overlay:
-```tsx
-if (isMobile) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 bg-background overflow-y-auto overscroll-none">
-      <div className="relative min-h-full">
-        {viewContent}
-      </div>
-    </div>
-  );
-}
-```
+Remove the time card (left column) since time is now on the hero pill. Replace with a combined info card containing:
+- Opening hours (collapsible, reusing same pattern as `PlaceDetailsSection`)
+- Divider (if hours AND contact info exist)
+- Phone link
+- Website link
+- "No details yet" placeholder for editors
 
-### Files Changed
-| File | Change |
-|------|--------|
-| `src/components/timeline/PlaceOverview.tsx` | Add `X` import, add close button over hero |
-| `src/components/timeline/EntrySheet.tsx` | Hide default Dialog X, replace mobile Drawer with full-screen overlay |
+Map column (right) stays identical.
+
+## 6. Remove distance display (lines 934-939)
+
+Delete the distance paragraph. Also remove the `distance` computed value (line 410-411) and the `haversineKm` import (line 12).
+
+## 7. Replace PlaceDetailsSection render with closed-day warning only (lines 941-944)
+
+The rating moved to the title row, hours moved to the info card. Keep only the closed-day conflict warning inline.
+
+## 8. Remove old phone/website section (lines 1003-1044)
+
+This content is now in the info card from step 5.
+
+## 9. Streamline reviews (lines 970-1001)
+
+Remove the header row ("Reviews (N)" + "See all on Google"). Keep just the scroll cards, then add a "See all reviews on Google" link below the scroll container.
+
+---
+
+## Technical detail: imports
+
+- Remove `haversineKm` import (line 12)
+- All other imports already present (`Collapsible`, `CollapsibleTrigger`, `CollapsibleContent`, `ChevronDown`, `Phone`, `ExternalLink`, `AlertTriangle`, etc.)
+
+## What stays unchanged
+
+- Flight layout, transport layout, voting, budget, delete dialog, map popover, notes, ImageGallery, close button, editorial summary, modified hours warning
+
