@@ -9,8 +9,8 @@ interface NameStepProps {
 
 const NameStep = ({ value, onChange, destination, onDestinationChange }: NameStepProps) => (
   <div>
-    <h2 className="mb-2 text-2xl font-bold">What's your trip called?</h2>
-    <p className="mb-6 text-sm text-muted-foreground">Give it a memorable name</p>
+    <h2 className="mb-2 text-2xl font-bold">Name your trip</h2>
+    <p className="mb-6 text-sm text-muted-foreground">Something you'll remember it by</p>
     <Input
       value={value}
       onChange={(e) => onChange(e.target.value)}

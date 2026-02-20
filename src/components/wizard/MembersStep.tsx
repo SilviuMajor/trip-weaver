@@ -34,8 +34,8 @@ const MembersStep = ({ members, onChange, creatorName, onCreatorNameChange, hasD
 
   return (
     <div>
-      <h2 className="mb-2 text-2xl font-bold">Who's coming?</h2>
-      <p className="mb-6 text-sm text-muted-foreground">You'll be added automatically as organizer</p>
+      <h2 className="mb-2 text-2xl font-bold">Who's coming along?</h2>
+      <p className="mb-6 text-sm text-muted-foreground">You're the organiser — add others if you'd like</p>
 
       {/* Creator name (if no display name set) */}
       {!hasDisplayName && (
