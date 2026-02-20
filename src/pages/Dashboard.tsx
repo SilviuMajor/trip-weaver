@@ -149,8 +149,8 @@ const Dashboard = () => {
 
   const handleCopyLink = (trip: Trip, e: React.MouseEvent) => {
     e.stopPropagation();
-    const url = (trip as any).invite_code
-      ? `${window.location.origin}/invite/${(trip as any).invite_code}`
+    const url = trip.invite_code
+      ? `${window.location.origin}/invite/${trip.invite_code}`
       : `${window.location.origin}/trip/${trip.id}`;
     navigator.clipboard.writeText(url);
     toast({ title: 'Link copied ✈️', description: 'Send it to your travel crew!' });
