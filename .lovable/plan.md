@@ -1,56 +1,85 @@
 
 
-# Phase 1a — Photo URL Fix + Timezone Fix + Migrations
+# Phase 1b — Hotel Step in Trip Creation Wizard
 
 ## Overview
-Fix two systemic bugs and migrate existing data:
-1. Photos from Google Places stored as `{url, attribution}` objects instead of URL strings -- broken across all entry types
-2. `localToUTC` uses browser-local timezone interpretation, shifting entry times by the browser's UTC offset
-
-Both fixes ship with in-app data migrations that run automatically on timeline load.
+Restructure the trip wizard from 5 steps to 4 (Name, Dates, Hotels, Members) by removing Timezone and Categories steps. Add a new inline HotelStep that replicates the full HotelWizard experience. Hotel drafts are collected in state and saved to the database in `handleCreate`.
 
 ## Changes
 
-### Bug 1: Photo URL Normalisation (5 fixes + 1 migration)
+### 1. Export `HotelDraft` from `src/components/timeline/HotelWizard.tsx` (line 15)
+Change `interface HotelDraft` to `export interface HotelDraft`. No other changes to this file.
 
-**Fix 1a: `src/components/timeline/PlacesAutocomplete.tsx` (line 102)**
-Normalise `data.photos` from `{url, attribution}` objects to plain URL strings. This cascades to fix EntrySheet creation, PhotoStripPicker previews, and all downstream consumers.
+### 2. New file: `src/components/wizard/HotelStep.tsx`
+A self-contained inline hotel sub-wizard with 5 internal sub-steps (0-4), replicating the HotelWizard UI but without Dialog/Supabase saves:
 
-**Fix 1b: `src/components/timeline/HotelWizard.tsx` (line 212)**
-Normalise photos in `autoEnrichFromParsedName` (direct edge function call).
+- **Sub-step 0**: Entry method -- Upload Booking Confirmation / Enter Manually buttons (plus parsing state)
+- **Sub-step 1**: Hotel details with auto-enrichment (searching/matched/candidates/manual states), using PlacesAutocomplete
+- **Sub-step 2**: Dates and times (check-in/checkout date+time, night count)
+- **Sub-step 3**: Daily defaults (evening return, morning leave)
+- **Sub-step 4**: Review card + "Add Another" / "Done" buttons
 
-**Fix 1c: `src/components/timeline/HotelWizard.tsx` (line 262)**
-Normalise photos in `selectCandidate` (direct edge function call).
+Props: `hotels: HotelDraft[]`, `onChange: (hotels: HotelDraft[]) => void`, `defaultCheckInDate: string`, `defaultCheckoutDate: string`
 
-**Fix 1d: `src/pages/Timeline.tsx` (lines 386-391)**
-Normalise photos in `handleAddToPlanner` before inserting into `option_images`.
+Key differences from HotelWizard:
+- No Dialog wrapper -- renders inline
+- No Supabase writes -- collects drafts via `onChange` callback
+- "Done" at sub-step 4 finalises the current draft into the array, resets to sub-step 0
+- Shows previously-added hotels as summary cards above the current sub-step
+- Header: "Where are you staying?" / "Add your hotel -- or skip this for now"
+- Sub-step progress dots (only visible after sub-step 0)
 
-**Fix 1e: `src/pages/Timeline.tsx` (lines 469-474)**
-Normalise photos in `handleAddAtTime` before inserting into `option_images`.
+Copies core logic from HotelWizard: `autoEnrichFromParsedName`, `selectCandidate`, `handleUpload`, `applyPlaceDetails`, `resetFields`, `buildDraft`, `renderStep1`, file upload handling, enrichment state machine, and all step UIs (steps 0-4).
 
-**Fix 1f: Photo data migration in `src/pages/Timeline.tsx`**
-Add a `useEffect` with ref guard that scans `option_images` for this trip, finds rows where `image_url` starts with `{`, parses the JSON to extract the `.url` field, and updates the row. Unrecoverable rows are deleted. Idempotent -- only touches broken rows. Triggers `fetchData()` refresh on completion.
+### 3. Modify: `src/pages/TripWizard.tsx`
 
-### Bug 2: Timezone Fix (1 fix + 1 migration)
+**Imports (lines 9-15):**
+- Remove `TimezoneStep`, `CategoryStep`, `CategoryPreset` imports
+- Add `HotelStep` import and `HotelDraft` type import from HotelWizard
+- Add `differenceInCalendarDays` to date-fns import
 
-**Fix 2a: `src/lib/timezoneUtils.ts` (line 30)**
-Add `Z` suffix to `new Date(\`...\`)` so JavaScript interprets it as UTC instead of browser-local time. One character fix that corrects all 30+ call sites across 4 files.
+**STEPS array (line 22):**
+- Change from `['Name', 'Dates', 'Timezone', 'Categories', 'Members']` to `['Name', 'Dates', 'Hotels', 'Members']`
 
-**Fix 2b: Timezone data migration in `src/pages/Timeline.tsx`**
-Add a `useEffect` with ref + localStorage guard (`tz_migrated_{tripId}`) that corrects existing entry timestamps. For each entry, calculates what the browser's UTC offset was at that time (using `trip.home_timezone`), and adds it back to the stored timestamp. Handles DST transitions per-entry. Runs once per trip, persisted via localStorage.
+**State (lines 39-41):**
+- Remove `timezone` (keep as local variable defaulting to `'Europe/London'`, updated by flight effect), `categories` state
+- Add `hotelDrafts: HotelDraft[]` state
+- Keep `timezone` state but remove its wizard step -- it's still set by the flight auto-detect effect and used in `handleCreate`
+
+**handleCreate (lines 147-210):**
+- Change `category_presets` to `null` in insert data
+- After flight creation block, add hotel creation loop calling new `createHotelEntries` function
+- Update success toast to include hotel count when applicable
+
+**New function `createHotelEntries`** (before handleCreate):
+Replicates HotelWizard's `handleFinish` block creation logic:
+- Insert into `hotels` table
+- Create check-in block (1hr)
+- Create overnight blocks (last night extends to checkout, tagged `linked_type: 'checkout'`)
+- Each block gets entry + entry_option + option_images
+- Uses `fallbackTz` (home timezone) since no flights exist on timeline yet during creation
+
+**Step rendering (lines 236-263):**
+- Step 0: NameStep (unchanged)
+- Step 1: DateStep (unchanged)
+- Step 2: `<HotelStep hotels={hotelDrafts} onChange={setHotelDrafts} defaultCheckInDate={startDate} defaultCheckoutDate={endDate} />`
+- Step 3: MembersStep (unchanged, renumbered from step 4)
+
+**Skip logic (line 233):**
+- Change `canSkip={step > 1 && !isLastStep}` to `canSkip={step >= 2 && !isLastStep}` (steps 2+ are skippable)
 
 ## What does NOT change
-- `utcToLocal`, `getHourInTimezone`, `resolveEntryTz`, `resolveDropTz` in timezoneUtils.ts
-- EntrySheet.tsx handleSave, handlePlaceSelect (downstream of PlacesAutocomplete fix)
-- PhotoStripPicker.tsx, EntryCard.tsx image rendering
-- google-places edge function (correctly returns objects; fix is consumer-side)
-- ContinuousTimeline.tsx drag/snap logic
-- Entry/option copy paths in Timeline.tsx
+- WizardStep.tsx -- adapts automatically to new STEPS length
+- NameStep.tsx, DateStep.tsx, MembersStep.tsx -- unchanged
+- TimezoneStep.tsx, CategoryStep.tsx -- files kept, just not imported
+- HotelWizard.tsx -- only exports HotelDraft, rest unchanged
+- Timeline.tsx, EntrySheet.tsx, ContinuousTimeline.tsx -- untouched
+- No database schema changes
 
 ## Files modified
 | File | Change |
 |------|--------|
-| `src/lib/timezoneUtils.ts` | Line 30: add `Z` suffix |
-| `src/components/timeline/PlacesAutocomplete.tsx` | Line 102: normalise photos |
-| `src/components/timeline/HotelWizard.tsx` | Lines 212, 262: normalise photos |
-| `src/pages/Timeline.tsx` | Lines 386-391, 469-474: normalise photos; add photo migration + timezone migration effects |
+| `src/components/wizard/HotelStep.tsx` | NEW -- inline hotel sub-wizard |
+| `src/components/timeline/HotelWizard.tsx` | Export `HotelDraft` interface (line 15) |
+| `src/pages/TripWizard.tsx` | Remove Timezone/Category steps, add Hotel step, add `createHotelEntries`, update STEPS/state/rendering |
+
