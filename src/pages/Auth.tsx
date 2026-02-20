@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Mail, Lock, Loader2 } from 'lucide-react';
+import { Mail, Lock, Loader2, User } from 'lucide-react';
 import Brand from '@/components/Brand';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,28 +13,31 @@ const Auth = () => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectUrl = searchParams.get('redirect');
   const { isAdmin, loading, signIn, signUp } = useAdminAuth();
 
   useEffect(() => {
     if (!loading && isAdmin) {
-      navigate('/');
+      navigate(redirectUrl || '/');
     }
-  }, [loading, isAdmin, navigate]);
+  }, [loading, isAdmin, navigate, redirectUrl]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
       if (isSignUp) {
-        const { error } = await signUp(email, password);
+        const { error } = await signUp(email, password, name.trim());
         if (error) throw error;
         toast({ title: 'Check your email for the confirmation link!' });
       } else {
         const { error } = await signIn(email, password);
         if (error) throw error;
-        navigate('/');
+        navigate(redirectUrl || '/');
       }
     } catch (err: any) {
       toast({ title: err.message, variant: 'destructive' });
@@ -84,6 +87,24 @@ const Auth = () => {
               />
             </div>
           </div>
+
+          {isSignUp && (
+            <div className="space-y-2">
+              <Label htmlFor="name">Name</Label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="name"
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="pl-10"
+                  placeholder="Your name"
+                  required
+                />
+              </div>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
