@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
@@ -6,10 +6,13 @@ import { useProfile } from '@/hooks/useProfile';
 import { toast } from '@/hooks/use-toast';
 import { addDays, format, parseISO, differenceInCalendarDays } from 'date-fns';
 import { localToUTC } from '@/lib/timezoneUtils';
+import { findCategory } from '@/lib/categories';
+import AIRPORTS from '@/lib/airports';
 import WizardStep from '@/components/wizard/WizardStep';
 import NameStep from '@/components/wizard/NameStep';
 import DateStep, { type FlightDraft } from '@/components/wizard/DateStep';
 import HotelStep from '@/components/wizard/HotelStep';
+import ActivitiesStep, { type ActivityDraft } from '@/components/wizard/ActivitiesStep';
 import MembersStep from '@/components/wizard/MembersStep';
 import type { HotelDraft } from '@/components/timeline/HotelWizard';
 
@@ -18,7 +21,7 @@ interface MemberDraft {
   role: 'organizer' | 'editor' | 'viewer';
 }
 
-const STEPS = ['Name', 'Dates', 'Hotels', 'Members'];
+const STEPS = ['Name', 'Dates', 'Hotels', 'Activities', 'Members'];
 
 const TripWizard = () => {
   const { adminUser, isAdmin, loading: authLoading } = useAdminAuth();
@@ -37,6 +40,7 @@ const TripWizard = () => {
   const [durationDays, setDurationDays] = useState(3);
   const [timezone, setTimezone] = useState('Europe/London');
   const [hotelDrafts, setHotelDrafts] = useState<HotelDraft[]>([]);
+  const [activityDrafts, setActivityDrafts] = useState<ActivityDraft[]>([]);
   const [members, setMembers] = useState<MemberDraft[]>([]);
 
   // Flight state
@@ -60,6 +64,20 @@ const TripWizard = () => {
       setTimezone(outboundFlight.departureTz);
     }
   }, [outboundFlight?.departureTz]);
+
+  // Derive origin coordinates for Activities step
+  const activityOrigin = useMemo(() => {
+    const hotelWithCoords = hotelDrafts.find(h => h.lat != null && h.lng != null);
+    if (hotelWithCoords) return { lat: hotelWithCoords.lat!, lng: hotelWithCoords.lng! };
+
+    if (outboundFlight?.arrivalLocation) {
+      const iata = outboundFlight.arrivalLocation.split(' - ')[0]?.trim();
+      const airport = AIRPORTS.find(a => a.iata === iata);
+      if (airport) return { lat: airport.lat, lng: airport.lng };
+    }
+
+    return null;
+  }, [hotelDrafts, outboundFlight]);
 
   const handleNext = () => setStep(s => Math.min(s + 1, STEPS.length - 1));
   const handleBack = () => setStep(s => Math.max(s - 1, 0));
@@ -262,6 +280,64 @@ const TripWizard = () => {
     }
   };
 
+  const createPlannerEntries = async (tripId: string, activities: ActivityDraft[], fallbackTz: string) => {
+    const REFERENCE_DATE_STR = '2099-01-01';
+    const startIso = localToUTC(REFERENCE_DATE_STR, '00:00', fallbackTz);
+    const endIso = localToUTC(REFERENCE_DATE_STR, '01:00', fallbackTz);
+
+    for (const activity of activities) {
+      const place = activity.place;
+      const cat = findCategory(activity.categoryId);
+
+      const { data: d, error } = await supabase
+        .from('entries')
+        .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false } as any)
+        .select('id')
+        .single();
+      if (error) throw error;
+
+      const { data: optData } = await supabase.from('entry_options').insert({
+        entry_id: d.id,
+        name: place.name,
+        category: cat?.id ?? activity.categoryId,
+        category_color: cat?.color ?? null,
+        location_name: place.address || null,
+        latitude: place.lat,
+        longitude: place.lng,
+        rating: place.rating,
+        user_rating_count: place.userRatingCount,
+        phone: place.phone || null,
+        address: place.address || null,
+        google_maps_uri: place.googleMapsUri || null,
+        google_place_id: place.placeId || null,
+        price_level: place.priceLevel || null,
+        opening_hours: place.openingHours || null,
+        website: place.website || null,
+      } as any).select('id').single();
+
+      // Background: fetch photos
+      if (place.placeId && !place.placeId.startsWith('manual-') && optData) {
+        try {
+          const { data: details } = await supabase.functions.invoke('google-places', {
+            body: { action: 'details', placeId: place.placeId },
+          });
+          if (details?.photos?.length > 0) {
+            const photoUrls = (details.photos ?? []).map((p: any) => typeof p === 'string' ? p : p?.url).filter(Boolean);
+            for (let i = 0; i < photoUrls.length; i++) {
+              await supabase.from('option_images').insert({
+                option_id: optData.id,
+                image_url: photoUrls[i],
+                sort_order: i,
+              });
+            }
+          }
+        } catch (e) {
+          console.error('Background photo fetch failed:', e);
+        }
+      }
+    }
+  };
+
   const handleCreate = async () => {
     if (!name) {
       toast({ title: 'Please fill in a name', variant: 'destructive' });
@@ -323,9 +399,15 @@ const TripWizard = () => {
         await createHotelEntries(trip.id, hotelDrafts, timezone, datesUnknown ? null : startDate);
       }
 
+      // Create planner entries for activities
+      if (activityDrafts.length > 0) {
+        await createPlannerEntries(trip.id, activityDrafts, timezone);
+      }
+
       const parts: string[] = [];
       if (outboundFlight || returnFlight) parts.push('flights');
       if (hotelDrafts.length > 0) parts.push(`${hotelDrafts.length} hotel${hotelDrafts.length > 1 ? 's' : ''}`);
+      if (activityDrafts.length > 0) parts.push(`${activityDrafts.length} activit${activityDrafts.length > 1 ? 'ies' : 'y'} in planner`);
       const desc = parts.length > 0 ? `Added ${parts.join(' + ')} to your timeline` : undefined;
       toast({ title: "Trip created — let's plan! ✈️", description: desc });
       navigate(`/trip/${trip.id}`);
@@ -386,6 +468,15 @@ const TripWizard = () => {
             />
           )}
           {step === 3 && (
+            <ActivitiesStep
+              activities={activityDrafts}
+              onChange={setActivityDrafts}
+              destination={destination}
+              originLat={activityOrigin?.lat}
+              originLng={activityOrigin?.lng}
+            />
+          )}
+          {step === 4 && (
             <MembersStep
               members={members}
               onChange={setMembers}
