@@ -1,45 +1,37 @@
 
 
-# Fix: Invite Links Should Use Published Domain
+# Polished Invite Landing Page
 
-## Problem
-The share link uses `window.location.origin` to build the URL. When you copy the link from the Lovable editor preview, it picks up the preview domain (`505eb05c-...lovableproject.com`) instead of your real published domain (`timelineplanner.lovable.app`). Anyone who receives that link gets sent to the Lovable preview, not your app.
+## What changes
 
-## Solution
-Replace `window.location.origin` with a constant pointing to your published domain for invite links. This ensures the link always points to your live app regardless of where you copy it from.
+### 1. Rewrite `src/pages/Invite.tsx`
+Replace the current simple "auto-join-or-redirect" page with a polished version that:
+- Fetches trip info first (name, destination, dates, emoji, image) using the public invite_code RLS policy
+- Shows a preview card to unauthenticated users with "Sign Up to Join" and "I Already Have an Account" buttons
+- Auto-joins logged-in users as viewers, then redirects to dashboard
+- Shows proper error state for invalid codes
+- Navigates to dashboard (`/`) after joining instead of the timeline
 
-## Changes
-
-### 1. `src/pages/TripSettings.tsx` (lines 113-115)
-Replace `window.location.origin` in `handleCopyLink` and the displayed link text with the published URL:
-
-```typescript
-const PUBLISHED_URL = 'https://timelineplanner.lovable.app';
-
-const url = trip?.invite_code
-  ? `${PUBLISHED_URL}/invite/${trip.invite_code}`
-  : `${PUBLISHED_URL}/trip/${tripId}`;
+### 2. Update `src/pages/Auth.tsx` (1 line)
+Change line 14 from:
 ```
-
-Same replacement in the displayed `<code>` element showing the link.
-
-### 2. `src/pages/Dashboard.tsx` (lines 150-153)
-Same change in `handleCopyLink`:
-
-```typescript
-const PUBLISHED_URL = 'https://timelineplanner.lovable.app';
-
-const url = trip.invite_code
-  ? `${PUBLISHED_URL}/invite/${trip.invite_code}`
-  : `${PUBLISHED_URL}/trip/${trip.id}`;
+const [isSignUp, setIsSignUp] = useState(false);
 ```
+to:
+```
+const [isSignUp, setIsSignUp] = useState(searchParams.get('signup') === 'true');
+```
+This makes the auth page open in signup mode when arriving from the invite page's "Sign Up to Join" button.
 
-### Optional: If you later connect a custom domain
-You can update the single `PUBLISHED_URL` constant to your custom domain (e.g., `https://yourdomain.com`) and both pages will use it automatically.
+### 3. No changes needed to:
+- **App.tsx** -- route already exists
+- **Dashboard.tsx** -- copy link already fixed in previous changes
 
-## Files changed
-| File | Change |
-|------|--------|
-| `src/pages/TripSettings.tsx` | Use published URL for invite links |
-| `src/pages/Dashboard.tsx` | Use published URL for invite links |
+## User flow
+1. Recipient opens `tr1p.co.uk/invite/abc123de`
+2. Sees trip preview card (name, emoji/image, destination, dates)
+3. Clicks "Sign Up to Join" --> goes to auth page in signup mode with redirect back to invite
+4. After signing up/logging in --> redirected back to invite page
+5. Invite page detects session --> auto-joins as viewer --> redirects to dashboard
+6. Existing members who click the link are recognized and sent straight to the dashboard
 
