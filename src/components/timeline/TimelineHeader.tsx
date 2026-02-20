@@ -1,7 +1,7 @@
 import { useTripMember } from '@/hooks/useTripMember';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { Button } from '@/components/ui/button';
-import { Home, MoreVertical, Settings, RefreshCw, User, Moon, Sun, LogOut } from 'lucide-react';
+import { Home, MoreVertical, Settings, RefreshCw, User, Moon, Sun, LogOut, ZoomIn } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,9 +18,12 @@ interface TimelineHeaderProps {
   tripId: string;
   onRefresh?: () => Promise<void>;
   refreshing?: boolean;
+  zoomLevel?: number;
+  onCycleZoom?: () => void;
+  zoomEnabled?: boolean;
 }
 
-const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderProps) => {
+const TimelineHeader = ({ trip, tripId, onRefresh, refreshing, zoomLevel, onCycleZoom, zoomEnabled }: TimelineHeaderProps) => {
   const { tripId: paramTripId } = useParams<{ tripId: string }>();
   const effectiveTripId = paramTripId || tripId;
   const { member: currentUser, isOrganiser: isOrganizer } = useTripMember(effectiveTripId);
@@ -48,7 +51,10 @@ const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderP
             <Home className="h-4 w-4" />
           </Button>
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-bold leading-tight">{trip?.name || 'tr1p'}</h1>
+            <h1 className="truncate text-lg font-bold leading-tight flex items-center gap-1.5">
+              {trip?.emoji && <span>{trip.emoji}</span>}
+              {trip?.name || 'tr1p'}
+            </h1>
             {currentUser && (
               <p className="text-xs text-muted-foreground">Hey, {currentUser.name}</p>
             )}
@@ -77,6 +83,21 @@ const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderP
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {zoomEnabled && onCycleZoom && (
+                <DropdownMenuItem onClick={onCycleZoom}>
+                  <ZoomIn className="mr-2 h-4 w-4" />
+                  Zoom: {zoomLevel === 1.0 ? '1×' : zoomLevel && zoomLevel < 1 ? `${Math.round(zoomLevel * 100)}%` : `${zoomLevel}×`}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+                {theme === 'dark' ? (
+                  <Sun className="mr-2 h-4 w-4" />
+                ) : (
+                  <Moon className="mr-2 h-4 w-4" />
+                )}
+                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               {isOrganizer && (
                 <DropdownMenuItem onClick={() => navigate(`/trip/${tripId}/settings`)}>
                   <Settings className="mr-2 h-4 w-4" />
@@ -86,14 +107,6 @@ const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderP
               <DropdownMenuItem onClick={() => navigate('/settings')}>
                 <User className="mr-2 h-4 w-4" />
                 Account
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-                {theme === 'dark' ? (
-                  <Sun className="mr-2 h-4 w-4" />
-                ) : (
-                  <Moon className="mr-2 h-4 w-4" />
-                )}
-                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout}>

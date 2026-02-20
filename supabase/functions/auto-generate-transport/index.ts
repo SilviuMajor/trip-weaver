@@ -140,10 +140,11 @@ function resolveToLocation(opt: any) {
 }
 
 function getLocationName(opt: any, type: 'from' | 'to'): string {
-  if (type === 'from') {
-    return opt.arrival_location || opt.location_name || 'Unknown';
-  }
-  return opt.departure_location || opt.location_name || 'Unknown';
+  // Prefer the entry name, then location_name, then flight-specific fields
+  if (opt.name && opt.category !== 'flight') return opt.name;
+  if (opt.location_name) return opt.location_name;
+  if (type === 'from') return opt.arrival_location || 'Unknown';
+  return opt.departure_location || 'Unknown';
 }
 
 Deno.serve(async (req) => {

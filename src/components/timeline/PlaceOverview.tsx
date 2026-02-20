@@ -121,6 +121,7 @@ export interface PlaceOverviewProps {
   onSaved: () => void;
   onClose: () => void;
   onMoveToIdeas?: (entryId: string) => void;
+  pushAction?: (action: { description: string; undo: () => Promise<void>; redo: () => Promise<void> }) => void;
   preloadedReviews?: { text: string; rating: number | null; author: string; relativeTime: string }[] | null;
   preloadedEditorialSummary?: string | null;
   preloadedCurrentOpeningHours?: string[] | null;
@@ -142,6 +143,7 @@ const PlaceOverview = ({
   onSaved,
   onClose,
   onMoveToIdeas,
+  pushAction,
   preloadedReviews,
   preloadedEditorialSummary,
   preloadedCurrentOpeningHours,
@@ -304,10 +306,24 @@ const PlaceOverview = ({
 
   const handleToggleLock = async () => {
     setToggling(true);
+    const wasLocked = entry.is_locked;
     try {
-      const { error } = await supabase.from('entries').update({ is_locked: !entry.is_locked } as any).eq('id', entry.id);
+      const { error } = await supabase.from('entries').update({ is_locked: !wasLocked } as any).eq('id', entry.id);
       if (error) throw error;
-      toast({ title: entry.is_locked ? 'Entry unlocked' : 'Entry locked' });
+
+      if (pushAction) {
+        pushAction({
+          description: wasLocked ? `Unlocked ${option.name}` : `Locked ${option.name}`,
+          undo: async () => {
+            await supabase.from('entries').update({ is_locked: wasLocked } as any).eq('id', entry.id);
+          },
+          redo: async () => {
+            await supabase.from('entries').update({ is_locked: !wasLocked } as any).eq('id', entry.id);
+          },
+        });
+      }
+
+      toast({ title: wasLocked ? 'Entry unlocked' : 'Entry locked' });
       onSaved();
     } catch (err: any) {
       toast({ title: 'Failed to toggle lock', description: err.message, variant: 'destructive' });
@@ -1221,11 +1237,34 @@ const PlaceOverview = ({
                     className="w-full"
                     onClick={async () => {
                       try {
+                        const entrySnapshot = { ...entry };
+                        const optionSnapshots = entry.options.map(o => ({ ...o }));
+                        const hotelId = option.hotel_id!;
+                        const deletedIds = [...hotelBlockEntryIds];
+
                         if (hotelBlockEntryIds.length > 0) {
                           const { error } = await supabase.from('entries').delete().in('id', hotelBlockEntryIds);
                           if (error) throw error;
                         }
-                        await supabase.from('hotels').delete().eq('id', option.hotel_id!);
+                        await supabase.from('hotels').delete().eq('id', hotelId);
+
+                        if (pushAction) {
+                          pushAction({
+                            description: `Delete all ${option.name || 'hotel'} blocks`,
+                            undo: async () => {
+                              const { id, options, ...entryData } = entrySnapshot as any;
+                              await supabase.from('entries').insert({ ...entryData, id }).select().single();
+                              for (const opt of optionSnapshots) {
+                                await supabase.from('entry_options').insert(opt as any);
+                              }
+                            },
+                            redo: async () => {
+                              await supabase.from('entries').delete().in('id', deletedIds);
+                              await supabase.from('hotels').delete().eq('id', hotelId);
+                            },
+                          });
+                        }
+
                         toast({ title: 'All hotel blocks deleted' });
                         onClose();
                         onSaved();
@@ -1241,8 +1280,28 @@ const PlaceOverview = ({
                     className="w-full"
                     onClick={async () => {
                       try {
+                        const entrySnapshot = { ...entry };
+                        const optionSnapshots = entry.options.map(o => ({ ...o }));
+
                         const { error } = await supabase.from('entries').delete().eq('id', entry.id);
                         if (error) throw error;
+
+                        if (pushAction) {
+                          pushAction({
+                            description: `Delete ${option.name || 'hotel'} block`,
+                            undo: async () => {
+                              const { id, options, ...entryData } = entrySnapshot as any;
+                              await supabase.from('entries').insert({ ...entryData, id }).select().single();
+                              for (const opt of optionSnapshots) {
+                                await supabase.from('entry_options').insert(opt as any);
+                              }
+                            },
+                            redo: async () => {
+                              await supabase.from('entries').delete().eq('id', entrySnapshot.id);
+                            },
+                          });
+                        }
+
                         toast({ title: 'Entry deleted' });
                         onClose();
                         onSaved();
@@ -1276,8 +1335,28 @@ const PlaceOverview = ({
                     className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                     onClick={async () => {
                       try {
+                        const entrySnapshot = { ...entry };
+                        const optionSnapshots = entry.options.map(o => ({ ...o }));
+
                         const { error } = await supabase.from('entries').delete().eq('id', entry.id);
                         if (error) throw error;
+
+                        if (pushAction) {
+                          pushAction({
+                            description: `Delete ${option.name || 'entry'}`,
+                            undo: async () => {
+                              const { id, options, ...entryData } = entrySnapshot as any;
+                              await supabase.from('entries').insert({ ...entryData, id }).select().single();
+                              for (const opt of optionSnapshots) {
+                                await supabase.from('entry_options').insert(opt as any);
+                              }
+                            },
+                            redo: async () => {
+                              await supabase.from('entries').delete().eq('id', entrySnapshot.id);
+                            },
+                          });
+                        }
+
                         toast({ title: 'Entry deleted' });
                         onClose();
                         onSaved();
