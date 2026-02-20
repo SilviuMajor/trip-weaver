@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { MapPin, Mail, Lock, Loader2 } from 'lucide-react';
+import { Mail, Lock, Loader2 } from 'lucide-react';
+import Brand from '@/components/Brand';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -59,12 +60,11 @@ const Auth = () => {
         className="w-full max-w-sm"
       >
         <div className="mb-10 text-center">
-          <div className="mb-4 inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/15 text-4xl">
-            🌍
+          <div className="mb-4">
+            <Brand size="xl" />
           </div>
-          <h1 className="mb-2 text-3xl font-bold tracking-tight">Trip Planner</h1>
           <p className="text-muted-foreground">
-            {isSignUp ? 'Create an admin account' : 'Sign in to manage trips'}
+            {isSignUp ? 'Create your account to start planning' : 'Welcome back — sign in to continue'}
           </p>
         </div>
 

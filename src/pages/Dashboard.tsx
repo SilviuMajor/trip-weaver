@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Plus, LogOut, Settings, MoreVertical, Link2, Trash2, Copy, ClipboardList, Search } from 'lucide-react';
+import Brand from '@/components/Brand';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
@@ -116,7 +117,7 @@ const Dashboard = () => {
     e.stopPropagation();
     const url = `${window.location.origin}/trip/${tripId}`;
     navigator.clipboard.writeText(url);
-    toast({ title: 'Link copied!', description: 'Share this link with your trip members.' });
+    toast({ title: 'Link copied ✈️', description: 'Send it to your travel crew!' });
   };
 
   const handleDeleteTrip = async () => {
@@ -124,7 +125,7 @@ const Dashboard = () => {
     await supabase.from('trips').delete().eq('id', deleteTrip.id);
     setDeleteTrip(null);
     fetchTrips();
-    toast({ title: 'Trip deleted' });
+    toast({ title: 'Trip removed' });
   };
 
   if (authLoading) {
@@ -140,7 +141,9 @@ const Dashboard = () => {
       <header className="border-b border-border bg-background/80 backdrop-blur-lg">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
           <div>
-            <h1 className="text-2xl font-bold">My Trips</h1>
+            <div className="mb-0.5">
+              <Brand size="sm" />
+            </div>
             <p className="text-sm text-muted-foreground">{displayName || adminUser?.email}</p>
           </div>
           <div className="flex items-center gap-2">
@@ -187,6 +190,23 @@ const Dashboard = () => {
           </button>
         </div>
 
+        {/* New Trip CTA */}
+        <motion.button
+          type="button"
+          onClick={() => navigate('/trip/new')}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6 flex w-full items-center gap-3 rounded-xl border-2 border-dashed border-primary/40 bg-primary/5 p-4 text-left transition-all hover:border-primary/60 hover:bg-primary/10"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/15">
+            <Plus className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <p className="font-semibold text-sm">Plan a new trip</p>
+            <p className="text-xs text-muted-foreground">Start from scratch or add flights</p>
+          </div>
+        </motion.button>
+
         {loading ? (
           <div className="space-y-3">
             {[1, 2, 3].map(i => (
@@ -202,13 +222,13 @@ const Dashboard = () => {
             <div className="mb-4 inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/15 text-4xl">
               🗺️
             </div>
-            <h2 className="mb-2 text-xl font-bold">No trips yet</h2>
+            <h2 className="mb-2 text-xl font-bold">Where to first?</h2>
             <p className="mb-6 text-sm text-muted-foreground">
-              Create your first trip to start planning
+              Create a trip and start building your itinerary
             </p>
             <Button onClick={() => navigate('/trip/new')}>
               <Plus className="mr-2 h-4 w-4" />
-              Create Trip
+              Plan My First Trip
             </Button>
           </motion.div>
         ) : (

@@ -200,7 +200,7 @@ const TripWizard = () => {
         await createFlightEntry(trip.id, returnFlight, endDate, 'Return Flight');
       }
 
-      toast({ title: 'Trip created!' });
+      toast({ title: "Trip created — let's plan! ✈️" });
       navigate(`/trip/${trip.id}`);
     } catch (err: any) {
       toast({ title: 'Failed to create trip', description: err.message, variant: 'destructive' });

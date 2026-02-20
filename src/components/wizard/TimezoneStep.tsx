@@ -16,8 +16,8 @@ const TIMEZONES = [
 
 const TimezoneStep = ({ value, onChange }: TimezoneStepProps) => (
   <div>
-    <h2 className="mb-2 text-2xl font-bold">Where are you starting from?</h2>
-    <p className="mb-6 text-sm text-muted-foreground">Select your home timezone</p>
+    <h2 className="mb-2 text-2xl font-bold">Where are you based?</h2>
+    <p className="mb-6 text-sm text-muted-foreground">This sets the clock for your trip's timeline</p>
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger>
         <SelectValue />

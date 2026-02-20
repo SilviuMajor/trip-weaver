@@ -41,7 +41,7 @@ const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderP
             )}
           </Button>
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-bold leading-tight">{trip?.name || 'Trip Planner'}</h1>
+            <h1 className="truncate text-lg font-bold leading-tight">{trip?.name || 'tr1p'}</h1>
             {currentUser && (
               <p className="text-xs text-muted-foreground">Hey, {currentUser.name}</p>
             )}

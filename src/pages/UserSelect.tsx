@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { Users, Lock } from 'lucide-react';
+import Brand from '@/components/Brand';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -148,13 +149,11 @@ const UserSelect = () => {
         className="w-full max-w-sm"
       >
         <div className="mb-10 text-center">
-          <div className="mb-4 inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/15 text-4xl">
-            🧳
+          <div className="mb-4">
+            <Brand size="lg" />
           </div>
-          <h1 className="mb-2 text-3xl font-bold tracking-tight">
-            {tripName || 'Trip Planner'}
-          </h1>
-          <p className="text-muted-foreground">Select your name to get started</p>
+          {tripName && <h1 className="mb-2 text-3xl font-bold tracking-tight">{tripName}</h1>}
+          <p className="text-muted-foreground">Tap your name to jump in</p>
         </div>
 
         {loading ? (
@@ -167,7 +166,7 @@ const UserSelect = () => {
           <div className="rounded-lg border border-dashed border-border p-8 text-center">
             <Users className="mx-auto mb-3 h-10 w-10 text-muted-foreground/50" />
             <p className="text-sm text-muted-foreground">
-              No members yet. The trip organizer needs to add members.
+              No members added yet — the organiser will set this up.
             </p>
           </div>
         ) : (
