@@ -1,76 +1,93 @@
 
 
-# Fix Hotel and Flight Blocks on Undated Trips -- Reference Date Remapping
+# Fix Weather -- Missing Airport Coords + Auto-Refresh After Card Movement
 
 ## Overview
-When a trip is created with "I don't know when" (undated), the timeline uses reference dates (2099-01-01, 2099-01-02, etc.) for its day columns. But hotel and flight entries are created with real calendar dates from user input (e.g. 2026-02-21). The rendering engine tries to match real dates against reference dates, fails, and falls back to day 0 -- causing all blocks to stack on the same visual day.
-
-The fix adds a `remapDate` function that converts real dates to reference dates for undated trips, applied in both the wizard and the timeline hotel wizard. A defensive fallback in `findDayIndex` prevents silent stacking when dates don't match.
+Two bugs fixed: (1) flights from TripWizard lack airport lat/lng on options, breaking weather location tracking, and (2) weather never recalculates after dragging cards on the timeline.
 
 ## Changes
 
-### 1. `src/pages/TripWizard.tsx`
+### 1. `src/pages/TripWizard.tsx` -- Store airport coordinates on flight entries
 
-**a) Add `remapDate` helper inside `handleCreate`** (after members insertion, before flight creation at line 387):
-- For undated trips: finds the earliest real date across all flights and hotels, then remaps each date to `2099-01-01 + offset`
-- For dated trips: identity function (no change)
-- Auto-expands `duration_days` if entries span more days than current duration
+**a) Add IATA lookup at top of `createFlightEntry`** (line 83-84):
+- Extract `depIata`/`arrIata` from departure/arrival location strings
+- Look up `depAirport`/`arrAirport` from AIRPORTS array
 
-**b) Update flight creation** (line 388-392):
-- Use `remapDate(rawDate)` instead of raw `flight.date`
+**b) Add `latitude`/`longitude` to flight option insert** (lines 99-112):
+- Add `latitude: arrAirport?.lat ?? null, longitude: arrAirport?.lng ?? null` (arrival coords, matching EntrySheet convention)
 
-**c) Update `createHotelEntries` call** (line 394-396):
-- Pass `remapDate` as a fifth parameter
+**c) Add coords to checkin option** (lines 128-136):
+- Add `departure_location`, `latitude: depAirport?.lat`, `longitude: depAirport?.lng`
+- Change `location_name` from truncated IATA to full location string
 
-**d) Update `createHotelEntries` function** (line 162):
-- Add `remapDate` parameter to signature
-- Remap check-in date and all overnight dates through `remapDate` before passing to `localToUTC`
-- Update `dayIndex` to handle undated trips (compute offset from `2099-01-01` instead of returning `null`)
+**d) Add coords to checkout option** (lines 151-158):
+- Add `arrival_location`, `latitude: arrAirport?.lat`, `longitude: arrAirport?.lng`
+- Change `location_name` from truncated IATA to full location string
 
-### 2. `src/components/timeline/HotelWizard.tsx`
+### 2. `src/pages/Timeline.tsx` -- IATA fallback in `dayLocationMap`
 
-Same pattern applied to the timeline version (used when adding hotels to an existing trip):
+**a) Add import** (line 7 area):
+- `import AIRPORTS from '@/lib/airports';`
 
-**a) Add `remapDate` helper inside `handleFinish`** (after the `nights` check at line 385):
-- For undated trips: remaps real dates relative to check-in date to reference dates
-- Auto-expands `duration_days` if hotel spans more days than current trip
+**b) Replace `dayLocationMap` useMemo** (lines 657-723):
+- Add `airportCoords` helper that extracts IATA from "LHR - Heathrow" strings and looks up coords in AIRPORTS array
+- Before first flight: try checkin entry coords, then IATA lookup on `departure_location`, then option lat/lng
+- After each flight: try checkout entry coords, then IATA lookup on `arrival_location`, then option lat/lng
 
-**b) Remap check-in block dates** (lines 454-459):
-- Use `remapDate(ciDate)` for timezone resolution and UTC conversion
+### 3. `src/pages/Timeline.tsx` -- IATA fallback in weather segment builder
 
-**c) Remap overnight loop dates** (lines 462-477):
-- Use `remapDate(...)` for both `nightDate` and `nextDate`
+**Replace waypoint loop in `handleGlobalRefresh`** (lines 1076-1106):
+- Add same `airportCoords` helper
+- For flights: get arrival coords from option lat/lng OR IATA lookup; get departure coords from checkin entry OR IATA lookup
+- Skip the early `continue` for entries without coords -- only skip non-flight entries without coords
+- Departure waypoint uses `entry.start_time` (not checkin start) for consistency
 
-**d) Update `dayIndex`** (lines 449-452):
-- For undated trips: compute offset from `REFERENCE_DATE` instead of returning `null`
+### 4. `src/pages/Timeline.tsx` -- Auto-refresh weather after card movement
 
-### 3. `src/components/timeline/ContinuousTimeline.tsx`
+**a) Add `weatherRefreshTimer` ref** (near line 205, with other refs):
+- `const weatherRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);`
 
-**Defensive `findDayIndex` fallback** (lines 205-211):
-- When exact date string matching fails, fall back to finding the closest day by timestamp proximity instead of hardcoding `return 0`
-- Prevents silent stacking on day 0 for any edge case where dates don't align
+**b) Add `refreshWeather` function** (after `handleGlobalRefresh` closing at line 1175):
+- Lightweight weather-only refresh (no transport regeneration)
+- Duplicates the weather segment building logic from `handleGlobalRefresh` (with IATA fallback)
+- Calls `fetch-weather` edge function then `fetchDataRef.current?.()`
+- Wrapped in `useCallback` with deps on `[tripId, trip, scheduledEntries]`
+
+**c) Add debounced trigger at end of `handleEntryTimeChange`** (before line 1452's closing `};`):
+- Clear any existing timer, set new 2-second timeout calling `refreshWeather()`
+- Prevents excessive API calls during rapid drag sequences
 
 ## Technical Details
 
-The `remapDate` function for the wizard:
+The `airportCoords` helper used in both `dayLocationMap` and `handleGlobalRefresh`:
 ```text
-remapDate(realDate) =
-  offset = differenceInCalendarDays(realDate, earliestRealDate)
-  return format(addDays("2099-01-01", max(0, offset)), "yyyy-MM-dd")
+airportCoords("LHR - Heathrow") -> { lat: 51.47, lng: -0.46 }
+airportCoords(null) -> null
 ```
 
-The `findDayIndex` fallback:
+Priority chain for flight location resolution:
 ```text
-If no exact date match found:
-  Find the day whose timestamp is closest to the entry's timestamp
-  Return that day's index (instead of 0)
+Departure: checkin entry coords -> IATA lookup -> option coords
+Arrival: checkout entry coords -> IATA lookup -> option coords (flight option stores arrival)
 ```
 
-## Files Modified
+Weather auto-refresh debounce:
+```text
+Card move -> clear timer -> set 2s timer -> refreshWeather()
+Another card move within 2s -> clear timer -> set new 2s timer
+Only the last move triggers the actual API call
+```
 
+## What does NOT change
+- `handleGlobalRefresh` structure (still does transport + weather on manual refresh)
+- `fetch-weather` edge function
+- `EntrySheet.tsx` (already stores coords correctly)
+- ContinuousTimeline.tsx, HotelWizard.tsx, any wizard UI
+- Database schema
+
+## Files modified
 | File | Change |
 |------|--------|
-| `src/pages/TripWizard.tsx` | Add remapDate, update createHotelEntries signature + usage, remap flight dates, fix dayIndex for undated |
-| `src/components/timeline/HotelWizard.tsx` | Add remapDate in handleFinish, remap all dates, fix dayIndex, auto-expand duration |
-| `src/components/timeline/ContinuousTimeline.tsx` | Defensive findDayIndex fallback using closest-day instead of hardcoded 0 |
+| `src/pages/TripWizard.tsx` | Add airport lat/lng to flight option, checkin, and checkout entries |
+| `src/pages/Timeline.tsx` | Import AIRPORTS, IATA fallback in dayLocationMap + weather segments, refreshWeather function, debounced auto-refresh after card movement |
 
