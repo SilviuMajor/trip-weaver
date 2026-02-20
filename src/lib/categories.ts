@@ -20,7 +20,7 @@ export const PREDEFINED_CATEGORIES: CategoryDef[] = [
   { id: 'hotel',            name: 'Hotel',            emoji: '🏨',  color: 'hsl(260, 50%, 55%)', defaultDurationMin: 600, defaultStartHour: 22, defaultStartMin: 0, pickerVisible: true },
   { id: 'breakfast',        name: 'Breakfast',        emoji: '🍳',  color: 'hsl(35, 80%, 50%)',  defaultDurationMin: 60,  defaultStartHour: 8,  defaultStartMin: 0, pickerVisible: true },
   { id: 'lunch',            name: 'Lunch',            emoji: '🍽️', color: 'hsl(24, 85%, 55%)',  defaultDurationMin: 90,  defaultStartHour: 12, defaultStartMin: 30, pickerVisible: true },
-  { id: 'dinner',           name: 'Dinner',           emoji: '🍲',  color: 'hsl(340, 65%, 50%)', defaultDurationMin: 120, defaultStartHour: 19, defaultStartMin: 0, pickerVisible: true },
+  { id: 'dinner',           name: 'Dinner',           emoji: '🍝',  color: 'hsl(340, 65%, 50%)', defaultDurationMin: 120, defaultStartHour: 19, defaultStartMin: 0, pickerVisible: true },
   { id: 'drinks',           name: 'Drinks',           emoji: '🍸',  color: 'hsl(280, 60%, 50%)', defaultDurationMin: 120, defaultStartHour: 21, defaultStartMin: 0, pickerVisible: true },
   { id: 'nightlife',        name: 'Nightlife',        emoji: '🎉',  color: 'hsl(300, 70%, 45%)', defaultDurationMin: 180, defaultStartHour: 22, defaultStartMin: 0, pickerVisible: true },
   { id: 'coffee_shop',      name: 'Coffee Shop',      emoji: '☕',  color: 'hsl(25, 70%, 45%)',  defaultDurationMin: 45,  defaultStartHour: 10, defaultStartMin: 0, pickerVisible: true },
