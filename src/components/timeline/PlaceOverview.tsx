@@ -455,7 +455,7 @@ const PlaceOverview = ({
           </div>
         ) : null}
 
-        <div className="px-4 pb-4 pt-2 space-y-4">
+        <div className="px-4 pb-4 pt-2 space-y-4 overflow-x-hidden">
           {/* Category pill + actions toolbar */}
           <div className="space-y-2">
             {/* Top row: category pill left, action icons right */}
@@ -972,7 +972,7 @@ const PlaceOverview = ({
                   </a>
                 )}
               </div>
-              <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none -mx-4 px-4" style={{ scrollSnapType: 'x mandatory' }}>
+              <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none" style={{ scrollSnapType: 'x mandatory' }}>
                 {reviews.map((review, i) => (
                   <div key={i} className="shrink-0 w-[260px] rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1.5" style={{ scrollSnapAlign: 'start' }}>
                     <div className="flex items-center gap-1.5">
