@@ -1,101 +1,56 @@
 
 
-# Brand Identity + New Trip CTA — Full Surface Treatment
+# Phase 1a — Photo URL Fix + Timezone Fix + Migrations
 
 ## Overview
-Introduce the "tr1p" brand across every user-facing screen with a reusable Brand component, add a prominent New Trip CTA on the dashboard, warm up all copy, and polish empty states and toast messages.
+Fix two systemic bugs and migrate existing data:
+1. Photos from Google Places stored as `{url, attribution}` objects instead of URL strings -- broken across all entry types
+2. `localToUTC` uses browser-local timezone interpretation, shifting entry times by the browser's UTC offset
+
+Both fixes ship with in-app data migrations that run automatically on timeline load.
 
 ## Changes
 
-### 1. New file: `src/components/Brand.tsx`
-Create a reusable inline wordmark. "tr" and "p" in `text-foreground`, "1" in `text-primary` (orange). Accepts `size` prop (sm/md/lg/xl) mapping to text sizes.
+### Bug 1: Photo URL Normalisation (5 fixes + 1 migration)
 
-### 2. `src/pages/Auth.tsx` (lines 61-68)
-- Replace emoji-in-box + "Trip Planner" heading with `<Brand size="xl" />`
-- Update subtitles: "Create your account to start planning" / "Welcome back -- sign in to continue"
-- Remove unused `MapPin` import, add `Brand` import
+**Fix 1a: `src/components/timeline/PlacesAutocomplete.tsx` (line 102)**
+Normalise `data.photos` from `{url, attribution}` objects to plain URL strings. This cascades to fix EntrySheet creation, PhotoStripPicker previews, and all downstream consumers.
 
-### 3. `src/pages/Dashboard.tsx`
+**Fix 1b: `src/components/timeline/HotelWizard.tsx` (line 212)**
+Normalise photos in `autoEnrichFromParsedName` (direct edge function call).
 
-**Header (lines 141-158):**
-- Replace `<h1>My Trips</h1>` with `<Brand size="sm" />`
-- Keep display name, New Trip button, settings, logout as-is
+**Fix 1c: `src/components/timeline/HotelWizard.tsx` (line 262)**
+Normalise photos in `selectCandidate` (direct edge function call).
 
-**Body -- New Trip CTA (insert between line 188 and 190):**
-- Add a dashed-border CTA card: "Plan a new trip" / "Start from scratch or add flights" with a Plus icon, navigates to `/trip/new`
+**Fix 1d: `src/pages/Timeline.tsx` (lines 386-391)**
+Normalise photos in `handleAddToPlanner` before inserting into `option_images`.
 
-**Empty state (lines 197-213):**
-- Change "No trips yet" to "Where to first?"
-- Change "Create your first trip to start planning" to "Create a trip and start building your itinerary"
-- Change button text from "Create Trip" to "Plan My First Trip"
+**Fix 1e: `src/pages/Timeline.tsx` (lines 469-474)**
+Normalise photos in `handleAddAtTime` before inserting into `option_images`.
 
-**Toast messages:**
-- Line 119: "Link copied!" to "Link copied" with description "Send it to your travel crew!"
-- Line 127: "Trip deleted" to "Trip removed"
+**Fix 1f: Photo data migration in `src/pages/Timeline.tsx`**
+Add a `useEffect` with ref guard that scans `option_images` for this trip, finds rows where `image_url` starts with `{`, parses the JSON to extract the `.url` field, and updates the row. Unrecoverable rows are deleted. Idempotent -- only touches broken rows. Triggers `fetchData()` refresh on completion.
 
-### 4. `src/pages/UserSelect.tsx` (lines 150-158)
-- Replace emoji box + "Trip Planner" fallback with `<Brand size="lg" />`
-- Only render `<h1>{tripName}</h1>` when tripName exists
-- Change subtitle: "Tap your name to jump in"
-- Empty members text (line 169-170): "No members added yet -- the organiser will set this up."
-- Add `Brand` import
+### Bug 2: Timezone Fix (1 fix + 1 migration)
 
-### 5. `src/components/timeline/TimelineHeader.tsx` (line 44)
-- Change fallback from `'Trip Planner'` to `'tr1p'` (plain string, no component needed in tight header)
+**Fix 2a: `src/lib/timezoneUtils.ts` (line 30)**
+Add `Z` suffix to `new Date(\`...\`)` so JavaScript interprets it as UTC instead of browser-local time. One character fix that corrects all 30+ call sites across 4 files.
 
-### 6. `src/pages/NotFound.tsx`
-- Full rewrite: branded 404 with compass emoji, "Looks like you're off the map", "Take me home" button, and small Brand component at bottom
-- Remove `useLocation`/`useEffect`, add `useNavigate`, `motion`, `Brand`
-
-### 7. `src/pages/Live.tsx` (lines 41-47)
-- Change "Coming Soon" to "Track your trip in real-time -- coming soon"
-
-### 8. `src/pages/TripWizard.tsx` (line 203)
-- Change toast from `'Trip created!'` to `"Trip created -- let's plan!"`
-
-### 9. Wizard step headers
-
-**`src/components/wizard/NameStep.tsx`:**
-- "What's your trip called?" to "Name your trip"
-- "Give it a memorable name" to "Something you'll remember it by"
-
-**`src/components/wizard/MembersStep.tsx` (lines 37-38):**
-- "Who's coming?" to "Who's coming along?"
-- "You'll be added automatically as organizer" to "You're the organiser -- add others if you'd like"
-
-**`src/components/wizard/TimezoneStep.tsx`:**
-- "Where are you starting from?" to "Where are you based?"
-- "Select your home timezone" to "This sets the clock for your trip's timeline"
-
-### 10. `index.html` meta tags
-- Author: "Lovable" to "tr1p"
-- Description: "For those who plan their adventures!" to "Plan your next adventure, together."
-- Update og:description and twitter:description to match
-
-### 11. `src/index.css` (line 6)
-- Comment: "Trip Planner" to "tr1p"
+**Fix 2b: Timezone data migration in `src/pages/Timeline.tsx`**
+Add a `useEffect` with ref + localStorage guard (`tz_migrated_{tripId}`) that corrects existing entry timestamps. For each entry, calculates what the browser's UTC offset was at that time (using `trip.home_timezone`), and adds it back to the stored timestamp. Handles DST transitions per-entry. Runs once per trip, persisted via localStorage.
 
 ## What does NOT change
-- Timeline.tsx, ContinuousTimeline.tsx, EntrySheet.tsx
-- Any Supabase queries, auth logic, data fetching
-- CARD_COLORS, category definitions, trip type interface
-- WizardStep.tsx layout/progress dots
-- Toast messages in Timeline.tsx
-- TripSettings.tsx, Settings.tsx, TripNavBar
+- `utcToLocal`, `getHourInTimezone`, `resolveEntryTz`, `resolveDropTz` in timezoneUtils.ts
+- EntrySheet.tsx handleSave, handlePlaceSelect (downstream of PlacesAutocomplete fix)
+- PhotoStripPicker.tsx, EntryCard.tsx image rendering
+- google-places edge function (correctly returns objects; fix is consumer-side)
+- ContinuousTimeline.tsx drag/snap logic
+- Entry/option copy paths in Timeline.tsx
 
 ## Files modified
 | File | Change |
 |------|--------|
-| `src/components/Brand.tsx` | NEW -- reusable wordmark |
-| `src/pages/Auth.tsx` | Wordmark hero, warmer subtitles |
-| `src/pages/Dashboard.tsx` | Header wordmark, body CTA, empty state, toast copy |
-| `src/pages/UserSelect.tsx` | Wordmark hero, warmer copy |
-| `src/components/timeline/TimelineHeader.tsx` | Fallback text |
-| `src/pages/NotFound.tsx` | Full rewrite |
-| `src/pages/Live.tsx` | Coming soon copy |
-| `src/pages/TripWizard.tsx` | Toast message |
-| `src/components/wizard/NameStep.tsx` | Heading copy |
-| `src/components/wizard/MembersStep.tsx` | Heading copy |
-| `src/components/wizard/TimezoneStep.tsx` | Heading + subtitle copy |
-| `index.html` | Meta author, description, og tags |
-| `src/index.css` | Comment update |
+| `src/lib/timezoneUtils.ts` | Line 30: add `Z` suffix |
+| `src/components/timeline/PlacesAutocomplete.tsx` | Line 102: normalise photos |
+| `src/components/timeline/HotelWizard.tsx` | Lines 212, 262: normalise photos |
+| `src/pages/Timeline.tsx` | Lines 386-391, 469-474: normalise photos; add photo migration + timezone migration effects |
