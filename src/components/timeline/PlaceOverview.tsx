@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -160,10 +160,15 @@ const PlaceOverview = ({
   const [viewApplying, setViewApplying] = useState(false);
   const [notesValue, setNotesValue] = useState('');
   const [notesDirty, setNotesDirty] = useState(false);
+  const notesSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notesValueRef = useRef(notesValue);
+  const notesDirtyRef = useRef(notesDirty);
+  notesValueRef.current = notesValue;
+  notesDirtyRef.current = notesDirty;
   const [heroIndex, setHeroIndex] = useState(0);
   const [showPlaceSearch, setShowPlaceSearch] = useState(false);
   const [placeSearchQuery, setPlaceSearchQuery] = useState('');
-  const [topReview, setTopReview] = useState<{ text: string; rating: number | null; author: string; relativeTime: string } | null>(null);
+  const [reviews, setReviews] = useState<{ text: string; rating: number | null; author: string; relativeTime: string }[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
   // ─── Effects ───
   useEffect(() => {
@@ -185,11 +190,10 @@ const PlaceOverview = ({
     }
   }, [deleting, option?.hotel_id]);
 
-  // Fetch review on-demand (skip if preloaded)
+  // Fetch reviews on-demand (skip if preloaded)
   useEffect(() => {
     if (preloadedReviews && preloadedReviews.length > 0) {
-      const best = [...preloadedReviews].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))[0];
-      setTopReview(best);
+      setReviews([...preloadedReviews].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 5));
       setReviewLoading(false);
       return;
     }
@@ -199,8 +203,7 @@ const PlaceOverview = ({
       body: { action: 'details', placeId: option.google_place_id }
     }).then(({ data }) => {
       if (data?.reviews?.length > 0) {
-        const best = [...data.reviews].sort((a: any, b: any) => (b.rating ?? 0) - (a.rating ?? 0))[0];
-        setTopReview(best);
+        setReviews([...data.reviews].sort((a: any, b: any) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 5));
       }
     }).catch(() => {}).finally(() => setReviewLoading(false));
   }, [option.google_place_id, option.category, preloadedReviews]);
@@ -255,13 +258,36 @@ const PlaceOverview = ({
     onSaved();
   };
 
-  const handleNotesSave = async () => {
-    if (!notesDirty) return;
-    const trimmed = notesValue.trim() || null;
+  const handleNotesSave = useCallback(async () => {
+    if (!notesDirtyRef.current) return;
+    const trimmed = notesValueRef.current.trim() || null;
     await supabase.from('entries').update({ notes: trimmed } as any).eq('id', entry.id);
+    notesDirtyRef.current = false;
     setNotesDirty(false);
     onSaved();
-  };
+  }, [entry.id, onSaved]);
+
+  // Debounced auto-save: fires 800ms after last keystroke
+  useEffect(() => {
+    if (!notesDirty) return;
+    if (notesSaveTimerRef.current) clearTimeout(notesSaveTimerRef.current);
+    notesSaveTimerRef.current = setTimeout(() => {
+      handleNotesSave();
+    }, 800);
+    return () => {
+      if (notesSaveTimerRef.current) clearTimeout(notesSaveTimerRef.current);
+    };
+  }, [notesValue, notesDirty, handleNotesSave]);
+
+  // Save on unmount (safety net when drawer closes while typing)
+  useEffect(() => {
+    return () => {
+      if (notesDirtyRef.current) {
+        const trimmed = notesValueRef.current.trim() || null;
+        supabase.from('entries').update({ notes: trimmed } as any).eq('id', entry.id);
+      }
+    };
+  }, [entry.id]);
 
   const handleToggleLock = async () => {
     setToggling(true);
@@ -405,13 +431,23 @@ const PlaceOverview = ({
     <>
       {/* Hero image gallery at top — fixed height, touch swipe */}
         {images.length > 0 ? (
-          <div className="relative w-full overflow-hidden" style={{ height: 240 }}>
-            <ImageGallery images={images} height={240} />
+          <div className="relative w-full overflow-hidden" style={{ height: 240, minHeight: 240 }}>
+            <ImageGallery images={images} height={240} rounded={false} />
             {isEditor && option.category !== 'transfer' && (
               <div className="absolute bottom-3 right-3 z-30">
                 <ImageUploader optionId={option.id} currentCount={images.length} onUploaded={onSaved} />
               </div>
             )}
+          </div>
+        ) : isFlightView ? (
+          <div className="relative w-full overflow-hidden" style={{ height: 180, minHeight: 180 }}>
+            <img
+              src="/default-flight.jpg"
+              alt="Flight"
+              className="h-full w-full object-cover"
+              style={{ minHeight: 180 }}
+              draggable={false}
+            />
           </div>
         ) : isEditor && option.category !== 'transfer' ? (
           <div className="w-full bg-muted/30 flex items-center justify-center" style={{ height: 160 }}>
@@ -420,20 +456,70 @@ const PlaceOverview = ({
         ) : null}
 
         <div className="px-4 pb-4 pt-2 space-y-4">
-          {/* Category badge + title */}
-          <div className="space-y-1">
-            {option.category && (
-              <Badge
-                className="w-fit gap-1 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
-                style={option.category_color ? { backgroundColor: option.category_color, color: '#fff' } : undefined}
-              >
-                {isFlightView && <Plane className="h-3 w-3" />}
-                {option.category}
-              </Badge>
-            )}
-            {entryDayLabel && (
-              <p className="text-xs font-medium text-muted-foreground">{entryDayLabel}</p>
-            )}
+          {/* Category pill + actions toolbar */}
+          <div className="space-y-2">
+            {/* Top row: category pill left, action icons right */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                {option.category && (
+                  <Badge
+                    className="shrink-0 gap-1 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+                    style={option.category_color ? { backgroundColor: option.category_color, color: '#fff' } : undefined}
+                  >
+                    {isFlightView && <Plane className="h-3 w-3" />}
+                    {option.category}
+                  </Badge>
+                )}
+                {entryDayLabel && (
+                  <span className="text-xs font-medium text-muted-foreground truncate">{entryDayLabel}</span>
+                )}
+              </div>
+              {isEditor && (
+                <div className="flex items-center gap-1 shrink-0">
+                  {option?.category !== 'flight' && option?.category !== 'transfer' && (
+                    <button
+                      className={cn(
+                        'flex items-center justify-center h-8 w-8 rounded-md transition-colors',
+                        isLocked ? 'bg-primary hover:bg-primary/90' : 'hover:bg-muted/50'
+                      )}
+                      onClick={handleToggleLock}
+                      disabled={toggling}
+                      title={isLocked ? 'Unlock' : 'Lock'}
+                    >
+                      {isLocked
+                        ? <Lock className="h-4 w-4 text-primary-foreground" />
+                        : <LockOpen className="h-4 w-4 text-muted-foreground" />
+                      }
+                    </button>
+                  )}
+                  {onMoveToIdeas && entry.is_scheduled !== false && option?.category !== 'transfer' && option?.category !== 'flight' && (
+                    <button
+                      className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted/50 transition-colors"
+                      onClick={() => {
+                        if (isLocked) {
+                          toast({ title: 'Unlock this entry first', description: 'Locked entries cannot be sent to the Planner.' });
+                          return;
+                        }
+                        onMoveToIdeas(entry.id);
+                      }}
+                      disabled={isLocked}
+                      title="Send to Planner"
+                    >
+                      <ClipboardList className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  )}
+                  <button
+                    className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-destructive/10 transition-colors"
+                    onClick={() => setDeleting(true)}
+                    title="Delete"
+                  >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Title */}
             <h2 className="text-xl font-bold">
               <InlineField
                 value={option.name}
@@ -465,45 +551,11 @@ const PlaceOverview = ({
                 </button>
               </div>
             )}
-
-            {/* Lock + Delete action row */}
-            <div className="flex items-center gap-2 pt-1">
-              {isEditor && option?.category !== 'flight' && option?.category !== 'transfer' && (
-                <button
-                  className={cn(
-                    'flex items-center justify-center h-8 w-8 rounded-md transition-colors',
-                    isLocked ? 'bg-primary hover:bg-primary/90' : 'hover:bg-muted/50'
-                  )}
-                  onClick={handleToggleLock}
-                  disabled={toggling}
-                >
-                  {isLocked
-                    ? <Lock className="h-4 w-4 text-primary-foreground" />
-                    : <LockOpen className="h-4 w-4 text-muted-foreground" />
-                  }
-                </button>
-              )}
-              {isEditor && (
-                <button
-                  className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-destructive/10 transition-colors"
-                  onClick={() => setDeleting(true)}
-                >
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </button>
-              )}
-            </div>
           </div>
 
           {/* Flight layout */}
           {isFlightView ? (
             <div className="space-y-3">
-              {images.length === 0 && (
-                <img
-                  src="https://images.unsplash.com/photo-1436491865332-7a61a109db05?w=600&h=200&fit=crop"
-                  alt="Flight"
-                  className="w-full h-32 object-cover rounded-xl"
-                />
-              )}
             <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 text-left space-y-0.5">
@@ -906,34 +958,35 @@ const PlaceOverview = ({
             })()
           )}
 
-          {/* Top Review */}
-          {option.category !== 'flight' && option.category !== 'transfer' && topReview && (
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm">💬</span>
-                <span className="text-xs font-semibold text-muted-foreground">Top Review</span>
-              </div>
-              <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <span className="text-xs font-medium">{topReview.author}</span>
-                  {topReview.rating && (
-                    <span className="text-[10px] text-muted-foreground">{'⭐'.repeat(Math.min(topReview.rating, 5))}</span>
-                  )}
-                  {topReview.relativeTime && (
-                    <span className="text-[10px] text-muted-foreground">· {topReview.relativeTime}</span>
-                  )}
+          {/* Reviews — horizontal scroll */}
+          {option.category !== 'flight' && option.category !== 'transfer' && reviews.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm">💬</span>
+                  <span className="text-xs font-semibold text-muted-foreground">Reviews ({reviews.length})</span>
                 </div>
-                <p className="text-xs text-muted-foreground line-clamp-3">{topReview.text}</p>
                 {option.google_maps_uri && (
-                  <a
-                    href={option.google_maps_uri}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[10px] text-primary hover:underline mt-1.5 inline-block"
-                  >
-                    Read more on Google →
+                  <a href={option.google_maps_uri} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:underline">
+                    See all on Google →
                   </a>
                 )}
+              </div>
+              <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none -mx-4 px-4" style={{ scrollSnapType: 'x mandatory' }}>
+                {reviews.map((review, i) => (
+                  <div key={i} className="shrink-0 w-[260px] rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1.5" style={{ scrollSnapAlign: 'start' }}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-medium truncate">{review.author}</span>
+                      {review.rating != null && (
+                        <span className="text-[10px] text-muted-foreground shrink-0">{'⭐'.repeat(Math.min(review.rating, 5))}</span>
+                      )}
+                    </div>
+                    {review.relativeTime && (
+                      <p className="text-[10px] text-muted-foreground">{review.relativeTime}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground line-clamp-4">{review.text}</p>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -1104,25 +1157,6 @@ const PlaceOverview = ({
             );
           })()}
 
-          {/* Editor actions */}
-          {isEditor && onMoveToIdeas && option?.category !== 'transfer' && option?.category !== 'flight' && (
-            <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={isLocked}
-                onClick={() => {
-                  if (isLocked) {
-                    toast({ title: 'Unlock this entry first', description: 'Locked entries cannot be sent to the Planner.' });
-                    return;
-                  }
-                  onMoveToIdeas(entry.id);
-                }}
-              >
-                <ClipboardList className="mr-1.5 h-3.5 w-3.5" /> Send to Planner
-              </Button>
-            </div>
-          )}
 
           {/* Delete confirmation */}
           {option?.hotel_id ? (

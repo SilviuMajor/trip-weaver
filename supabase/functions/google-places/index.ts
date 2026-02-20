@@ -21,7 +21,7 @@ const mapPlace = (place: any) => ({
   website: place.websiteUri ?? null,
   phone: place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? null,
   photoRef: place.photos?.[0]?.name ?? null,
-  reviews: (place.reviews ?? []).slice(0, 3).map((r: any) => ({
+  reviews: (place.reviews ?? []).slice(0, 5).map((r: any) => ({
     text: r.text?.text ?? '',
     rating: r.rating ?? null,
     author: r.authorAttribution?.displayName ?? 'Anonymous',
@@ -176,7 +176,7 @@ serve(async (req) => {
         priceLevel: result.priceLevel ?? null,
         placeTypes: result.types ?? null,
         photos: photoResults,
-        reviews: (result.reviews ?? []).slice(0, 3).map((r: any) => ({
+        reviews: (result.reviews ?? []).slice(0, 5).map((r: any) => ({
           text: r.text?.text ?? '',
           rating: r.rating ?? null,
           author: r.authorAttribution?.displayName ?? 'Anonymous',

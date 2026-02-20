@@ -6,9 +6,10 @@ import type { OptionImage } from '@/types/trip';
 interface ImageGalleryProps {
   images: OptionImage[];
   height?: number;
+  rounded?: boolean;
 }
 
-const ImageGallery = ({ images, height = 220 }: ImageGalleryProps) => {
+const ImageGallery = ({ images, height = 220, rounded = true }: ImageGalleryProps) => {
   const [current, setCurrent] = useState(0);
   const touchStartX = useRef<number | null>(null);
   const touchDeltaX = useRef(0);
@@ -38,7 +39,7 @@ const ImageGallery = ({ images, height = 220 }: ImageGalleryProps) => {
   };
 
   return (
-    <div className="relative overflow-hidden rounded-xl" style={{ height }}>
+    <div className={cn("relative overflow-hidden", rounded && "rounded-xl")} style={{ height, minHeight: height }}>
       <div
         className="w-full h-full"
         onTouchStart={handleTouchStart}
@@ -49,6 +50,8 @@ const ImageGallery = ({ images, height = 220 }: ImageGalleryProps) => {
           src={sorted[current].image_url}
           alt={`Image ${current + 1}`}
           className="h-full w-full object-cover"
+          style={{ minHeight: height }}
+          draggable={false}
         />
         {sorted[current].attribution && (
           <span className="absolute bottom-2 right-2 text-[9px] text-white/70 bg-black/30 px-1.5 py-0.5 rounded backdrop-blur-sm pointer-events-none">

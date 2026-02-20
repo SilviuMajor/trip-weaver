@@ -549,7 +549,7 @@ const ExploreView = ({
     try {
       if (searchQuery.trim()) {
         // Text search: widen radius
-        const newRadius = textSearchRadiusRef.current * 2;
+        const newRadius = Math.min(textSearchRadiusRef.current * 3, 50000);
         textSearchRadiusRef.current = newRadius;
         const body: any = { action: 'textSearch', query: searchQuery.trim(), radius: newRadius };
         if (originLocation) {
@@ -563,15 +563,17 @@ const ExploreView = ({
         const { data, error } = await supabase.functions.invoke('google-places', { body });
         if (error) throw error;
         const moreResults = data?.results ?? [];
+        let newUniqueCount = 0;
         setResults(prev => {
           const existingIds = new Set(prev.map(r => r.placeId));
           const unique = moreResults.filter((r: ExploreResult) => !existingIds.has(r.placeId));
+          newUniqueCount = unique.length;
           return [...prev, ...unique];
         });
-        setCanLoadMore(moreResults.length >= 20);
+        setCanLoadMore(newUniqueCount >= 3 && newRadius < 50000);
       } else if (originLocation) {
-        // Nearby search: double radius
-        const newRadius = nearbyRadiusRef.current * 2;
+        // Nearby search: triple radius, cap at 50km
+        const newRadius = Math.min(nearbyRadiusRef.current * 3, 50000);
         nearbyRadiusRef.current = newRadius;
         const types = selectedCategories.flatMap(catId => CATEGORY_TO_PLACE_TYPES[catId] || []);
         const { data, error } = await supabase.functions.invoke('google-places', {
@@ -579,12 +581,14 @@ const ExploreView = ({
         });
         if (error) throw error;
         const moreResults = data?.results ?? [];
+        let newUniqueCount = 0;
         setResults(prev => {
           const existingIds = new Set(prev.map(r => r.placeId));
           const unique = moreResults.filter((r: ExploreResult) => !existingIds.has(r.placeId));
+          newUniqueCount = unique.length;
           return [...prev, ...unique];
         });
-        setCanLoadMore(moreResults.length >= 20);
+        setCanLoadMore(newUniqueCount >= 3 && newRadius < 50000);
       }
     } catch (err: any) {
       console.error('Load more failed:', err);
