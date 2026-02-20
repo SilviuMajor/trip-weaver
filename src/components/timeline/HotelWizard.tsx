@@ -384,6 +384,22 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
         const nights = differenceInCalendarDays(parseISO(coDate), parseISO(ciDate));
         if (nights <= 0) continue;
 
+        // For undated trips: remap real dates to reference dates
+        const remapDate = (realDate: string): string => {
+          if (!isUndated) return realDate;
+          const offset = differenceInCalendarDays(parseISO(realDate), parseISO(ciDate));
+          return format(addDays(parseISO(REFERENCE_DATE), Math.max(0, offset)), 'yyyy-MM-dd');
+        };
+
+        // Auto-expand duration if hotel spans more days than current trip
+        if (isUndated) {
+          const totalDaysNeeded = nights + 1;
+          const currentDuration = trip.duration_days ?? 3;
+          if (totalDaysNeeded > currentDuration) {
+            await supabase.from('trips').update({ duration_days: totalDaysNeeded }).eq('id', tripId);
+          }
+        }
+
         // Helper to create an entry + option + photos
         const createBlock = async (
           startIso: string,
@@ -447,33 +463,36 @@ const HotelWizard = ({ open, onOpenChange, tripId, trip, onCreated, dayTimezoneM
 
         // Day index relative to trip start (for scheduled_day)
         const dayIndex = (dateStr: string) => {
-          if (isUndated) return null;
+          if (isUndated) {
+            return differenceInCalendarDays(parseISO(dateStr), parseISO(REFERENCE_DATE));
+          }
           return differenceInCalendarDays(parseISO(dateStr), parseISO(trip.start_date!));
         };
 
         // 2. Check-in block (1hr)
-        const ciTz = tzFor(ciDate);
-        const ciStart = localToUTC(ciDate, hotel.checkInTime || '15:00', ciTz);
+        const ciDateRef = remapDate(ciDate);
+        const ciTz = tzFor(ciDateRef);
+        const ciStart = localToUTC(ciDateRef, hotel.checkInTime || '15:00', ciTz);
         const ciEndTime = `${String(Math.min(23, parseInt(hotel.checkInTime || '15') + 1)).padStart(2, '0')}:${(hotel.checkInTime || '15:00').split(':')[1]}`;
-        const ciEnd = localToUTC(ciDate, ciEndTime, ciTz);
-        await createBlock(ciStart, ciEnd, `Check in · ${hotel.name}`, dayIndex(ciDate));
+        const ciEnd = localToUTC(ciDateRef, ciEndTime, ciTz);
+        await createBlock(ciStart, ciEnd, `Check in · ${hotel.name}`, dayIndex(ciDateRef));
 
         // 3. Overnight blocks — last night extends to checkout time
         for (let n = 0; n < nights; n++) {
-          const nightDate = format(addDays(parseISO(ciDate), n), 'yyyy-MM-dd');
-          const nextDate = format(addDays(parseISO(ciDate), n + 1), 'yyyy-MM-dd');
-          const nightTz = tzFor(nightDate);
-          const nextTz = tzFor(nextDate);
-          const oStart = localToUTC(nightDate, hotel.eveningReturn || '22:00', nightTz);
+          const nightDateRef = remapDate(format(addDays(parseISO(ciDate), n), 'yyyy-MM-dd'));
+          const nextDateRef = remapDate(format(addDays(parseISO(ciDate), n + 1), 'yyyy-MM-dd'));
+          const nightTz = tzFor(nightDateRef);
+          const nextTz = tzFor(nextDateRef);
+          const oStart = localToUTC(nightDateRef, hotel.eveningReturn || '22:00', nightTz);
 
           const isLastNight = n === nights - 1;
           const endTime = isLastNight ? (hotel.checkoutTime || '11:00') : (hotel.morningLeave || '08:00');
-          const oEnd = localToUTC(nextDate, endTime, nextTz);
+          const oEnd = localToUTC(nextDateRef, endTime, nextTz);
 
           const optionName = isLastNight ? `Check out · ${hotel.name}` : hotel.name;
           const linkedType = isLastNight ? 'checkout' : null;
 
-          await createBlock(oStart, oEnd, optionName, dayIndex(nightDate), linkedType);
+          await createBlock(oStart, oEnd, optionName, dayIndex(nightDateRef), linkedType);
         }
 
         // No separate checkout block — final overnight covers it

@@ -159,7 +159,7 @@ const TripWizard = () => {
     }
   };
 
-  const createHotelEntries = async (tripId: string, hotels: HotelDraft[], fallbackTz: string, tripStartDate: string | null) => {
+  const createHotelEntries = async (tripId: string, hotels: HotelDraft[], fallbackTz: string, tripStartDate: string | null, remapDate: (d: string) => string) => {
     for (const hotel of hotels) {
       const { data: hotelRow, error: hotelErr } = await supabase
         .from('hotels')
@@ -250,30 +250,33 @@ const TripWizard = () => {
       };
 
       const dayIndex = (dateStr: string) => {
-        if (!tripStartDate) return null;
+        if (!tripStartDate) {
+          return differenceInCalendarDays(parseISO(dateStr), parseISO('2099-01-01'));
+        }
         return differenceInCalendarDays(parseISO(dateStr), parseISO(tripStartDate));
       };
 
       // Check-in block (1hr)
-      const ciStart = localToUTC(ciDate, hotel.checkInTime || '15:00', fallbackTz);
+      const ciDateRef = remapDate(ciDate);
+      const ciStart = localToUTC(ciDateRef, hotel.checkInTime || '15:00', fallbackTz);
       const ciEndTime = `${String(Math.min(23, parseInt(hotel.checkInTime || '15') + 1)).padStart(2, '0')}:${(hotel.checkInTime || '15:00').split(':')[1]}`;
-      const ciEnd = localToUTC(ciDate, ciEndTime, fallbackTz);
-      await createBlock(ciStart, ciEnd, `Check in · ${hotel.name}`, dayIndex(ciDate));
+      const ciEnd = localToUTC(ciDateRef, ciEndTime, fallbackTz);
+      await createBlock(ciStart, ciEnd, `Check in · ${hotel.name}`, dayIndex(ciDateRef));
 
       // Overnight blocks
       for (let n = 0; n < nights; n++) {
-        const nightDate = format(addDays(parseISO(ciDate), n), 'yyyy-MM-dd');
-        const nextDate = format(addDays(parseISO(ciDate), n + 1), 'yyyy-MM-dd');
-        const oStart = localToUTC(nightDate, hotel.eveningReturn || '22:00', fallbackTz);
+        const nightDateRef = remapDate(format(addDays(parseISO(ciDate), n), 'yyyy-MM-dd'));
+        const nextDateRef = remapDate(format(addDays(parseISO(ciDate), n + 1), 'yyyy-MM-dd'));
+        const oStart = localToUTC(nightDateRef, hotel.eveningReturn || '22:00', fallbackTz);
 
         const isLastNight = n === nights - 1;
         const endTime = isLastNight ? (hotel.checkoutTime || '11:00') : (hotel.morningLeave || '08:00');
-        const oEnd = localToUTC(nextDate, endTime, fallbackTz);
+        const oEnd = localToUTC(nextDateRef, endTime, fallbackTz);
 
         const optionName = isLastNight ? `Check out · ${hotel.name}` : hotel.name;
         const linkedType = isLastNight ? 'checkout' : null;
 
-        await createBlock(oStart, oEnd, optionName, dayIndex(nightDate), linkedType);
+        await createBlock(oStart, oEnd, optionName, dayIndex(nightDateRef), linkedType);
       }
     }
   };
@@ -384,15 +387,47 @@ const TripWizard = () => {
 
       if (membersError) throw membersError;
 
+      // For undated trips: remap real dates to reference dates (2099-01-01 + offset)
+      const REFERENCE_DATE_STR = '2099-01-01';
+      let remapDate: (realDate: string) => string;
+      if (datesUnknown) {
+        const allRealDates: string[] = [];
+        for (const f of flightDrafts) {
+          if (f.date) allRealDates.push(f.date);
+        }
+        for (const h of hotelDrafts) {
+          if (h.checkInDate) allRealDates.push(h.checkInDate);
+        }
+        allRealDates.sort();
+        const earliest = allRealDates[0] || REFERENCE_DATE_STR;
+        remapDate = (realDate: string) => {
+          const offset = differenceInCalendarDays(parseISO(realDate), parseISO(earliest));
+          return format(addDays(parseISO(REFERENCE_DATE_STR), Math.max(0, offset)), 'yyyy-MM-dd');
+        };
+
+        if (allRealDates.length >= 1) {
+          const maxDate = hotelDrafts.reduce((max, h) => {
+            return h.checkoutDate && h.checkoutDate > max ? h.checkoutDate : max;
+          }, allRealDates[allRealDates.length - 1]);
+          const totalSpan = differenceInCalendarDays(parseISO(maxDate), parseISO(earliest)) + 1;
+          if (totalSpan > durationDays) {
+            await supabase.from('trips').update({ duration_days: totalSpan }).eq('id', trip.id);
+          }
+        }
+      } else {
+        remapDate = (realDate: string) => realDate;
+      }
+
       // Create flight entries
       for (const flight of flightDrafts) {
-        const flightDate = flight.date || startDate || '2099-01-01';
+        const rawDate = flight.date || startDate || REFERENCE_DATE_STR;
+        const flightDate = remapDate(rawDate);
         const flightName = flight.flightNumber || `${flight.departureLocation.split(' - ')[0]} → ${flight.arrivalLocation.split(' - ')[0]}`;
         await createFlightEntry(trip.id, flight, flightDate, flightName);
       }
 
       if (hotelDrafts.length > 0) {
-        await createHotelEntries(trip.id, hotelDrafts, timezone, datesUnknown ? null : startDate);
+        await createHotelEntries(trip.id, hotelDrafts, timezone, datesUnknown ? null : startDate, remapDate);
       }
 
       if (activityDrafts.length > 0) {

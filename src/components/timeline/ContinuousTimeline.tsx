@@ -207,7 +207,18 @@ const ContinuousTimeline = ({
     for (let i = 0; i < days.length; i++) {
       if (format(days[i], 'yyyy-MM-dd') === dateStr) return i;
     }
-    return 0;
+    // Fallback: find closest day by timestamp proximity (prevents silent stacking on day 0)
+    const entryMs = new Date(isoTime).getTime();
+    let closestIdx = 0;
+    let closestDist = Infinity;
+    for (let i = 0; i < days.length; i++) {
+      const dist = Math.abs(days[i].getTime() - entryMs);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestIdx = i;
+      }
+    }
+    return closestIdx;
   }, [days]);
 
   // Compute global hour for an entry
