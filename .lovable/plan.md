@@ -1,93 +1,63 @@
 
 
-# Timeline Card Design, Layout & Scroll Fixes
+# Card Interaction Overhaul -- No Push, Explicit Snap Only
 
-Seven changes across 4 files.
-
----
-
-## 1. Remove Card Corner + Buttons
-
-**File:** `src/components/timeline/ContinuousTimeline.tsx` (lines 1793-1828)
-
-Delete the entire block containing both `{onAddBetween && (() => {` IIFE calls that render the dashed `<Plus>` circles at top-left and bottom-left of each card. Keep the `Plus` import since it's still used by gap "Add something" buttons.
+Three changes to make cards feel stable: they only move when the user explicitly drags or snaps them.
 
 ---
 
-## 2. Fix Scroll-on-Card (Critical Mobile Bug)
+## 1. Remove Smart Drop Push
 
-**File:** `src/components/timeline/EntryCard.tsx` (lines 410, 434, 459, 496, 562)
+**File:** `src/pages/Timeline.tsx` (lines 1579-1653)
 
-Replace all 5 occurrences of `touchAction: 'none'` with `touchAction: 'pan-y'` (keeping other style properties like `borderLeftColor` where present).
+Delete the entire "Smart Drop" block from `handleEntryTimeChange`. This includes:
+- The overlap detection logic (lines 1579-1588)
+- The push-down logic for unlocked overlapped cards (lines 1591-1648)
+- The locked card overlap toast (lines 1649-1653)
 
-**File:** `src/hooks/useDragResize.ts` (lines 335-418)
-
-Replace the entire `onTouchStart` callback with a two-phase approach:
-- **Phase 1 (hold window):** Attach a `passive: true` `checkMovement` listener that allows native browser scrolling. If finger moves > threshold, cancel the hold timer.
-- **Phase 2 (after 400ms hold):** Remove passive listener, attach `passive: false` `handleDragMove` listener that calls `preventDefault()` and handles drag positioning.
-
-This ensures native scroll momentum works when touching cards, and only hijacks touch events after confirming a deliberate long-press.
+After deletion, the code flows directly from the transport reposition `} catch` block (line 1575-1577) to the auto-extend trip check (line 1655).
 
 ---
 
-## 3. Align Moving-Time Pills to Gutter
+## 2. Remove Auto-Transport on Plain Drops
 
-**File:** `src/components/timeline/ContinuousTimeline.tsx` (lines 1940, 1943, 1957)
+Transport creation should only happen via explicit snap (magnet lock during drag). Three auto-transport blocks need removal:
 
-Change all 3 occurrences of `left: -72` to `left: -48` to align drag time pills with hour labels.
+### 2a. `handleEntryTimeChange` adjacency check (lines 1552-1574)
 
----
+Delete the "Check if we need to create NEW transport" block that runs after transport repositioning. Keep the `} catch` on line 1575.
 
-## 4. Daylight Tint -- Deep Night + Golden-Hour Bands + UTC Fix
+### 2b. `handleDropOnTimeline` adjacency check (lines 1962-1988)
 
-**File:** `src/components/timeline/ContinuousTimeline.tsx` (lines 1836-1872)
+Delete the "Auto-create transport for nearby adjacent cards" block. The toast at line 1990 and the opening hours check above it both remain.
 
-Replace the sunrise/sunset gradient block:
-- Fix UTC bug: Use `getHourInTimezone(sunTimes.sunrise.toISOString(), dayTz)` instead of `getUTCHours()` to get correct local hours.
-- Resolve `dayTz` via `getDayTzInfo(day)?.activeTz || homeTimezone`.
-- Keep the existing edge bar gradient.
-- Add a full-width daylight tint layer (`z-[1]`, `pointer-events-none`) with deep navy overlay for night hours and warm amber bands at sunrise/sunset transitions, fully transparent during daytime.
-- Wrap both elements in a `Fragment` with a key.
+### 2c. `handleDropExploreCard` adjacency check (lines 2021-2047)
 
-Import `Fragment` from React (update the existing import on line 1).
+Delete the "Auto-create transport for nearby adjacent cards" block inside `if (newEntryId)`. The `handleSnapRelease` dependency in the `useCallback` deps array (line 2048) should also be removed.
 
 ---
 
-## 5. Bolder Hour Labels
+## 3. Reduce Snap Magnet Threshold (20min to 15min)
 
-**File:** `src/components/timeline/ContinuousTimeline.tsx` (line 1148)
+**File:** `src/components/timeline/ContinuousTimeline.tsx` (line 783)
 
-Change `font-medium text-muted-foreground/50` to `font-semibold text-muted-foreground/70` for increased visibility.
-
----
-
-## 6. Bigger Weather Emojis + Fix Centering
-
-**File:** `src/components/timeline/WeatherBadge.tsx` (lines 31-33)
-
-- Change `gap-0.5` to `gap-1`
-- Change emoji span from `text-sm` to `text-base`
-
-**File:** `src/components/timeline/ContinuousTimeline.tsx` (line 1903)
-
-Change weather centering offset from `-6` to `-10` to properly center the now-larger badge at the half-hour mark.
+Change `SNAP_THRESHOLD_HOURS = 20 / 60` to `SNAP_THRESHOLD_HOURS = 15 / 60`.
 
 ---
 
-## 7. Slightly Bigger TZ Change Pill
+## What Stays Unchanged
 
-**File:** `src/components/timeline/ContinuousTimeline.tsx` (line 1886)
+- `handleSnapRelease` itself (creates transport on explicit snap)
+- Transport reposition on move (existing transports follow their cards)
+- `handleChainShift` (block resize shifts)
+- `handleGroupDrop` (group drag)
+- `computeOverlapLayout` (visual overlap columns)
+- Auto-generate-transport edge function (batch operation)
 
-Change `px-2 py-0.5 text-[10px]` to `px-2.5 py-1 text-xs` for improved readability.
+## Files Changed
 
----
-
-## Files Changed Summary
-
-| File | Changes |
-|------|---------|
-| `src/components/timeline/ContinuousTimeline.tsx` | Remove card +buttons, align drag pills, daylight tint with UTC fix, bolder hour labels, weather centering, bigger TZ pill |
-| `src/hooks/useDragResize.ts` | Two-phase touch lifecycle: passive during hold, non-passive after drag starts |
-| `src/components/timeline/EntryCard.tsx` | `touchAction: 'none'` to `touchAction: 'pan-y'` on all 5 tiers |
-| `src/components/timeline/WeatherBadge.tsx` | Emoji `text-sm` to `text-base`, `gap-0.5` to `gap-1` |
+| File | Change |
+|------|--------|
+| `src/pages/Timeline.tsx` | Delete Smart Drop block, delete 3 auto-transport adjacency checks |
+| `src/components/timeline/ContinuousTimeline.tsx` | Snap threshold 20min to 15min |
 
