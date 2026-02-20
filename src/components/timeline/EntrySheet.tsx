@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Drawer, DrawerContent } from '@/components/ui/drawer';
+
 import { useIsMobile } from '@/hooks/use-mobile';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
@@ -894,18 +894,19 @@ const EntrySheet = ({
     );
 
     if (isMobile) {
+      if (!open) return null;
       return (
-        <Drawer open={open} onOpenChange={onOpenChange}>
-          <DrawerContent className="max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-background overflow-y-auto overscroll-none">
+          <div className="relative min-h-full">
             {viewContent}
-          </DrawerContent>
-        </Drawer>
+          </div>
+        </div>
       );
     }
 
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md p-0">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md p-0 [&>button:last-child]:hidden">
           {viewContent}
         </DialogContent>
       </Dialog>
