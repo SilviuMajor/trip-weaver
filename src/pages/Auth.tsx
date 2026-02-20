@@ -11,15 +11,15 @@ import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { lovable } from '@/integrations/lovable/index';
 
 const Auth = () => {
-  const [isSignUp, setIsSignUp] = useState(false);
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectUrl = searchParams.get('redirect');
+  const [isSignUp, setIsSignUp] = useState(searchParams.get('signup') === 'true');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const redirectUrl = searchParams.get('redirect');
   const { isAdmin, loading, signIn, signUp } = useAdminAuth();
 
   useEffect(() => {
