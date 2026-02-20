@@ -7,7 +7,8 @@ import { findCategory } from '@/lib/categories';
 import { inferCategoryFromTypes } from '@/lib/placeTypeMapping';
 import { checkOpeningHoursConflict, resolveFromAddress, resolveToAddress } from '@/lib/entryHelpers';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useTripMember } from '@/hooks/useTripMember';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import AIRPORTS from '@/lib/airports';
 
@@ -69,7 +70,8 @@ async function autoExtendTripIfNeeded(
 
 const Timeline = () => {
   const { tripId } = useParams<{ tripId: string }>();
-  const { currentUser, isEditor } = useCurrentUser();
+  const { member: currentUser, isEditor, isAuthenticated, loading: memberLoading } = useTripMember(tripId);
+  const { session } = useAdminAuth();
   const navigate = useNavigate();
   const { latitude: userLat, longitude: userLng } = useGeolocation();
 
@@ -253,12 +255,17 @@ const Timeline = () => {
   }, []);
 
 
-  // Redirect if no user
+  // Redirect if not authenticated or not a member
   useEffect(() => {
-    if (!currentUser) {
-      navigate(tripId ? `/trip/${tripId}` : '/');
+    if (memberLoading) return;
+    if (!isAuthenticated) {
+      navigate('/auth');
+      return;
     }
-  }, [currentUser, navigate, tripId]);
+    if (!currentUser) {
+      navigate('/');
+    }
+  }, [memberLoading, isAuthenticated, currentUser, navigate]);
 
   // Concurrent fetch guard
   const fetchingRef = useRef(false);
@@ -366,7 +373,7 @@ const Timeline = () => {
 
     const { data: d, error } = await supabase
       .from('entries')
-      .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false } as any)
+      .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false, created_by: session?.user?.id ?? null } as any)
       .select('id').single();
     if (error) throw error;
 
@@ -439,7 +446,7 @@ const Timeline = () => {
 
       const { data: d, error } = await supabase
         .from('entries')
-        .insert({ trip_id: tripId, start_time: startTime, end_time: endTime, is_scheduled: true } as any)
+        .insert({ trip_id: tripId, start_time: startTime, end_time: endTime, is_scheduled: true, created_by: session?.user?.id ?? null } as any)
         .select('id').single();
       if (error) throw error;
 
@@ -883,6 +890,7 @@ const Timeline = () => {
         is_scheduled: true,
         from_entry_id: effectiveFromId,
         to_entry_id: effectiveToId,
+        created_by: session?.user?.id ?? null,
       } as any).select().single();
 
       if (newTransport) {

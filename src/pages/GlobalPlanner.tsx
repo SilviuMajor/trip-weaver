@@ -107,13 +107,23 @@ const GlobalPlanner = () => {
   // Bug 6 fix: Only use direct query from entries/entry_options, no sync
   const fetchDirectPlaces = useCallback(async (): Promise<GlobalPlace[]> => {
     if (!adminUser) return [];
+    // Get all trips the user is a member of (owned + shared)
+    const { data: memberships } = await supabase
+      .from('trip_users')
+      .select('trip_id')
+      .eq('user_id', adminUser.id);
+    if (!memberships?.length) return [];
+
+    const tripIds = [...new Set(memberships.map(m => m.trip_id).filter(Boolean))] as string[];
+
     const { data: trips } = await supabase
       .from('trips')
-      .select('id, end_date')
-      .eq('owner_id', adminUser.id);
+      .select('id, name, end_date')
+      .in('id', tripIds);
     if (!trips?.length) return [];
 
-    const tripIds = trips.map(t => t.id);
+    const tripNameMap = new Map<string, string>();
+    trips.forEach(t => tripNameMap.set(t.id, t.name));
     const tripEndMap = new Map<string, string | null>();
     trips.forEach(t => tripEndMap.set(t.id, t.end_date));
 
@@ -166,6 +176,7 @@ const GlobalPlanner = () => {
         status: isVisited ? 'visited' : 'want_to_go',
         source: 'trip_auto',
         source_trip_id: entry?.trip_id ?? null,
+        source_trip_name: entry?.trip_id ? tripNameMap.get(entry.trip_id) ?? null : null,
         rating: opt.rating,
         price_level: opt.price_level,
         website: opt.website,
@@ -305,7 +316,7 @@ const GlobalPlanner = () => {
                   <MapPin className="h-4 w-4 text-primary" />
                   {selectedCity}
                 </span>
-              ) : 'My Places'}
+              ) : 'Global Planner'}
             </h1>
           </div>
           <div className="flex items-center gap-2">
@@ -370,6 +381,11 @@ const GlobalPlanner = () => {
                               compact
                               visitedBadge={place.status === 'visited'}
                             />
+                            {place.source_trip_name && (
+                              <p className="mt-1 truncate text-[10px] text-muted-foreground/70 px-1">
+                                from {place.source_trip_name}
+                              </p>
+                            )}
                           </div>
                         );
                       })}
@@ -440,6 +456,9 @@ const GlobalPlanner = () => {
                           <p className="truncate font-semibold text-sm">{place.name}</p>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             {place.address && <span className="truncate">{place.address.split(',')[0]}</span>}
+                            {place.source_trip_name && (
+                              <span className="shrink-0 text-[10px] text-muted-foreground/60">· {place.source_trip_name}</span>
+                            )}
                             {place.rating && (
                               <span className="flex items-center gap-0.5 shrink-0">
                                 <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />

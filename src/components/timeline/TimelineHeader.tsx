@@ -1,7 +1,8 @@
-import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useTripMember } from '@/hooks/useTripMember';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { Button } from '@/components/ui/button';
 import { LogOut, Settings, RefreshCw, User, Moon, Sun } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useTheme } from 'next-themes';
 import type { Trip } from '@/types/trip';
 
@@ -13,13 +14,16 @@ interface TimelineHeaderProps {
 }
 
 const TimelineHeader = ({ trip, tripId, onRefresh, refreshing }: TimelineHeaderProps) => {
-  const { currentUser, logout, isOrganizer } = useCurrentUser();
+  const { tripId: paramTripId } = useParams<{ tripId: string }>();
+  const effectiveTripId = paramTripId || tripId;
+  const { member: currentUser, isOrganiser: isOrganizer } = useTripMember(effectiveTripId);
+  const { signOut } = useAdminAuth();
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
 
-  const handleLogout = () => {
-    logout();
-    navigate(`/trip/${tripId}`);
+  const handleLogout = async () => {
+    await signOut();
+    navigate('/auth');
   };
 
   return (

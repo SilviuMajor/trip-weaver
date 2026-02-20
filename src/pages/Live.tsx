@@ -2,22 +2,29 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Radio } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useTripMember } from '@/hooks/useTripMember';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import TimelineHeader from '@/components/timeline/TimelineHeader';
 import TripNavBar from '@/components/timeline/TripNavBar';
 import type { Trip } from '@/types/trip';
 
 const Live = () => {
   const { tripId } = useParams<{ tripId: string }>();
-  const { currentUser } = useCurrentUser();
+  const { member: currentUser, isAuthenticated, loading: memberLoading } = useTripMember(tripId);
+  const { session } = useAdminAuth();
   const navigate = useNavigate();
   const [trip, setTrip] = useState<Trip | null>(null);
 
   useEffect(() => {
-    if (!currentUser) {
-      navigate(tripId ? `/trip/${tripId}` : '/');
+    if (memberLoading) return;
+    if (!isAuthenticated) {
+      navigate('/auth');
+      return;
     }
-  }, [currentUser, navigate, tripId]);
+    if (!currentUser) {
+      navigate('/');
+    }
+  }, [memberLoading, isAuthenticated, currentUser, navigate]);
 
   const fetchTrip = useCallback(async () => {
     if (!tripId) return;
