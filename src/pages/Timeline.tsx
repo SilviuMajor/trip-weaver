@@ -1688,11 +1688,21 @@ const Timeline = () => {
               arrival_terminal: opt.arrival_terminal,
               airport_checkin_hours: opt.airport_checkin_hours,
               airport_checkout_min: opt.airport_checkout_min,
+              phone: opt.phone,
+              address: opt.address,
+              rating: opt.rating,
+              user_rating_count: opt.user_rating_count,
+              opening_hours: opt.opening_hours,
+              google_maps_uri: opt.google_maps_uri,
+              google_place_id: opt.google_place_id,
+              price_level: opt.price_level,
+              hotel_id: opt.hotel_id,
+              estimated_budget: opt.estimated_budget,
+              actual_cost: opt.actual_cost,
             } as any)
             .select('id')
             .single();
           if (optErr || !newOpt) throw optErr;
-
           if (opt.images && opt.images.length > 0) {
             await supabase.from('option_images').insert(
               opt.images.map(img => ({
@@ -2156,6 +2166,17 @@ const Timeline = () => {
             arrival_terminal: opt.arrival_terminal,
             airport_checkin_hours: opt.airport_checkin_hours,
             airport_checkout_min: opt.airport_checkout_min,
+            phone: opt.phone,
+            address: opt.address,
+            rating: opt.rating,
+            user_rating_count: opt.user_rating_count,
+            opening_hours: opt.opening_hours,
+            google_maps_uri: opt.google_maps_uri,
+            google_place_id: opt.google_place_id,
+            price_level: opt.price_level,
+            hotel_id: opt.hotel_id,
+            estimated_budget: opt.estimated_budget,
+            actual_cost: opt.actual_cost,
           } as any)
           .select('id')
           .single();
@@ -2252,6 +2273,17 @@ const Timeline = () => {
             arrival_terminal: opt.arrival_terminal,
             airport_checkin_hours: opt.airport_checkin_hours,
             airport_checkout_min: opt.airport_checkout_min,
+            phone: opt.phone,
+            address: opt.address,
+            rating: opt.rating,
+            user_rating_count: opt.user_rating_count,
+            opening_hours: opt.opening_hours,
+            google_maps_uri: opt.google_maps_uri,
+            google_place_id: opt.google_place_id,
+            price_level: opt.price_level,
+            hotel_id: opt.hotel_id,
+            estimated_budget: opt.estimated_budget,
+            actual_cost: opt.actual_cost,
           } as any)
           .select('id')
           .single();
