@@ -1,64 +1,104 @@
 
 
-# Review Prefetch, Cache Module & Timeline Integration
+# UX Fixes -- Icon, Transport Title, Drag Shake, Zoom, Undo
 
-Most of this is already implemented from the previous changes. What remains is extracting the cache to a shared module and adding prefetch on card tap.
+Six independent fixes across 7 files.
 
-## Current State
-- Edge function already returns 5 reviews (`.slice(0, 5)` in place)
-- PlaceOverview already renders reviews as horizontal scroll cards
-- PlaceOverview already has an inline `reviewCache` Map
+---
 
-## Changes Needed
+## 1. Trip Emoji Before Name in Header
 
-### 1. Create shared cache module
-**New file:** `src/lib/reviewCache.ts`
+**File:** `src/components/timeline/TimelineHeader.tsx` (line 51)
 
-Extract the review cache from PlaceOverview into a standalone module with:
-- `getCachedReviews(placeId)` -- synchronous cache lookup
-- `prefetchReviews(placeId)` -- fire-and-forget fetch with deduplication (prevents double-fetching if called rapidly)
-- `seedReviewCache(placeId, reviews)` -- seed from preloaded data
-- Module-level `Map` for data + `Map` for in-flight promises
+Replace the plain `<h1>` with a flex row that prepends `trip?.emoji` as a span before the name.
 
-### 2. Update PlaceOverview to use shared module
-**File:** `src/components/timeline/PlaceOverview.tsx`
+---
 
-- Import `getCachedReviews`, `prefetchReviews`, `seedReviewCache`, `CachedReview` from the new module
-- Remove the inline `reviewCache` Map and `CachedReview` type (lines 25-27)
-- Update the review fetch `useEffect` (lines 197-229) to use the shared module functions instead of direct `reviewCache` access and inline `supabase.functions.invoke`
+## 2. Transport Card: Use Place Name Not Coordinates
 
-### 3. Add prefetch in handleCardTap
+**File:** `src/pages/Timeline.tsx` (lines 898-905)
+
+- Replace `toAddr.split(',')[0].trim()` with `toOpt?.name || toOpt?.location_name || toAddr.split(',')[0].trim()`, truncated to 25 chars.
+- Update `departure_location` and `arrival_location` to prefer `fromOpt?.name` / `toOpt?.name` over raw addresses.
+
+**File:** `supabase/functions/auto-generate-transport/index.ts` (lines 142-147)
+
+- Rewrite `getLocationName()` to prefer `opt.name` (for non-flights), then `opt.location_name`, then flight-specific fields.
+
+---
+
+## 3. Increase Mobile Drag Hold to 400ms + Delay Locked Shake
+
+**File:** `src/hooks/useDragResize.ts` (line 46)
+
+- Change `TOUCH_HOLD_MS` from `200` to `400`.
+
+**File:** `src/components/timeline/ContinuousTimeline.tsx` (lines 489-497, 1607-1610, 1715-1726, 1763-1766)
+
+- Add `lockedTimerRef`, `startLockedAttempt(entryId)` (delayed 400ms), and `cancelLockedAttempt()` functions.
+- Replace `onTouchStart` handlers for locked resize handles to use `startLockedAttempt` with `onTouchMove`/`onTouchEnd` cancellation.
+- Replace `onTouchDragStart` for locked cards to use `startLockedAttempt`, and add `onTouchDragMove`/`onTouchDragEnd` cancellation for locked path.
+- Keep `onMouseDown` handlers as immediate (desktop has no scroll conflict).
+
+---
+
+## 4. Move Zoom Toggle Into Header Overflow Menu
+
+**File:** `src/components/timeline/TimelineHeader.tsx`
+
+- Add `zoomLevel`, `onCycleZoom`, `zoomEnabled` props to the interface.
+- Add `ZoomIn` to lucide imports.
+- Add a zoom menu item in the dropdown (before theme toggle): shows "Zoom: 1x" / "75%" / "1.5x" and calls `onCycleZoom`.
+
 **File:** `src/pages/Timeline.tsx`
 
-- Import `prefetchReviews` from `@/lib/reviewCache`
-- In `handleCardTap` (line 1417), before opening the sheet, call `prefetchReviews(option.google_place_id)` for non-flight/non-transport entries
-- This fires the API call ~200-300ms before PlaceOverview mounts, so reviews are often cached by the time the component renders
+- Pass `zoomLevel`, `onCycleZoom={cycleZoom}`, `zoomEnabled` to `<TimelineHeader>` (line 2868-2873).
+- Delete the floating zoom button block (lines 3635-3652).
 
-## Technical Details
+---
 
-**PlaceOverview.tsx line 25-27** -- remove inline cache:
-```tsx
-// DELETE these 3 lines:
-type CachedReview = { ... };
-const reviewCache = new Map<string, CachedReview[]>();
-```
+## 5. Undo: Card Deletion with Full Restore
 
-**PlaceOverview.tsx lines 197-229** -- replace useEffect to use shared module:
-- `reviewCache.has(placeId)` becomes `getCachedReviews(placeId)`
-- `reviewCache.set(placeId, sorted)` becomes `seedReviewCache(placeId, sorted)`
-- The API fetch path calls `prefetchReviews(placeId)` which deduplicates and caches
+**File:** `src/components/timeline/PlaceOverview.tsx`
 
-**Timeline.tsx line 1417** -- add prefetch before opening sheet:
-```tsx
-if (option.google_place_id && option.category !== 'flight') {
-  prefetchReviews(option.google_place_id);
-}
-```
+- Add `pushAction` to the `PlaceOverviewProps` interface.
+- Destructure it in the component.
+- In the non-hotel delete handler (line 1277-1287): snapshot entry + options before delete, push undo action that re-inserts them.
+- In the hotel "Just This Block" handler (line 1242-1251): same snapshot + undo pattern.
+- In the hotel "Delete All" handler (line 1222-1234): snapshot current entry + options, push undo (partial restore for current entry).
 
-## Files Changed
+**File:** `src/components/timeline/EntrySheet.tsx`
+
+- Add `pushAction` to `EntrySheetProps` interface.
+- Destructure and pass through to `<PlaceOverview>`.
+
+**File:** `src/pages/Timeline.tsx`
+
+- Pass `pushAction={pushAction}` to `<EntrySheet>` (around line 3278).
+
+---
+
+## 6. Undo: Lock/Unlock Toggle
+
+**File:** `src/components/timeline/PlaceOverview.tsx` (lines 305-315)
+
+- Capture `wasLocked` before toggling. After successful DB update, call `pushAction` with undo/redo that reverts/re-applies the lock state.
+
+**File:** `src/pages/Timeline.tsx` (lines 2552-2566)
+
+- After successful DB update in `handleToggleLock`, call `pushAction` with undo/redo that also does optimistic local updates.
+
+---
+
+## Files Changed Summary
 
 | File | Change |
 |------|--------|
-| `src/lib/reviewCache.ts` | New shared cache + prefetch module |
-| `src/components/timeline/PlaceOverview.tsx` | Use shared module, remove inline cache |
-| `src/pages/Timeline.tsx` | Import and call `prefetchReviews` in `handleCardTap` |
+| `src/components/timeline/TimelineHeader.tsx` | Trip emoji, zoom in dropdown menu |
+| `src/pages/Timeline.tsx` | Transport name fix, pass zoom to header, remove float zoom, pass pushAction to EntrySheet, lock undo |
+| `src/hooks/useDragResize.ts` | TOUCH_HOLD_MS 200 to 400 |
+| `src/components/timeline/ContinuousTimeline.tsx` | Delayed locked shake for touch |
+| `src/components/timeline/EntrySheet.tsx` | Accept + pass pushAction prop |
+| `src/components/timeline/PlaceOverview.tsx` | Accept pushAction, delete undo, lock undo |
+| `supabase/functions/auto-generate-transport/index.ts` | getLocationName prefers name over coords |
+
