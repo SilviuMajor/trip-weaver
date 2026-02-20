@@ -11,7 +11,7 @@ import { toast } from '@/hooks/use-toast';
 import { utcToLocal, localToUTC } from '@/lib/timezoneUtils';
 import { haversineKm } from '@/lib/distance';
 import { cn } from '@/lib/utils';
-import { Loader2, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, RefreshCw, Phone, ChevronDown, Navigation, Car, AlertTriangle } from 'lucide-react';
+import { Loader2, Check, Clock, ExternalLink, Pencil, Trash2, Lock, Unlock, LockOpen, ClipboardList, Plane, RefreshCw, Phone, ChevronDown, Navigation, Car, AlertTriangle, X } from 'lucide-react';
 import InlineField from './InlineField';
 import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import ImageGallery from './ImageGallery';
@@ -429,6 +429,15 @@ const PlaceOverview = ({
 
   return (
     <>
+      {/* Close button — floated over hero with gradient backdrop */}
+      <button
+        className="absolute top-3 right-3 z-50 flex items-center justify-center h-8 w-8 rounded-full bg-black/40 backdrop-blur-sm hover:bg-black/60 transition-colors"
+        onClick={onClose}
+        aria-label="Close"
+      >
+        <X className="h-4 w-4 text-white" />
+      </button>
+
       {/* Hero image gallery at top — fixed height, touch swipe */}
         {images.length > 0 ? (
           <div className="relative w-full overflow-hidden" style={{ height: 240, minHeight: 240 }}>
