@@ -149,7 +149,7 @@ const Dashboard = () => {
 
   const handleCopyLink = (trip: Trip, e: React.MouseEvent) => {
     e.stopPropagation();
-    const PUBLISHED_URL = 'https://timelineplanner.lovable.app';
+    const PUBLISHED_URL = 'https://tr1p.co.uk';
     const url = trip.invite_code
       ? `${PUBLISHED_URL}/invite/${trip.invite_code}`
       : `${PUBLISHED_URL}/trip/${trip.id}`;
