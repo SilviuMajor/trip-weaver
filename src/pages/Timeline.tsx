@@ -9,6 +9,7 @@ import { checkOpeningHoursConflict, resolveFromAddress, resolveToAddress } from 
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGeolocation } from '@/hooks/useGeolocation';
+import AIRPORTS from '@/lib/airports';
 
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { useTravelCalculation } from '@/hooks/useTravelCalculation';
@@ -203,6 +204,7 @@ const Timeline = () => {
   const [dragActiveEntryId, setDragActiveEntryId] = useState<string | null>(null);
   const [binHighlighted, setBinHighlighted] = useState(false);
   const binRef = useRef<HTMLDivElement>(null);
+  const weatherRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sidebar HTML5 drag state (for drag-to-bin from Planner sidebar)
   const [sidebarDragActive, setSidebarDragActive] = useState(false);
@@ -659,24 +661,44 @@ const Timeline = () => {
     const map = new Map<string, { lat: number; lng: number }>();
     if (!trip) return map;
 
+    // Helper: extract IATA code from "LHR - Heathrow" style strings
+    const airportCoords = (locationStr?: string | null): { lat: number; lng: number } | null => {
+      if (!locationStr) return null;
+      const iata = locationStr.split(' - ')[0]?.trim();
+      if (!iata || iata.length < 2) return null;
+      const apt = AIRPORTS.find(a => a.iata === iata);
+      return apt ? { lat: apt.lat, lng: apt.lng } : null;
+    };
+
     // Find all flights sorted chronologically
     const allFlights = scheduledEntries
       .filter(e => e.options[0]?.category === 'flight')
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
 
-    // Determine initial location from first flight's departure, or fallback
-    let currentLat = allFlights[0]?.options[0]?.latitude ?? null;
-    let currentLng = allFlights[0]?.options[0]?.longitude ?? null;
+    // Before the first flight: user is at the departure airport
+    let currentLat: number | null = null;
+    let currentLng: number | null = null;
 
-    // For flights, departure_location has "IATA - City" but lat/lng are on the option
-    // We need to derive coords from airport data. For now, use option lat/lng as departure coords
-    // and look for arrival coords from the next entry after the flight or from airport DB
-    // Simple approach: track location changes at flight boundaries
     if (allFlights.length > 0) {
-      // Before first flight: use departure location coords
-      // Entry options store lat/lng for the primary location; for flights this might be departure
       const firstOpt = allFlights[0].options[0];
-      if (firstOpt.latitude != null && firstOpt.longitude != null) {
+      // Try linked checkin entry coords first
+      const checkin = scheduledEntries.find(
+        e => e.linked_flight_id === allFlights[0].id && e.linked_type === 'checkin'
+      );
+      if (checkin?.options[0]?.latitude != null) {
+        currentLat = checkin.options[0].latitude;
+        currentLng = checkin.options[0].longitude;
+      }
+      // Fallback: look up departure IATA from airports DB
+      if (currentLat == null) {
+        const depCoords = airportCoords(firstOpt.departure_location);
+        if (depCoords) {
+          currentLat = depCoords.lat;
+          currentLng = depCoords.lng;
+        }
+      }
+      // Last fallback: option lat/lng (which is arrival for flights)
+      if (currentLat == null && firstOpt.latitude != null) {
         currentLat = firstOpt.latitude;
         currentLng = firstOpt.longitude;
       }
@@ -686,27 +708,29 @@ const Timeline = () => {
     for (const day of days) {
       const dayStr = format(day, 'yyyy-MM-dd');
 
-      // Check if any flight lands on or before this day
+      // Process flights that land on or before this day
       while (flightIdx < allFlights.length) {
         const flight = allFlights[flightIdx];
         const flightOpt = flight.options[0];
         const flightArrTz = flightOpt?.arrival_tz || homeTimezone;
         const flightDay = getDateInTimezone(flight.end_time, flightArrTz);
         if (flightDay <= dayStr) {
-          // After this flight, location is arrival
-          const opt = flight.options[0];
-          // Try to get arrival coords - check entries right after the flight
-          const arrivalEntries = scheduledEntries.filter(e =>
-            e.linked_flight_id === flight.id && e.linked_type === 'checkout'
+          // After this flight, location switches to arrival airport
+          const checkout = scheduledEntries.find(
+            e => e.linked_flight_id === flight.id && e.linked_type === 'checkout'
           );
-          if (arrivalEntries[0]?.options[0]?.latitude != null) {
-            currentLat = arrivalEntries[0].options[0].latitude;
-            currentLng = arrivalEntries[0].options[0].longitude;
-          } else if (opt.latitude != null && opt.longitude != null) {
-            // Fallback to flight option coords (which might be departure)
-            // For proper arrival coords we'd need airport DB lookup
-            currentLat = opt.latitude;
-            currentLng = opt.longitude;
+          if (checkout?.options[0]?.latitude != null) {
+            currentLat = checkout.options[0].latitude;
+            currentLng = checkout.options[0].longitude;
+          } else {
+            const arrCoords = airportCoords(flightOpt.arrival_location);
+            if (arrCoords) {
+              currentLat = arrCoords.lat;
+              currentLng = arrCoords.lng;
+            } else if (flightOpt.latitude != null) {
+              currentLat = flightOpt.latitude;
+              currentLng = flightOpt.longitude;
+            }
           }
           flightIdx++;
         } else {
@@ -1073,30 +1097,57 @@ const Timeline = () => {
         .filter(e => e.is_scheduled)
         .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
 
+      // Helper: look up airport coords from IATA code
+      const airportCoords = (locationStr?: string | null): { lat: number; lng: number } | null => {
+        if (!locationStr) return null;
+        const iata = locationStr.split(' - ')[0]?.trim();
+        if (!iata || iata.length < 2) return null;
+        const apt = AIRPORTS.find(a => a.iata === iata);
+        return apt ? { lat: apt.lat, lng: apt.lng } : null;
+      };
+
       for (const entry of scheduled) {
         const opt = entry.options[0];
-        if (!opt || opt.latitude == null || opt.longitude == null) continue;
+        if (!opt) continue;
 
         if (opt.category === 'flight') {
-          // Flight: arrival location applies at landing time
-          waypoints.push({
-            timeMs: new Date(entry.end_time).getTime(),
-            lat: opt.latitude,
-            lng: opt.longitude,
-          });
-          // Departure airport from linked checkin
+          // Arrival waypoint: option coords → IATA lookup
+          let arrLat = opt.latitude;
+          let arrLng = opt.longitude;
+          if (arrLat == null) {
+            const arrCoords = airportCoords(opt.arrival_location);
+            if (arrCoords) { arrLat = arrCoords.lat; arrLng = arrCoords.lng; }
+          }
+          if (arrLat != null && arrLng != null) {
+            waypoints.push({
+              timeMs: new Date(entry.end_time).getTime(),
+              lat: arrLat,
+              lng: arrLng,
+            });
+          }
+
+          // Departure waypoint: checkin entry coords → IATA lookup
+          let depLat: number | null = null;
+          let depLng: number | null = null;
           const checkin = scheduled.find(
             e => e.linked_flight_id === entry.id && e.linked_type === 'checkin'
           );
           if (checkin?.options[0]?.latitude != null) {
+            depLat = checkin.options[0].latitude!;
+            depLng = checkin.options[0].longitude!;
+          } else {
+            const depCoords = airportCoords(opt.departure_location);
+            if (depCoords) { depLat = depCoords.lat; depLng = depCoords.lng; }
+          }
+          if (depLat != null && depLng != null) {
             waypoints.push({
-              timeMs: new Date(checkin.start_time).getTime(),
-              lat: checkin.options[0].latitude!,
-              lng: checkin.options[0].longitude!,
+              timeMs: new Date(entry.start_time).getTime(),
+              lat: depLat,
+              lng: depLng,
             });
           }
         } else if (!entry.linked_flight_id) {
-          // Regular entry: location at start time
+          if (opt.latitude == null || opt.longitude == null) continue;
           waypoints.push({
             timeMs: new Date(entry.start_time).getTime(),
             lat: opt.latitude,
@@ -1173,6 +1224,119 @@ const Timeline = () => {
       setGlobalRefreshing(false);
     }
   }, [tripId, trip, scheduledEntries, days, homeTimezone]);
+
+  // Lightweight weather-only refresh (no transport regeneration)
+  const refreshWeather = useCallback(async () => {
+    if (!tripId || !trip || !trip.start_date) return;
+
+    try {
+      const start = parseISO(trip.start_date);
+      const end = parseISO(trip.end_date!);
+      const refreshDays: Date[] = [];
+      let cur = startOfDay(start);
+      while (cur <= end) { refreshDays.push(new Date(cur)); cur = addDays(cur, 1); }
+
+      const airportCoords = (locationStr?: string | null): { lat: number; lng: number } | null => {
+        if (!locationStr) return null;
+        const iata = locationStr.split(' - ')[0]?.trim();
+        if (!iata || iata.length < 2) return null;
+        const apt = AIRPORTS.find(a => a.iata === iata);
+        return apt ? { lat: apt.lat, lng: apt.lng } : null;
+      };
+
+      const segments: { lat: number; lng: number; startDate: string; endDate: string; startHour?: number; endHour?: number }[] = [];
+      const waypoints: { timeMs: number; lat: number; lng: number }[] = [];
+      const scheduled = scheduledEntries
+        .filter(e => e.is_scheduled)
+        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+
+      for (const entry of scheduled) {
+        const opt = entry.options[0];
+        if (!opt) continue;
+
+        if (opt.category === 'flight') {
+          let arrLat = opt.latitude;
+          let arrLng = opt.longitude;
+          if (arrLat == null) {
+            const arrCoords = airportCoords(opt.arrival_location);
+            if (arrCoords) { arrLat = arrCoords.lat; arrLng = arrCoords.lng; }
+          }
+          if (arrLat != null && arrLng != null) {
+            waypoints.push({ timeMs: new Date(entry.end_time).getTime(), lat: arrLat, lng: arrLng });
+          }
+          let depLat: number | null = null;
+          let depLng: number | null = null;
+          const checkin = scheduled.find(e => e.linked_flight_id === entry.id && e.linked_type === 'checkin');
+          if (checkin?.options[0]?.latitude != null) {
+            depLat = checkin.options[0].latitude!;
+            depLng = checkin.options[0].longitude!;
+          } else {
+            const depCoords = airportCoords(opt.departure_location);
+            if (depCoords) { depLat = depCoords.lat; depLng = depCoords.lng; }
+          }
+          if (depLat != null && depLng != null) {
+            waypoints.push({ timeMs: new Date(entry.start_time).getTime(), lat: depLat, lng: depLng });
+          }
+        } else if (!entry.linked_flight_id && opt.latitude != null && opt.longitude != null) {
+          waypoints.push({ timeMs: new Date(entry.start_time).getTime(), lat: opt.latitude, lng: opt.longitude });
+        }
+      }
+
+      waypoints.sort((a, b) => a.timeMs - b.timeMs);
+      if (waypoints.length === 0) return;
+
+      const roundLoc = (lat: number, lng: number) => ({
+        lat: Math.round(lat * 10) / 10,
+        lng: Math.round(lng * 10) / 10,
+      });
+      const findNearest = (timeMs: number) => {
+        let best = waypoints[0];
+        let bestDist = Math.abs(timeMs - best.timeMs);
+        for (const wp of waypoints) {
+          const dist = Math.abs(timeMs - wp.timeMs);
+          if (dist < bestDist) { bestDist = dist; best = wp; }
+        }
+        return best;
+      };
+
+      type HourLoc = { date: string; hour: number; lat: number; lng: number };
+      const hourLocations: HourLoc[] = [];
+      for (const day of refreshDays) {
+        const dayStr = format(day, 'yyyy-MM-dd');
+        for (let h = 0; h < 24; h++) {
+          const hourMs = new Date(`${dayStr}T${String(h).padStart(2, '0')}:00:00Z`).getTime();
+          const nearest = findNearest(hourMs);
+          const rounded = roundLoc(nearest.lat, nearest.lng);
+          hourLocations.push({ date: dayStr, hour: h, lat: rounded.lat, lng: rounded.lng });
+        }
+      }
+
+      let currentSeg: { lat: number; lng: number; startDate: string; endDate: string; startHour: number; endHour: number } | null = null;
+      for (const hl of hourLocations) {
+        if (currentSeg && currentSeg.lat === hl.lat && currentSeg.lng === hl.lng) {
+          currentSeg.endDate = hl.date;
+          currentSeg.endHour = hl.hour;
+        } else {
+          if (currentSeg) segments.push(currentSeg);
+          currentSeg = { lat: hl.lat, lng: hl.lng, startDate: hl.date, endDate: hl.date, startHour: hl.hour, endHour: hl.hour };
+        }
+      }
+      if (currentSeg) segments.push(currentSeg);
+      for (const seg of segments) {
+        if (seg.startHour === 0 && seg.endHour === 23) {
+          delete (seg as any).startHour;
+          delete (seg as any).endHour;
+        }
+      }
+
+      if (segments.length > 0) {
+        await supabase.functions.invoke('fetch-weather', { body: { tripId, segments } });
+        await fetchDataRef.current?.();
+      }
+    } catch (err) {
+      console.error('Weather refresh failed:', err);
+    }
+  }, [tripId, trip, scheduledEntries]);
 
   const getEntriesForDay = (day: Date): EntryWithOptions[] => {
     const dayStr = format(day, 'yyyy-MM-dd');
@@ -1449,6 +1613,12 @@ const Timeline = () => {
 
     // Auto-extend trip if entry goes past final day
     if (trip && tripId) await autoExtendTripIfNeeded(tripId, newEndIso, trip, fetchData);
+
+    // 6. Debounced weather refresh — wait 2s after last card movement
+    if (weatherRefreshTimer.current) clearTimeout(weatherRefreshTimer.current);
+    weatherRefreshTimer.current = setTimeout(() => {
+      refreshWeather();
+    }, 2000);
   };
 
   // Handle mode switch confirm from TransportConnector
