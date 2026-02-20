@@ -1563,10 +1563,6 @@ const ContinuousTimeline = ({
                 <div
                   data-entry-card
                   data-entry-id={entry.id}
-                  onTouchStart={canDrag ? (e) => {
-                    dismissCardHint();
-                    onTouchStart(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
-                  } : undefined}
                   className={cn(
                     'absolute pr-1 group overflow-visible',
                     isDragged && 'z-30',
@@ -1584,7 +1580,7 @@ const ContinuousTimeline = ({
                     transition: 'left 200ms ease, width 200ms ease, opacity 0.2s ease',
                     border: isBeingDragged ? '3px dashed hsl(var(--primary) / 0.5)' : undefined,
                     borderRadius: isBeingDragged ? '16px' : undefined,
-                    touchAction: 'none',
+                    
                   }}
                 >
                 <div className="relative h-full">
@@ -1734,6 +1730,7 @@ const ContinuousTimeline = ({
                           handleLockedAttempt(entry.id);
                         } : undefined}
                         onTouchDragStart={canDrag ? (e) => {
+                          dismissCardHint();
                           onTouchStart(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
                         } : isLocked ? (e) => {
                           e.stopPropagation();
