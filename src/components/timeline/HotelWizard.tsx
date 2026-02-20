@@ -12,7 +12,7 @@ import PlacesAutocomplete, { type PlaceDetails } from './PlacesAutocomplete';
 import type { Trip } from '@/types/trip';
 import { cn } from '@/lib/utils';
 
-interface HotelDraft {
+export interface HotelDraft {
   name: string;
   address: string | null;
   lat: number | null;
