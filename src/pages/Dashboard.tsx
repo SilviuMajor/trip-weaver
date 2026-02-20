@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, LogOut, Settings, MoreVertical, Link2, Trash2, Copy, ClipboardList, Search } from 'lucide-react';
+import { Plus, Settings, MoreVertical, Trash2, Copy, ClipboardList, Search } from 'lucide-react';
 import Brand from '@/components/Brand';
+import UserAvatar from '@/components/UserAvatar';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
@@ -36,7 +37,7 @@ const CARD_COLORS = [
 ];
 
 const Dashboard = () => {
-  const { adminUser, isAdmin, loading: authLoading, signOut } = useAdminAuth();
+  const { adminUser, isAdmin, loading: authLoading } = useAdminAuth();
   const { displayName } = useProfile(adminUser?.id);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [tripDestinations, setTripDestinations] = useState<Record<string, string>>({});
@@ -142,10 +143,7 @@ const Dashboard = () => {
     fetchTrips();
   }, [adminUser]);
 
-  const handleSignOut = async () => {
-    await signOut();
-    navigate('/auth');
-  };
+  // Sign out moved to Account Settings page
 
   const handleCopyLink = (trip: Trip, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -177,24 +175,16 @@ const Dashboard = () => {
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-background/80 backdrop-blur-lg">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
-          <div>
-            <div className="mb-0.5">
-              <Brand size="sm" />
-            </div>
-            <p className="text-sm text-muted-foreground">{displayName || adminUser?.email}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button onClick={() => navigate('/trip/new')} size="sm">
-              <Plus className="mr-1 h-4 w-4" />
-              New Trip
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => navigate('/settings')}>
-              <Settings className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="icon" onClick={handleSignOut}>
-              <LogOut className="h-4 w-4" />
-            </Button>
-          </div>
+          {/* Left: Profile avatar → Account */}
+          <button onClick={() => navigate('/settings')} className="shrink-0">
+            <UserAvatar name={displayName || adminUser?.email} size="md" />
+          </button>
+
+          {/* Centre: Brand */}
+          <Brand size="sm" />
+
+          {/* Right: spacer for balance */}
+          <div className="w-9" />
         </div>
       </header>
 

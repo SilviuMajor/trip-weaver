@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Star, Loader2, ChevronRight, MapPin, Search } from 'lucide-react';
+import UserAvatar from '@/components/UserAvatar';
+import { useProfile } from '@/hooks/useProfile';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Drawer, DrawerContent } from '@/components/ui/drawer';
@@ -93,6 +95,7 @@ const buildTempEntry = (place: GlobalPlace): { entry: EntryWithOptions; option: 
 const GlobalPlanner = () => {
   const navigate = useNavigate();
   const { adminUser, isAdmin, loading: authLoading } = useAdminAuth();
+  const { displayName } = useProfile(adminUser?.id);
   const [places, setPlaces] = useState<GlobalPlace[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -325,6 +328,11 @@ const GlobalPlanner = () => {
                 <Search className="h-3.5 w-3.5 mr-1.5" />
                 Explore
               </Button>
+            )}
+            {!selectedCity && (
+              <button onClick={() => navigate('/settings')} className="shrink-0">
+                <UserAvatar name={displayName} size="sm" />
+              </button>
             )}
           </div>
         </div>
