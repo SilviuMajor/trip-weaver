@@ -55,6 +55,8 @@ interface EntryCardProps {
   isProcessing?: boolean;
   linkedType?: string | null;
   height?: number;
+  /** Override duration in hours — used during resize to show live duration */
+  overrideDurationHours?: number | null;
   canEdit?: boolean;
   overlapMinutes?: number;
   overlapPosition?: 'top' | 'bottom';
@@ -121,6 +123,7 @@ const EntryCard = ({
   isProcessing,
   linkedType,
   height: heightProp,
+  overrideDurationHours,
   canEdit,
   overlapMinutes = 0,
   overlapPosition,
@@ -144,7 +147,16 @@ const EntryCard = ({
   const isDark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
   const hue = extractHue(catColor);
 
-  const durationLabel = formatDuration(startTime, endTime);
+  const durationLabel = overrideDurationHours != null
+    ? (() => {
+        const totalMin = Math.round(overrideDurationHours * 60);
+        const hh = Math.floor(totalMin / 60);
+        const mm = totalMin % 60;
+        if (hh === 0) return `${mm}m`;
+        if (mm === 0) return `${hh}h`;
+        return `${hh}h ${mm}m`;
+      })()
+    : formatDuration(startTime, endTime);
 
   // ─── 5-tier pixel-based system ───
   const h = heightProp ?? 200;

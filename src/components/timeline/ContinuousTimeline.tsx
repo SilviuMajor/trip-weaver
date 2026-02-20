@@ -1685,6 +1685,11 @@ const ContinuousTimeline = ({
                         option={primaryOption}
                         startTime={entry.start_time}
                         endTime={entry.end_time}
+                        overrideDurationHours={
+                          isResizing && dragState
+                            ? dragState.currentEndHour - dragState.currentStartHour
+                            : null
+                        }
                         formatTime={entryFormatTime}
                         isPast={entryPast}
                         optionIndex={0}
