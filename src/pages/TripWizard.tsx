@@ -97,7 +97,7 @@ const TripWizard = () => {
 
     const { data: entry, error } = await supabase
       .from('entries')
-      .insert({ trip_id: tripId, start_time: startIso, end_time: endIso })
+      .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, created_by: adminUser?.id ?? null })
       .select('id')
       .single();
     if (error || !entry) return;
@@ -130,6 +130,7 @@ const TripWizard = () => {
         is_locked: true,
         linked_flight_id: entry.id,
         linked_type: 'checkin',
+        created_by: adminUser?.id ?? null,
       } as any)
       .select('id')
       .single();
@@ -156,6 +157,7 @@ const TripWizard = () => {
         is_locked: true,
         linked_flight_id: entry.id,
         linked_type: 'checkout',
+        created_by: adminUser?.id ?? null,
       } as any)
       .select('id')
       .single();
@@ -225,6 +227,7 @@ const TripWizard = () => {
             is_scheduled: true,
             scheduled_day: scheduledDay,
             linked_type: linkedType || null,
+            created_by: adminUser?.id ?? null,
           } as any)
           .select('id')
           .single();
@@ -306,7 +309,7 @@ const TripWizard = () => {
 
       const { data: d, error } = await supabase
         .from('entries')
-        .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false } as any)
+        .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false, created_by: adminUser?.id ?? null } as any)
         .select('id')
         .single();
       if (error) throw error;

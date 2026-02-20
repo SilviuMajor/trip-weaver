@@ -29,6 +29,7 @@ export interface Trip {
   image_url: string | null;
   walk_threshold_min: number;
   default_transport_mode: string;
+  invite_code?: string | null;
   created_at: string;
   updated_at: string;
 }

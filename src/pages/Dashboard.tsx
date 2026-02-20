@@ -40,6 +40,8 @@ const Dashboard = () => {
   const { displayName } = useProfile(adminUser?.id);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [tripDestinations, setTripDestinations] = useState<Record<string, string>>({});
+  const [tripOrganisers, setTripOrganisers] = useState<Record<string, string>>({});
+  const [memberRoleMap, setMemberRoleMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [deleteTrip, setDeleteTrip] = useState<Trip | null>(null);
   const navigate = useNavigate();
@@ -52,14 +54,46 @@ const Dashboard = () => {
 
   const fetchTrips = async () => {
     if (!adminUser) return;
+    // Get trip IDs where user is a member
+    const { data: memberships } = await supabase
+      .from('trip_users')
+      .select('trip_id, role')
+      .eq('user_id', adminUser.id);
+
+    const memberTripIds = (memberships ?? []).map(m => m.trip_id).filter(Boolean) as string[];
+    const roleMap: Record<string, string> = {};
+    (memberships ?? []).forEach(m => { if (m.trip_id) roleMap[m.trip_id] = m.role; });
+    setMemberRoleMap(roleMap);
+
+    // Get all trips: owned OR member of
     const { data } = await supabase
       .from('trips')
       .select('*')
-      .eq('owner_id', adminUser.id)
+      .or(`owner_id.eq.${adminUser.id}${memberTripIds.length > 0 ? `,id.in.(${memberTripIds.join(',')})` : ''}`)
       .order('start_date', { ascending: false });
 
     const fetchedTrips = (data ?? []) as unknown as Trip[];
     setTrips(fetchedTrips);
+
+    // Fetch organiser names for shared trips
+    const sharedTrips = fetchedTrips.filter(t => t.owner_id !== adminUser.id);
+    if (sharedTrips.length > 0) {
+      const ownerIds = [...new Set(sharedTrips.map(t => t.owner_id).filter(Boolean))] as string[];
+      if (ownerIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, display_name')
+          .in('id', ownerIds);
+        const orgMap: Record<string, string> = {};
+        sharedTrips.forEach(t => {
+          if (t.owner_id && t.owner_id !== adminUser.id) {
+            const profile = profiles?.find(p => p.id === t.owner_id);
+            orgMap[t.id] = profile?.display_name || 'Someone';
+          }
+        });
+        setTripOrganisers(orgMap);
+      }
+    }
 
     // Auto-generate destination list from entry data
     if (fetchedTrips.length > 0) {
@@ -113,9 +147,11 @@ const Dashboard = () => {
     navigate('/auth');
   };
 
-  const handleCopyLink = (tripId: string, e: React.MouseEvent) => {
+  const handleCopyLink = (trip: Trip, e: React.MouseEvent) => {
     e.stopPropagation();
-    const url = `${window.location.origin}/trip/${tripId}`;
+    const url = (trip as any).invite_code
+      ? `${window.location.origin}/invite/${(trip as any).invite_code}`
+      : `${window.location.origin}/trip/${trip.id}`;
     navigator.clipboard.writeText(url);
     toast({ title: 'Link copied ✈️', description: 'Send it to your travel crew!' });
   };
@@ -172,8 +208,8 @@ const Dashboard = () => {
               <ClipboardList className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <p className="font-semibold text-sm">My Places</p>
-              <p className="text-xs text-muted-foreground">All saved places</p>
+              <p className="font-semibold text-sm">Global Planner</p>
+              <p className="text-xs text-muted-foreground">All places across your trips</p>
             </div>
           </button>
           <button
@@ -255,6 +291,9 @@ const Dashboard = () => {
                   {(tripDestinations[trip.id] || trip.destination) && (
                     <p className="truncate text-sm text-muted-foreground">📍 {tripDestinations[trip.id] || trip.destination}</p>
                   )}
+                  {tripOrganisers[trip.id] && (
+                    <p className="text-xs text-muted-foreground/70">Organised by {tripOrganisers[trip.id]}</p>
+                  )}
                   <p className="text-sm text-muted-foreground">
                     {trip.start_date && trip.end_date
                       ? `${format(parseISO(trip.start_date), 'd MMM')} — ${format(parseISO(trip.end_date), 'd MMM yyyy')}`
@@ -274,7 +313,7 @@ const Dashboard = () => {
                       <Settings className="mr-2 h-4 w-4" />
                       Trip Settings
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => handleCopyLink(trip.id, e)}>
+                    <DropdownMenuItem onClick={(e) => handleCopyLink(trip, e)}>
                       <Copy className="mr-2 h-4 w-4" />
                       Copy Share Link
                     </DropdownMenuItem>

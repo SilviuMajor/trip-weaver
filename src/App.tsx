@@ -11,7 +11,7 @@ import { useAdminAuth } from "@/hooks/useAdminAuth";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import TripWizard from "./pages/TripWizard";
-import UserSelect from "./pages/UserSelect";
+
 import Timeline from "./pages/Timeline";
 import Settings from "./pages/Settings";
 import TripSettings from "./pages/TripSettings";

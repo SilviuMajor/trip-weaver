@@ -13,7 +13,8 @@ import { addDays, format, parseISO } from 'date-fns';
 import { utcToLocal, localToUTC } from '@/lib/timezoneUtils';
 import { PREDEFINED_CATEGORIES, PICKER_CATEGORIES, TRAVEL_MODES, type CategoryDef } from '@/lib/categories';
 import type { Trip, EntryWithOptions, EntryOption, CategoryPreset } from '@/types/trip';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useTripMember } from '@/hooks/useTripMember';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import AirportPicker from './AirportPicker';
 import type { Airport } from '@/lib/airports';
 import AIRPORTS from '@/lib/airports';
@@ -97,7 +98,8 @@ const EntrySheet = ({
   onHotelSelected,
   onExploreRequest,
 }: EntrySheetProps) => {
-  const { currentUser, isEditor } = useCurrentUser();
+  const { member: currentUser, isEditor } = useTripMember(tripId);
+  const { session } = useAdminAuth();
   const isMobile = useIsMobile();
 
   // ─── Create mode state ───
@@ -607,7 +609,7 @@ const EntrySheet = ({
 
       const { data: d, error } = await supabase
         .from('entries')
-        .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false, scheduled_day: scheduledDay } as any)
+        .insert({ trip_id: tripId, start_time: startIso, end_time: endIso, is_scheduled: false, scheduled_day: scheduledDay, created_by: session?.user?.id ?? null } as any)
         .select('id').single();
       if (error) throw error;
 
@@ -664,7 +666,7 @@ const EntrySheet = ({
         if (error) throw error;
         entryId = editEntry.id;
       } else {
-        const insertPayload: any = { trip_id: tripId, start_time: startIso, end_time: endIso };
+        const insertPayload: any = { trip_id: tripId, start_time: startIso, end_time: endIso, created_by: session?.user?.id ?? null };
         if (transportContext?.fromEntryId) insertPayload.from_entry_id = transportContext.fromEntryId;
         if (transportContext?.toEntryId) insertPayload.to_entry_id = transportContext.toEntryId;
         const { data: d, error } = await supabase.from('entries').insert(insertPayload).select('id').single();
@@ -737,6 +739,7 @@ const EntrySheet = ({
           end_time: startIso,
           linked_flight_id: entryId,
           linked_type: 'checkin',
+          created_by: session?.user?.id ?? null,
         } as any).select('id').single();
 
         if (linkedEntryCheckin.data) {
@@ -758,6 +761,7 @@ const EntrySheet = ({
           end_time: new Date(new Date(endIso).getTime() + checkoutMin * 60000).toISOString(),
           linked_flight_id: entryId,
           linked_type: 'checkout',
+          created_by: session?.user?.id ?? null,
         } as any).select('id').single();
 
         if (linkedEntryCheckout.data) {

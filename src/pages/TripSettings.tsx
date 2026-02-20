@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { ArrowLeft, Save, Copy, X, Check, Plus, Trash2, CalendarIcon, Upload, ImageIcon, Lock, LockOpen, Footprints } from 'lucide-react';
+import { ArrowLeft, Save, Copy, X, Check, Plus, Trash2, CalendarIcon, Upload, ImageIcon, Footprints, UserPlus } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { toast } from '@/hooks/use-toast';
@@ -55,10 +55,6 @@ const TripSettings = () => {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
 
-  // Add member state
-  const [newMemberName, setNewMemberName] = useState('');
-  const [newMemberRole, setNewMemberRole] = useState<string>('viewer');
-  const [addingMember, setAddingMember] = useState(false);
 
   // Date conversion state
   const [startDateInput, setStartDateInput] = useState('');
@@ -114,7 +110,9 @@ const TripSettings = () => {
   };
 
   const handleCopyLink = () => {
-    const url = `${window.location.origin}/trip/${tripId}`;
+    const url = trip?.invite_code
+      ? `${window.location.origin}/invite/${trip.invite_code}`
+      : `${window.location.origin}/trip/${tripId}`;
     navigator.clipboard.writeText(url);
     setCopied(true);
     toast({ title: 'Link copied to clipboard!' });
@@ -143,24 +141,6 @@ const TripSettings = () => {
     }
   };
 
-  const handleAddMember = async () => {
-    if (!tripId || !newMemberName.trim()) return;
-    setAddingMember(true);
-    const { data, error } = await supabase
-      .from('trip_users')
-      .insert({ name: newMemberName.trim(), role: newMemberRole, trip_id: tripId })
-      .select('*')
-      .single();
-    if (error) {
-      toast({ title: 'Failed to add member', description: error.message, variant: 'destructive' });
-    } else {
-      setMembers(prev => [...prev, data as unknown as TripUser]);
-      setNewMemberName('');
-      setNewMemberRole('viewer');
-      toast({ title: 'Member added!' });
-    }
-    setAddingMember(false);
-  };
 
   const handleDeleteTrip = async () => {
     if (!tripId) return;
@@ -412,7 +392,9 @@ const TripSettings = () => {
           <Label className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Share Link</Label>
           <div className="flex items-center gap-2 rounded-lg border border-border bg-card p-3">
             <code className="flex-1 truncate text-sm text-muted-foreground">
-              {`${window.location.origin}/trip/${tripId}`}
+              {trip?.invite_code
+                ? `${window.location.origin}/invite/${trip.invite_code}`
+                : `${window.location.origin}/trip/${tripId}`}
             </code>
             <Button variant="outline" size="sm" onClick={handleCopyLink}>
               {copied ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
@@ -428,58 +410,26 @@ const TripSettings = () => {
           </Label>
           <div className="space-y-2">
             {members.map((m) => (
-              <div key={m.id} className="space-y-2 rounded-lg border border-border bg-card p-3">
-                <div className="flex items-center gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">
-                      {m.pin_hash && <Lock className="mr-1 inline h-3.5 w-3.5 text-primary" />}
-                      {m.name}
-                    </p>
-                  </div>
-                  <Select value={m.role} onValueChange={(v) => handleRoleChange(m.id, v)}>
-                    <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="organizer">Organizer</SelectItem>
-                      <SelectItem value="editor">Editor</SelectItem>
-                      <SelectItem value="viewer">Viewer</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <button onClick={() => handleRemoveMember(m.id)} className="text-muted-foreground hover:text-destructive">
-                    <X className="h-4 w-4" />
-                  </button>
+              <div key={m.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium">{m.name}</p>
                 </div>
-                {/* PIN management */}
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="password"
-                    maxLength={6}
-                    placeholder={m.pin_hash ? '••••' : 'Set PIN'}
-                    className="h-8 w-24 text-xs"
-                    onBlur={async (e) => {
-                      const val = e.target.value.trim();
-                      if (!val) return;
-                      await supabase.from('trip_users').update({ pin_hash: val } as any).eq('id', m.id);
-                      setMembers(prev => prev.map(x => x.id === m.id ? { ...x, pin_hash: val } : x));
-                      e.target.value = '';
-                      toast({ title: `PIN set for ${m.name}` });
-                    }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                  />
-                  {m.pin_hash && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 px-2 text-xs"
-                      onClick={async () => {
-                        await supabase.from('trip_users').update({ pin_hash: null } as any).eq('id', m.id);
-                        setMembers(prev => prev.map(x => x.id === m.id ? { ...x, pin_hash: null } : x));
-                        toast({ title: `PIN removed for ${m.name}` });
-                      }}
-                    >
-                      <LockOpen className="mr-1 h-3 w-3" />Clear
-                    </Button>
-                  )}
-                </div>
+                {m.role === 'organizer' ? (
+                  <span className="text-xs font-medium text-muted-foreground">Organiser</span>
+                ) : (
+                  <>
+                    <Select value={m.role} onValueChange={(v) => handleRoleChange(m.id, v)}>
+                      <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="editor">Editor</SelectItem>
+                        <SelectItem value="viewer">Viewer</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <button onClick={() => handleRemoveMember(m.id)} className="text-muted-foreground hover:text-destructive">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
               </div>
             ))}
             {members.length === 0 && (
@@ -487,25 +437,12 @@ const TripSettings = () => {
             )}
           </div>
 
-          {/* Add member */}
-          <div className="flex items-end gap-2 rounded-lg border border-dashed border-border p-3">
-            <div className="min-w-0 flex-1 space-y-1">
-              <Label className="text-xs text-muted-foreground">Name</Label>
-              <Input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="New member name" className="h-9" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Role</Label>
-              <Select value={newMemberRole} onValueChange={setNewMemberRole}>
-                <SelectTrigger className="h-9 w-28"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="editor">Editor</SelectItem>
-                  <SelectItem value="viewer">Viewer</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button size="sm" className="h-9" disabled={!newMemberName.trim() || addingMember} onClick={handleAddMember}>
-              <Plus className="mr-1 h-3.5 w-3.5" />Add
-            </Button>
+          {/* Invite instructions */}
+          <div className="flex items-center gap-3 rounded-lg border border-dashed border-border p-4">
+            <UserPlus className="h-5 w-5 shrink-0 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              Share the invite link above to add people to this trip. They'll join as viewers — you can promote them here.
+            </p>
           </div>
         </section>
 

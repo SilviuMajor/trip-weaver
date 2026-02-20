@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useTripMember } from '@/hooks/useTripMember';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { addDays, format, parseISO } from 'date-fns';
 import { localToUTC } from '@/lib/timezoneUtils';
@@ -19,7 +20,8 @@ import type { Trip, Entry, EntryOption, EntryWithOptions, CategoryPreset } from 
 
 const Planner = () => {
   const { tripId } = useParams<{ tripId: string }>();
-  const { currentUser, isEditor } = useCurrentUser();
+  const { member: currentUser, isEditor } = useTripMember(tripId);
+  const { session } = useAdminAuth();
   const navigate = useNavigate();
 
   const [trip, setTrip] = useState<Trip | null>(null);
@@ -39,8 +41,8 @@ const Planner = () => {
   const REFERENCE_DATE = '2099-01-01';
 
   useEffect(() => {
-    if (!currentUser) navigate(tripId ? `/trip/${tripId}` : '/');
-  }, [currentUser, navigate, tripId]);
+    if (!currentUser && !session) navigate('/auth');
+  }, [currentUser, session, navigate]);
 
   const fetchingRef = useRef(false);
 
@@ -122,7 +124,7 @@ const Planner = () => {
 
       const { data: d, error } = await supabase
         .from('entries')
-        .insert({ trip_id: trip.id, start_time: startIso, end_time: endIso, is_scheduled: false } as any)
+        .insert({ trip_id: trip.id, start_time: startIso, end_time: endIso, is_scheduled: false, created_by: session?.user?.id ?? null } as any)
         .select('id').single();
       if (error) throw error;
 
