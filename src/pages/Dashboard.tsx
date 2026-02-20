@@ -149,9 +149,10 @@ const Dashboard = () => {
 
   const handleCopyLink = (trip: Trip, e: React.MouseEvent) => {
     e.stopPropagation();
+    const PUBLISHED_URL = 'https://timelineplanner.lovable.app';
     const url = trip.invite_code
-      ? `${window.location.origin}/invite/${trip.invite_code}`
-      : `${window.location.origin}/trip/${trip.id}`;
+      ? `${PUBLISHED_URL}/invite/${trip.invite_code}`
+      : `${PUBLISHED_URL}/trip/${trip.id}`;
     navigator.clipboard.writeText(url);
     toast({ title: 'Link copied ✈️', description: 'Send it to your travel crew!' });
   };

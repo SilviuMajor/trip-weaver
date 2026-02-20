@@ -109,10 +109,12 @@ const TripSettings = () => {
     setSaving(false);
   };
 
+  const PUBLISHED_URL = 'https://timelineplanner.lovable.app';
+
   const handleCopyLink = () => {
     const url = trip?.invite_code
-      ? `${window.location.origin}/invite/${trip.invite_code}`
-      : `${window.location.origin}/trip/${tripId}`;
+      ? `${PUBLISHED_URL}/invite/${trip.invite_code}`
+      : `${PUBLISHED_URL}/trip/${tripId}`;
     navigator.clipboard.writeText(url);
     setCopied(true);
     toast({ title: 'Link copied to clipboard!' });
@@ -393,8 +395,8 @@ const TripSettings = () => {
           <div className="flex items-center gap-2 rounded-lg border border-border bg-card p-3">
             <code className="flex-1 truncate text-sm text-muted-foreground">
               {trip?.invite_code
-                ? `${window.location.origin}/invite/${trip.invite_code}`
-                : `${window.location.origin}/trip/${tripId}`}
+                ? `https://timelineplanner.lovable.app/invite/${trip.invite_code}`
+                : `https://timelineplanner.lovable.app/trip/${tripId}`}
             </code>
             <Button variant="outline" size="sm" onClick={handleCopyLink}>
               {copied ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
