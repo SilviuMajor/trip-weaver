@@ -81,6 +81,12 @@ const TripWizard = () => {
   const handleBack = () => setStep(s => Math.max(s - 1, 0));
 
   const createFlightEntry = async (tripId: string, flight: FlightDraft, flightDate: string, flightName: string) => {
+    // Look up airport coordinates
+    const depIata = flight.departureLocation.split(' - ')[0]?.trim();
+    const arrIata = flight.arrivalLocation.split(' - ')[0]?.trim();
+    const depAirport = AIRPORTS.find(a => a.iata === depIata);
+    const arrAirport = AIRPORTS.find(a => a.iata === arrIata);
+
     const startIso = localToUTC(flightDate, flight.departureTime, flight.departureTz);
     let endIso = localToUTC(flightDate, flight.arrivalTime, flight.arrivalTz);
     // If arrival is before departure, assume next day
@@ -109,6 +115,8 @@ const TripWizard = () => {
       arrival_terminal: flight.arrivalTerminal || null,
       airport_checkin_hours: 2,
       airport_checkout_min: 30,
+      latitude: arrAirport?.lat ?? null,
+      longitude: arrAirport?.lng ?? null,
     } as any);
 
     // Create processing entries
@@ -131,7 +139,10 @@ const TripWizard = () => {
         name: 'Airport Check-in',
         category: 'airport_processing',
         category_color: 'hsl(210, 50%, 60%)',
-        location_name: flight.departureLocation.split(' - ')[0] || null,
+        location_name: flight.departureLocation || null,
+        departure_location: flight.departureLocation || null,
+        latitude: depAirport?.lat ?? null,
+        longitude: depAirport?.lng ?? null,
       } as any);
     }
 
@@ -154,7 +165,10 @@ const TripWizard = () => {
         name: 'Airport Checkout',
         category: 'airport_processing',
         category_color: 'hsl(210, 50%, 60%)',
-        location_name: flight.arrivalLocation.split(' - ')[0] || null,
+        location_name: flight.arrivalLocation || null,
+        arrival_location: flight.arrivalLocation || null,
+        latitude: arrAirport?.lat ?? null,
+        longitude: arrAirport?.lng ?? null,
       } as any);
     }
   };
