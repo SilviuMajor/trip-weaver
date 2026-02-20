@@ -332,7 +332,7 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     startDrag(entryId, type, e.clientX, e.clientY, entryStartHour, entryEndHour, tz);
   }, [startDrag]);
 
-  // Touch: hold-to-drag with continuous listener lifecycle
+  // Touch: hold-to-drag — lets browser scroll natively during hold window
   const onTouchStart = useCallback((
     e: React.TouchEvent,
     entryId: string,
@@ -345,43 +345,32 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     const startX = touch.clientX;
     const startY = touch.clientY;
     touchStartPosRef.current = { x: startX, y: startY };
-    let lastTouchY = startY;
+
     let holdCancelled = false;
+    let dragListenersAttached = false;
 
-    // Single set of listeners for the ENTIRE touch lifecycle
-    const handleTouchMove = (ev: TouchEvent) => {
+    // Phase 1 listener — lightweight, passive, just checks if finger moved
+    // Browser scrolling works normally during this phase
+    const checkMovement = (ev: TouchEvent) => {
+      if (holdCancelled) return;
       const t = ev.touches[0];
-      ev.preventDefault(); // ALWAYS prevent default — we handle everything
-
-      if (isDraggingRef.current) {
-        // Phase 2: Drag is active — update position
-        handlePointerMoveRef.current(t.clientX, t.clientY);
-      } else if (!holdCancelled) {
-        // Phase 1: Still in hold window — check if finger moved too far
-        const dx = t.clientX - startX;
-        const dy = t.clientY - startY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist > TOUCH_MOVE_THRESHOLD) {
-          // Finger moved too much — cancel hold, switch to manual scroll mode
-          if (touchTimerRef.current) {
-            clearTimeout(touchTimerRef.current);
-            touchTimerRef.current = null;
-          }
-          holdCancelled = true;
-          // Don't cleanup listeners — we continue to handle scroll manually
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (Math.sqrt(dx * dx + dy * dy) > TOUCH_MOVE_THRESHOLD) {
+        // User is scrolling — cancel the hold timer
+        holdCancelled = true;
+        if (touchTimerRef.current) {
+          clearTimeout(touchTimerRef.current);
+          touchTimerRef.current = null;
         }
       }
+    };
 
-      if (holdCancelled) {
-        // Manual scroll: move the scroll container by the delta
-        const deltaY = lastTouchY - t.clientY; // inverted: finger moves down = scroll down
-        if (scrollContainerRef?.current) {
-          scrollContainerRef.current.scrollTop += deltaY;
-        }
-      }
-
-      lastTouchY = t.clientY;
+    // Phase 2 listener — non-passive, attached only after hold fires
+    const handleDragMove = (ev: TouchEvent) => {
+      ev.preventDefault();
+      const t = ev.touches[0];
+      handlePointerMoveRef.current(t.clientX, t.clientY);
     };
 
     const handleTouchEnd = () => {
@@ -397,20 +386,28 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     };
 
     const cleanup = () => {
-      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchmove', checkMovement);
+      if (dragListenersAttached) {
+        document.removeEventListener('touchmove', handleDragMove);
+      }
       document.removeEventListener('touchend', handleTouchEnd);
       document.removeEventListener('touchcancel', handleTouchEnd);
     };
 
-    // Attach immediately with { passive: false } — stays for entire lifecycle
-    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    // Attach Phase 1: passive listener (allows browser scroll)
+    document.addEventListener('touchmove', checkMovement, { passive: true });
     document.addEventListener('touchend', handleTouchEnd);
     document.addEventListener('touchcancel', handleTouchEnd);
 
-    // Hold timer
+    // Hold timer — if finger stays still for TOUCH_HOLD_MS, start dragging
     touchTimerRef.current = setTimeout(() => {
       touchTimerRef.current = null;
       if (!holdCancelled) {
+        // Remove passive listener, attach non-passive drag listener
+        document.removeEventListener('touchmove', checkMovement);
+        document.addEventListener('touchmove', handleDragMove, { passive: false });
+        dragListenersAttached = true;
+
         startDrag(entryId, type, startX, startY, entryStartHour, entryEndHour, tz);
         if (navigator.vibrate) navigator.vibrate(20);
       }
