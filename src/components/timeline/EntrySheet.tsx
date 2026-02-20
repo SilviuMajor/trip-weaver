@@ -918,7 +918,25 @@ const EntrySheet = ({
           </DialogHeader>
 
           {step === 'category' && (
-            <div className="space-y-3">
+            <div className="space-y-1">
+              {/* Search bar */}
+              <div className="relative mb-3">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search for a place..."
+                  className="pl-9"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                      const query = e.currentTarget.value.trim();
+                      setCategoryId('activity');
+                      setName(query);
+                      setStep('details');
+                    }
+                  }}
+                />
+              </div>
+
               {/* Contextual transport suggestion */}
               {gapContext && gapContext.fromName && gapContext.toName && (
                 <button
@@ -944,34 +962,64 @@ const EntrySheet = ({
                 </button>
               )}
 
-              {/* Quick search bar — goes straight to Explore */}
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search for a place..."
-                  className="w-full rounded-xl border border-border bg-card px-4 py-3 pl-10 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                      onExploreRequest?.(null, e.currentTarget.value.trim());
-                    }
-                  }}
-                />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              </div>
+              {/* Category list — grouped vertical layout */}
+              {(() => {
+                const travelIds = ['flight', 'hotel', 'private_transfer'];
+                const foodIds = ['breakfast', 'lunch', 'coffee_shop', 'dinner', 'drinks', 'nightlife'];
+                const activityIds = ['sightseeing', 'museum', 'park', 'activity', 'shopping'];
 
-              <div className="grid grid-cols-3 gap-2">
-                {allCategories.map((cat) => (
+                const customCats = allCategories.filter(c =>
+                  !travelIds.includes(c.id) &&
+                  !foodIds.includes(c.id) &&
+                  !activityIds.includes(c.id)
+                );
+
+                const renderItem = (cat: typeof allCategories[0]) => (
                   <button
                     key={cat.id}
                     type="button"
                     onClick={() => handleCategorySelect(cat.id)}
-                    className="flex flex-col items-center gap-1.5 rounded-xl border border-border bg-card p-3 text-center transition-all hover:border-primary hover:bg-primary/5"
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-accent/50 active:bg-accent"
                   >
-                    <span className="text-2xl">{cat.emoji}</span>
-                    <span className="text-xs font-medium">{cat.name}</span>
+                    <span className="text-lg w-7 text-center shrink-0">{cat.emoji}</span>
+                    <span className="text-sm font-medium">{cat.name}</span>
                   </button>
-                ))}
-              </div>
+                );
+
+                const divider = (key: string) => (
+                  <div key={key} className="my-1 border-t border-border/50" />
+                );
+
+                return (
+                  <div>
+                    {travelIds.map(id => {
+                      const cat = allCategories.find(c => c.id === id);
+                      return cat ? renderItem(cat) : null;
+                    })}
+
+                    {divider('div-travel')}
+
+                    {customCats.length > 0 && (
+                      <>
+                        {customCats.map(cat => renderItem(cat))}
+                        {divider('div-custom')}
+                      </>
+                    )}
+
+                    {foodIds.map(id => {
+                      const cat = allCategories.find(c => c.id === id);
+                      return cat ? renderItem(cat) : null;
+                    })}
+
+                    {divider('div-food')}
+
+                    {activityIds.map(id => {
+                      const cat = allCategories.find(c => c.id === id);
+                      return cat ? renderItem(cat) : null;
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
