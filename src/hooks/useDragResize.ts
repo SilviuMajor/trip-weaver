@@ -341,6 +341,9 @@ export function useDragResize({ pixelsPerHour, startHour, totalHours, gridTopPx,
     entryEndHour: number,
     tz?: string,
   ) => {
+    // Guard: if another touch sequence is already active, ignore
+    if (touchTimerRef.current) return;
+
     const touch = e.touches[0];
     const startX = touch.clientX;
     const startY = touch.clientY;
