@@ -487,13 +487,28 @@ const ContinuousTimeline = ({
   }, [showCardHint]);
 
   const [shakeEntryId, setShakeEntryId] = useState<string | null>(null);
-  
-  
-  
+  const lockedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleLockedAttempt = useCallback((entryId: string) => {
     toast.error('Cannot drag a locked event');
     setShakeEntryId(entryId);
     setTimeout(() => setShakeEntryId(null), 400);
+  }, []);
+
+  // Delayed version for touch — only fires if finger stays put for 400ms
+  const startLockedAttempt = useCallback((entryId: string) => {
+    if (lockedTimerRef.current) clearTimeout(lockedTimerRef.current);
+    lockedTimerRef.current = setTimeout(() => {
+      handleLockedAttempt(entryId);
+      lockedTimerRef.current = null;
+    }, 400);
+  }, [handleLockedAttempt]);
+
+  const cancelLockedAttempt = useCallback(() => {
+    if (lockedTimerRef.current) {
+      clearTimeout(lockedTimerRef.current);
+      lockedTimerRef.current = null;
+    }
   }, []);
 
   // Build flight groups
@@ -1607,7 +1622,9 @@ const ContinuousTimeline = ({
                       data-resize-handle
                       className="absolute left-0 right-0 -top-1 z-20 h-5 cursor-not-allowed touch-none"
                       onMouseDown={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
-                      onTouchStart={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
+                      onTouchStart={(e) => { e.stopPropagation(); startLockedAttempt(entry.id); }}
+                      onTouchMove={() => cancelLockedAttempt()}
+                      onTouchEnd={() => cancelLockedAttempt()}
                     >
                       {!hasEntryDirectlyAbove && (
                         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-2 rounded-full bg-muted-foreground/10" />
@@ -1720,10 +1737,10 @@ const ContinuousTimeline = ({
                           onTouchStart(e as any, entry.id, 'move', origStartGH, origEndGH, dragTz);
                         } : isLocked ? (e) => {
                           e.stopPropagation();
-                          handleLockedAttempt(entry.id);
+                          startLockedAttempt(entry.id);
                         } : undefined}
-                        onTouchDragMove={onTouchMove}
-                        onTouchDragEnd={onTouchEnd}
+                        onTouchDragMove={canDrag ? onTouchMove : isLocked ? () => cancelLockedAttempt() : undefined}
+                        onTouchDragEnd={canDrag ? onTouchEnd : isLocked ? () => cancelLockedAttempt() : undefined}
                         isShaking={shakeEntryId === entry.id}
                         entryId={entry.id}
                         onToggleLock={isEditor && onToggleLock ? () => onToggleLock(entry.id, !!isLocked) : undefined}
@@ -1763,7 +1780,9 @@ const ContinuousTimeline = ({
                       data-resize-handle
                       className="absolute -bottom-1 left-0 right-0 z-20 h-5 cursor-not-allowed touch-none"
                       onMouseDown={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
-                      onTouchStart={(e) => { e.stopPropagation(); handleLockedAttempt(entry.id); }}
+                      onTouchStart={(e) => { e.stopPropagation(); startLockedAttempt(entry.id); }}
+                      onTouchMove={() => cancelLockedAttempt()}
+                      onTouchEnd={() => cancelLockedAttempt()}
                     >
                       {!hasEntryDirectlyBelow && height >= 72 && (
                         <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-2 rounded-full bg-muted-foreground/10" />

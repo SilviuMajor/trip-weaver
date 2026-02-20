@@ -43,7 +43,7 @@ interface UseDragResizeOptions {
 }
 
 const SNAP_MINUTES = 5;
-const TOUCH_HOLD_MS = 200;
+const TOUCH_HOLD_MS = 400;
 const TOUCH_MOVE_THRESHOLD = 10;
 
 // Auto-scroll constants

@@ -895,14 +895,15 @@ const Timeline = () => {
       } as any).select().single();
 
       if (newTransport) {
-        const toShort = toAddr.split(',')[0].trim();
+        const toDisplayName = toOpt?.name || toOpt?.location_name || toAddr.split(',')[0].trim();
+        const toShort = toDisplayName.length > 25 ? toDisplayName.substring(0, 25) + '…' : toDisplayName;
         const modeLabel = defaultMode === 'walk' ? 'Walk' : defaultMode === 'transit' ? 'Transit' : defaultMode === 'drive' ? 'Drive' : defaultMode === 'bicycle' ? 'Cycle' : 'Transit';
         await supabase.from('entry_options').insert({
           entry_id: newTransport.id,
           name: `${modeLabel} to ${toShort}`,
           category: 'transfer',
-          departure_location: fromAddr,
-          arrival_location: toAddr,
+          departure_location: fromOpt?.name || fromOpt?.location_name || fromAddr,
+          arrival_location: toOpt?.name || toOpt?.location_name || toAddr,
           distance_km: defaultResult?.distance_km ?? null,
           route_polyline: defaultResult?.polyline ?? null,
           transport_modes: allResults.length > 0 ? allResults : [{ mode: defaultMode, duration_min: durationMin, distance_km: 0, polyline: null }],
@@ -2551,6 +2552,7 @@ const Timeline = () => {
 
   const handleToggleLock = async (entryId: string, currentLocked: boolean) => {
     const newLocked = !currentLocked;
+    const entryName = entries.find(e => e.id === entryId)?.options[0]?.name || 'entry';
     // Optimistic local update
     updateEntryLocally(entryId, { is_locked: newLocked } as any);
     // Background DB sync
@@ -2562,7 +2564,19 @@ const Timeline = () => {
       // Rollback on error
       updateEntryLocally(entryId, { is_locked: currentLocked } as any);
       toast({ title: 'Failed to toggle lock', description: error.message, variant: 'destructive' });
+      return;
     }
+    pushAction({
+      description: currentLocked ? `Unlocked ${entryName}` : `Locked ${entryName}`,
+      undo: async () => {
+        updateEntryLocally(entryId, { is_locked: currentLocked } as any);
+        await supabase.from('entries').update({ is_locked: currentLocked }).eq('id', entryId);
+      },
+      redo: async () => {
+        updateEntryLocally(entryId, { is_locked: newLocked } as any);
+        await supabase.from('entries').update({ is_locked: newLocked }).eq('id', entryId);
+      },
+    });
   };
 
   // Auto-generate transport between events
@@ -2870,6 +2884,9 @@ const Timeline = () => {
         tripId={tripId ?? ''}
         onRefresh={handleGlobalRefresh}
         refreshing={globalRefreshing}
+        zoomLevel={zoomLevel}
+        onCycleZoom={cycleZoom}
+        zoomEnabled={zoomEnabled}
       />
       <TripNavBar
         liveOpen={liveOpen}
@@ -3389,6 +3406,7 @@ const Timeline = () => {
             userVotes={userVotes}
             onVoteChange={fetchData}
             onMoveToIdeas={handleSendToPlanner}
+            pushAction={pushAction}
             // Create mode props
             prefillStartTime={prefillStartTime}
             prefillEndTime={prefillEndTime}
@@ -3632,24 +3650,7 @@ const Timeline = () => {
         </div>
       )}
 
-      {/* Zoom toggle button */}
-      {zoomEnabled && (
-        <button
-          onClick={cycleZoom}
-          className="fixed top-20 right-4 z-40 flex items-center justify-center h-9 min-w-[3.25rem] rounded-full bg-background/90 backdrop-blur border border-border shadow-md px-2.5 transition-all duration-150 hover:shadow-lg active:scale-95"
-          title={`Zoom: ${Math.round(zoomLevel * 100)}% — tap to cycle`}
-        >
-          <svg className="h-3.5 w-3.5 mr-1 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="7" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            <line x1="8" y1="11" x2="14" y2="11" />
-            <line x1="11" y1="8" x2="11" y2="14" />
-          </svg>
-          <span className="text-xs font-bold text-foreground tabular-nums">
-            {zoomLevel === 1.0 ? '1×' : zoomLevel < 1 ? `${Math.round(zoomLevel * 100)}%` : `${zoomLevel}×`}
-          </span>
-        </button>
-      )}
+      {/* Zoom toggle moved to header overflow menu */}
 
       {/* Transient zoom indicator (during pinch/scroll) */}
       {zoomEnabled && showZoomIndicator && zoomLevel !== 1.0 && (

@@ -71,6 +71,7 @@ interface EntrySheetProps {
   userVotes?: string[];
   onVoteChange?: () => void;
   onMoveToIdeas?: (entryId: string) => void;
+  pushAction?: (action: { description: string; undo: () => Promise<void>; redo: () => Promise<void> }) => void;
 
   // Create mode
   editEntry?: EntryWithOptions | null;
@@ -91,7 +92,7 @@ const EntrySheet = ({
   mode, open, onOpenChange, tripId, trip, onSaved,
   resolvedTz: resolvedTzProp,
   entry, option, formatTime: formatTimeProp, userLat, userLng,
-  votingLocked, userVotes = [], onVoteChange, onMoveToIdeas,
+  votingLocked, userVotes = [], onVoteChange, onMoveToIdeas, pushAction,
   editEntry, editOption, prefillStartTime, prefillEndTime, prefillCategory, transportContext,
   gapContext,
   onTransportConflict,
@@ -890,6 +891,7 @@ const EntrySheet = ({
         onSaved={onSaved}
         onClose={() => onOpenChange(false)}
         onMoveToIdeas={onMoveToIdeas}
+        pushAction={pushAction}
       />
     );
 
