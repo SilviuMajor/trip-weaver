@@ -127,6 +127,27 @@ const Timeline = () => {
   const zoomLevelRef = useRef(zoomLevel);
   useEffect(() => { zoomLevelRef.current = zoomLevel; }, [zoomLevel]);
 
+  const ZOOM_LEVELS = [0.75, 1.0, 1.5] as const;
+
+  const snapToNearestLevel = (raw: number): number => {
+    let closest = ZOOM_LEVELS[0] as number;
+    let minDist = Math.abs(raw - closest);
+    for (const level of ZOOM_LEVELS) {
+      const dist = Math.abs(raw - level);
+      if (dist < minDist) { minDist = dist; closest = level; }
+    }
+    return closest;
+  };
+
+  const cycleZoom = useCallback(() => {
+    setZoomLevel(prev => {
+      const snapped = snapToNearestLevel(prev);
+      const idx = ZOOM_LEVELS.indexOf(snapped as typeof ZOOM_LEVELS[number]);
+      const nextIdx = (idx + 1) % ZOOM_LEVELS.length;
+      return ZOOM_LEVELS[nextIdx];
+    });
+  }, []);
+
   // Persist zoom to sessionStorage
   useEffect(() => {
     sessionStorage.setItem('timeline-zoom', String(zoomLevel));
@@ -2177,7 +2198,7 @@ const Timeline = () => {
         e.preventDefault();
         const newDist = getDistance(e.touches[0], e.touches[1]);
         const scale = newDist / lastPinchDistRef.current;
-        const newZoom = Math.min(2.0, Math.max(0.5, pinchAnchorZoomRef.current * scale));
+        const newZoom = Math.min(1.5, Math.max(0.75, pinchAnchorZoomRef.current * scale));
 
         const anchorY = pinchAnchorYRef.current;
         const rect = el.getBoundingClientRect();
@@ -2195,6 +2216,9 @@ const Timeline = () => {
 
     const handleTouchEnd = (e: TouchEvent) => {
       if (e.touches.length < 2) {
+        if (lastPinchDistRef.current !== null) {
+          setZoomLevel(prev => snapToNearestLevel(prev));
+        }
         lastPinchDistRef.current = null;
       }
     };
@@ -2216,13 +2240,15 @@ const Timeline = () => {
     const el = mainScrollRef.current;
     if (!el) return;
 
+    let wheelEndTimer: ReturnType<typeof setTimeout> | null = null;
+
     const handleWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
 
       const delta = -e.deltaY * 0.005;
       const currentZoom = zoomLevelRef.current;
-      const newZoom = Math.min(2.0, Math.max(0.5, currentZoom + delta));
+      const newZoom = Math.min(1.5, Math.max(0.75, currentZoom + delta));
 
       const rect = el.getBoundingClientRect();
       const anchorRelative = e.clientY - rect.top + el.scrollTop;
@@ -2236,8 +2262,19 @@ const Timeline = () => {
       });
     };
 
-    el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => el.removeEventListener('wheel', handleWheel);
+    const handleWheelWithSnap = (e: WheelEvent) => {
+      handleWheel(e);
+      if (wheelEndTimer) clearTimeout(wheelEndTimer);
+      wheelEndTimer = setTimeout(() => {
+        setZoomLevel(prev => snapToNearestLevel(prev));
+      }, 300);
+    };
+
+    el.addEventListener('wheel', handleWheelWithSnap, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', handleWheelWithSnap);
+      if (wheelEndTimer) clearTimeout(wheelEndTimer);
+    };
   }, [zoomEnabled, scrollContainerReady]);
 
   // Bin + Planner FAB proximity detection is now handled via onDragPositionUpdate callback
@@ -3581,7 +3618,26 @@ const Timeline = () => {
         </div>
       )}
 
-      {/* Zoom level indicator */}
+      {/* Zoom toggle button */}
+      {zoomEnabled && (
+        <button
+          onClick={cycleZoom}
+          className="fixed top-20 right-4 z-40 flex items-center justify-center h-9 min-w-[3.25rem] rounded-full bg-background/90 backdrop-blur border border-border shadow-md px-2.5 transition-all duration-150 hover:shadow-lg active:scale-95"
+          title={`Zoom: ${Math.round(zoomLevel * 100)}% — tap to cycle`}
+        >
+          <svg className="h-3.5 w-3.5 mr-1 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="7" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+            <line x1="11" y1="8" x2="11" y2="14" />
+          </svg>
+          <span className="text-xs font-bold text-foreground tabular-nums">
+            {zoomLevel === 1.0 ? '1×' : zoomLevel < 1 ? `${Math.round(zoomLevel * 100)}%` : `${zoomLevel}×`}
+          </span>
+        </button>
+      )}
+
+      {/* Transient zoom indicator (during pinch/scroll) */}
       {zoomEnabled && showZoomIndicator && zoomLevel !== 1.0 && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 rounded-full bg-foreground/80 px-3 py-1 shadow-lg transition-opacity duration-300">
           <span className="text-xs font-bold text-background">
