@@ -98,11 +98,14 @@ const SidebarEntryCard = ({ entry, onDragStart, onClick, onDuplicate, onInsert, 
         let dragging = false;
 
         const handleMove = (ev: TouchEvent) => {
-          ev.preventDefault();
           const t = ev.touches[0];
           if (!holdCancelled && !dragging && Math.hypot(t.clientX - startX, t.clientY - startY) > 10) {
             holdCancelled = true;
             clearTimeout(timer);
+          }
+          // Only prevent default (block scroll) once drag has started
+          if (dragging) {
+            ev.preventDefault();
           }
           if (dragging) {
             onSidebarDragMove?.(t.clientX, t.clientY);
