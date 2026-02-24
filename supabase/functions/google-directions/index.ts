@@ -6,6 +6,7 @@ const corsHeaders = {
 };
 
 const ROUTES_API_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MODE_MAP: Record<string, string> = {
   transit: 'TRANSIT',
@@ -70,7 +71,6 @@ async function fetchSingleMode(
     travelMode,
   };
 
-  // Add departure time for transit and drive (traffic-aware)
   if (departureTime && (travelMode === 'TRANSIT' || travelMode === 'DRIVE')) {
     requestBody.departureTime = departureTime;
     if (travelMode === 'DRIVE') {
@@ -93,6 +93,20 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Auth check
+    const authHeader = req.headers.get('authorization');
+    const token = authHeader?.replace('Bearer ', '');
+    const supabaseAuth = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_PUBLISHABLE_KEY')!
+    );
+    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const GOOGLE_MAPS_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY');
     if (!GOOGLE_MAPS_API_KEY) {
       throw new Error('GOOGLE_MAPS_API_KEY is not configured');
@@ -104,11 +118,17 @@ Deno.serve(async (req) => {
     if (body.fromAddress && body.toAddress) {
       const { fromAddress, toAddress, departureTime } = body;
 
-      // If modes array provided, fetch all modes in parallel
-      if (body.modes && Array.isArray(body.modes)) {
-        console.log(`Multi-mode Routes API: "${fromAddress}" -> "${toAddress}" modes: ${body.modes.join(', ')}`);
+      // Validate addresses
+      if (typeof fromAddress !== 'string' || fromAddress.length > 500) throw new Error('Invalid fromAddress');
+      if (typeof toAddress !== 'string' || toAddress.length > 500) throw new Error('Invalid toAddress');
 
-        const promises = body.modes.map((mode: string) =>
+      if (body.modes && Array.isArray(body.modes)) {
+        const validModes = Object.keys(MODE_MAP);
+        const modes = body.modes.filter((m: string) => validModes.includes(m));
+
+        console.log(`Multi-mode Routes API: "${fromAddress}" -> "${toAddress}" modes: ${modes.join(', ')}`);
+
+        const promises = modes.map((mode: string) =>
           fetchSingleMode(GOOGLE_MAPS_API_KEY, fromAddress, toAddress, mode, departureTime)
             .then(result => result ? { mode, duration_min: result.duration_min, distance_km: result.distance_km, polyline: result.polyline } : null)
             .catch(() => null)
@@ -122,7 +142,6 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Single mode (legacy)
       const { mode } = body;
       console.log(`Routes API: "${fromAddress}" -> "${toAddress}" (${mode || 'transit'})`);
 
@@ -146,7 +165,9 @@ Deno.serve(async (req) => {
 
     // --- Mode 2: Trip-wide batch calculation ---
     const { tripId } = body;
-    if (!tripId) throw new Error('tripId or fromAddress/toAddress is required');
+    if (!tripId || typeof tripId !== 'string' || !UUID_RE.test(tripId)) {
+      throw new Error('Valid tripId (UUID) or fromAddress/toAddress is required');
+    }
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
