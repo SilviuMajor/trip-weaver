@@ -28,12 +28,29 @@ interface Segment {
   endHour?: number;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
+    // Auth check
+    const authHeader = req.headers.get('authorization');
+    const token = authHeader?.replace('Bearer ', '');
+    const supabaseAuth = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_PUBLISHABLE_KEY')!
+    );
+    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -42,16 +59,28 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { tripId, segments, lat, lng } = body;
 
-    if (!tripId) {
-      throw new Error('tripId is required');
+    // Input validation
+    if (!tripId || typeof tripId !== 'string' || !UUID_RE.test(tripId)) {
+      return new Response(JSON.stringify({ error: 'Valid tripId (UUID) is required' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     // Support both new segments API and legacy single lat/lng
     let locationSegments: Segment[];
 
     if (segments && Array.isArray(segments) && segments.length > 0) {
+      // Validate segments
+      for (const seg of segments) {
+        if (typeof seg.lat !== 'number' || seg.lat < -90 || seg.lat > 90) throw new Error('Invalid segment lat');
+        if (typeof seg.lng !== 'number' || seg.lng < -180 || seg.lng > 180) throw new Error('Invalid segment lng');
+        if (!seg.startDate || !DATE_RE.test(seg.startDate)) throw new Error('Invalid segment startDate');
+        if (!seg.endDate || !DATE_RE.test(seg.endDate)) throw new Error('Invalid segment endDate');
+      }
       locationSegments = segments;
     } else if (lat != null && lng != null) {
+      if (typeof lat !== 'number' || lat < -90 || lat > 90) throw new Error('Invalid lat');
+      if (typeof lng !== 'number' || lng < -180 || lng > 180) throw new Error('Invalid lng');
       // Legacy: single location for the whole trip
       const { data: trip, error: tripError } = await supabase
         .from('trips')
@@ -77,7 +106,6 @@ Deno.serve(async (req) => {
 
     for (const seg of locationSegments) {
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${seg.lat}&longitude=${seg.lng}&hourly=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m&start_date=${seg.startDate}&end_date=${seg.endDate}&timezone=auto`;
-      console.log(`Open-Meteo URL: ${url}`);
 
       const response = await fetch(url);
       if (!response.ok) {
@@ -100,7 +128,6 @@ Deno.serve(async (req) => {
         const dateStr = time[i].substring(0, 10);
         const hour = dateTime.getHours();
 
-        // Filter by hour bounds on boundary dates
         if (seg.startHour != null && dateStr === seg.startDate && hour < seg.startHour) continue;
         if (seg.endHour != null && dateStr === seg.endDate && hour > seg.endHour) continue;
 
@@ -119,8 +146,6 @@ Deno.serve(async (req) => {
           longitude: seg.lng,
         });
       }
-
-      console.log(`Inserting ${records.length} weather records for segment (${seg.lat},${seg.lng})`);
 
       // Insert in batches of 100
       for (let i = 0; i < records.length; i += 100) {

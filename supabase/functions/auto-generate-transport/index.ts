@@ -6,6 +6,7 @@ const corsHeaders = {
 };
 
 const ROUTES_API_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function buildWaypoint(lat: number, lng: number) {
   return {
@@ -69,7 +70,6 @@ async function fetchMode(
   }
 }
 
-// Get location info from an entry option – returns coords or address
 function getEntryLocation(opt: any): { origin: any; address: string } | null {
   if (opt.latitude != null && opt.longitude != null) {
     return {
@@ -77,7 +77,6 @@ function getEntryLocation(opt: any): { origin: any; address: string } | null {
       address: opt.location_name || opt.arrival_location || `${opt.latitude},${opt.longitude}`,
     };
   }
-  // For flights, use arrival_location as the "end" location
   if (opt.arrival_location) {
     return { origin: buildAddressWaypoint(opt.arrival_location), address: opt.arrival_location };
   }
@@ -88,7 +87,6 @@ function getEntryLocation(opt: any): { origin: any; address: string } | null {
 }
 
 function getEntryDestLocation(opt: any): { origin: any; address: string } | null {
-  // For the "to" entry, use departure_location for flights, or location coords
   if (opt.latitude != null && opt.longitude != null) {
     return {
       origin: buildWaypoint(opt.latitude, opt.longitude),
@@ -108,9 +106,7 @@ function ceilTo5(min: number): number {
   return Math.ceil(min / 5) * 5;
 }
 
-// Resolve the "from" location (where you end up after an entry)
 function resolveFromLocation(opt: any) {
-  // For flights: you end up at the arrival
   if (opt.category === 'flight' && opt.arrival_location) {
     if (opt.latitude != null && opt.longitude != null) {
       // lat/lng might be departure for flights; prefer arrival_location address
@@ -125,9 +121,7 @@ function resolveFromLocation(opt: any) {
   return null;
 }
 
-// Resolve the "to" location (where you need to be at for an entry)
 function resolveToLocation(opt: any) {
-  // For flights: you need to be at departure
   if (opt.category === 'flight' && opt.departure_location) {
     return buildAddressWaypoint(opt.departure_location);
   }
@@ -140,7 +134,6 @@ function resolveToLocation(opt: any) {
 }
 
 function getLocationName(opt: any, type: 'from' | 'to'): string {
-  // Prefer the entry name, then location_name, then flight-specific fields
   if (opt.name && opt.category !== 'flight') return opt.name;
   if (opt.location_name) return opt.location_name;
   if (type === 'from') return opt.arrival_location || 'Unknown';
@@ -153,11 +146,29 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Auth check
+    const authHeader = req.headers.get('authorization');
+    const token = authHeader?.replace('Bearer ', '');
+    const supabaseAuth = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_PUBLISHABLE_KEY')!
+    );
+    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const GOOGLE_MAPS_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY');
     if (!GOOGLE_MAPS_API_KEY) throw new Error('GOOGLE_MAPS_API_KEY is not configured');
 
     const { tripId } = await req.json();
-    if (!tripId) throw new Error('tripId is required');
+    if (!tripId || typeof tripId !== 'string' || !UUID_RE.test(tripId)) {
+      return new Response(JSON.stringify({ error: 'Valid tripId (UUID) is required' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -214,7 +225,6 @@ Deno.serve(async (req) => {
       return `${get('year')}-${get('month')}-${get('day')}`;
     }
 
-    // Build flight-aware per-day timezone map (mirrors client-side dayTimezoneMap in src/pages/Timeline.tsx)
     const flightEntries = entries
       .filter((e: any) => {
         const opt = optionsByEntry.get(e.id);
@@ -222,30 +232,25 @@ Deno.serve(async (req) => {
       })
       .sort((a: any, b: any) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
 
-    // Start with home timezone, or first flight's departure TZ
     let currentDayTz = homeTimezone;
     if (flightEntries.length > 0) {
       const firstFlightOpt = optionsByEntry.get(flightEntries[0].id);
       if (firstFlightOpt?.departure_tz) currentDayTz = firstFlightOpt.departure_tz;
     }
 
-    // Build per-day TZ map by processing flights chronologically
     const perDayTz = new Map<string, string>();
     const allDayStrs = new Set<string>();
     for (const entry of entries) {
       allDayStrs.add(getDateInTz(entry.start_time, currentDayTz));
     }
-    // First pass: assign current TZ to all days
     for (const dayStr of [...allDayStrs].sort()) {
       perDayTz.set(dayStr, currentDayTz);
     }
-    // Second pass: update TZ based on flight arrivals
     let runningTz = currentDayTz;
     for (const flight of flightEntries) {
       const flightOpt = optionsByEntry.get(flight.id);
       const arrivalDay = getDateInTz(flight.end_time, flightOpt?.arrival_tz || runningTz);
       runningTz = flightOpt?.arrival_tz || runningTz;
-      // All days from arrival day onward use the new TZ
       for (const dayStr of [...allDayStrs].sort()) {
         if (dayStr >= arrivalDay) {
           perDayTz.set(dayStr, runningTz);
@@ -255,7 +260,6 @@ Deno.serve(async (req) => {
 
     const dayGroups = new Map<string, any[]>();
     for (const entry of entries) {
-      // Use per-day resolved TZ for grouping
       const dayStr = getDateInTz(entry.start_time, perDayTz.get(getDateInTz(entry.start_time, currentDayTz)) || currentDayTz);
       if (!dayGroups.has(dayStr)) dayGroups.set(dayStr, []);
       dayGroups.get(dayStr)!.push(entry);
@@ -266,7 +270,6 @@ Deno.serve(async (req) => {
 
     // 4. Process each day
     for (const [dayStr, dayEntries] of dayGroups) {
-      // Build maps of flight -> checkout end times and checkin start times
       const flightCheckoutEnd = new Map<string, string>();
       const flightCheckinStart = new Map<string, string>();
       for (const e of dayEntries) {
@@ -278,12 +281,10 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Filter out checkin/checkout (they're part of flight groups)
       const mainEntries = dayEntries.filter((e: any) =>
         e.linked_type !== 'checkin' && e.linked_type !== 'checkout'
       );
 
-      // Sort by start_time
       mainEntries.sort((a: any, b: any) =>
         new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
       );
@@ -296,11 +297,9 @@ Deno.serve(async (req) => {
 
         if (!optA || !optB) continue;
 
-        // Guard A: Skip transport-like categories
         const transportLike = ['transfer', 'travel', 'transport'];
         if (transportLike.includes(optA.category) || transportLike.includes(optB.category)) continue;
 
-        // Check if transport already exists between them
         const existingTransport = mainEntries.find((e: any) => {
           const opt = optionsByEntry.get(e.id);
           if (opt?.category !== 'transfer') return false;
@@ -310,7 +309,6 @@ Deno.serve(async (req) => {
         });
         if (existingTransport) continue;
 
-        // Resolve locations
         const fromLoc = resolveFromLocation(optA);
         const toLoc = resolveToLocation(optB);
 
@@ -319,23 +317,19 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Use checkout end_time for flights (transport starts after checkout, not flight end)
         const transportStartTime = (optA.category === 'flight')
           ? (flightCheckoutEnd.get(entryA.id) || entryA.end_time)
           : entryA.end_time;
 
-        // Use checkin start_time as deadline for destination flights
         const deadlineTime = (optB.category === 'flight')
           ? (flightCheckinStart.get(entryB.id) || entryB.start_time)
           : entryB.start_time;
 
-        // Guard B: Skip if no effective gap (start >= deadline)
         if (new Date(transportStartTime).getTime() >= new Date(deadlineTime).getTime()) {
           console.log(`Skipping ${entryA.id} -> ${entryB.id}: no effective gap`);
           continue;
         }
 
-        // Guard C: Skip if entryB is a flight and its linked checkin already bridges the gap
         if (optB.category === 'flight' && flightCheckinStart.has(entryB.id)) {
           const checkinStart = new Date(flightCheckinStart.get(entryB.id)!).getTime();
           if (checkinStart <= new Date(transportStartTime).getTime()) {
@@ -344,14 +338,12 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Fetch walking + transit directions
         const departureTime = transportStartTime;
         const [walkResult, transitResult] = await Promise.all([
           fetchMode(GOOGLE_MAPS_API_KEY, fromLoc, toLoc, 'WALK', departureTime),
           fetchMode(GOOGLE_MAPS_API_KEY, fromLoc, toLoc, 'TRANSIT', departureTime),
         ]);
 
-        // Determine best mode
         let selected: ModeResult | null = null;
         if (walkResult && walkResult.duration_min <= walkThreshold) {
           selected = walkResult;
@@ -366,7 +358,6 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Determine emoji for mode
         const modeEmoji: Record<string, string> = {
           walk: '🚶',
           transit: '🚇',
@@ -375,17 +366,14 @@ Deno.serve(async (req) => {
         };
         const emoji = modeEmoji[selected.mode] || '🚶';
 
-        // Build transport entry - start at checkout end (for flights) or entryA end
         const transportDuration = Math.max(ceilTo5(selected.duration_min), 5);
         const startTime = transportStartTime;
         const endTimeMs = new Date(startTime).getTime() + transportDuration * 60000;
         const endTime = new Date(endTimeMs).toISOString();
 
-        // Short destination name
         const destName = getLocationName(optB, 'to');
         const shortDest = destName.length > 25 ? destName.substring(0, 25) + '…' : destName;
 
-        // Create the entry
         const { data: newEntry, error: entryInsertErr } = await supabase
           .from('entries')
           .insert({
@@ -402,7 +390,6 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Create the option
         const { error: optInsertErr } = await supabase
           .from('entry_options')
           .insert({
@@ -430,7 +417,6 @@ Deno.serve(async (req) => {
           to_entry_id: entryB.id,
         });
 
-        // Detect overlap with next entry
         if (new Date(endTime).getTime() > new Date(entryB.start_time).getTime()) {
           overlaps.push({
             transport_id: newEntry.id,
